@@ -93,7 +93,7 @@ that, and hand-editing the registry `PATH` is how environments get broken.
 Then launch with **`RUN -- Medal of Honor Model Viewer.bat`**, or drag a `.skd` / `.tik` onto it.
 
 If "Smart App Control" blocked the .bat file from opening:
-Right-click the .bat file --> Properties --> General tab --> Security: [✓] Unblock the file.
+Right-click the .bat file --> Properties --> General tab --> Security: [✓] Unblock file.
 
 ### macOS
 
