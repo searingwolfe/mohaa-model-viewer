@@ -90,7 +90,7 @@ running it, and installs the packages.
 It deliberately **does not modify your `PATH`** — Python's own installer handles
 that, and hand-editing the registry `PATH` is how environments get broken.
 
-Then launch with **`RUN_mohaa_view.bat`**, or drag a `.skd` / `.tik` onto it.
+Then launch with **`RUN -- Medal of Honor Model Viewer.bat`**, or drag a `.skd` / `.tik` onto it.
 
 ### macOS
 
