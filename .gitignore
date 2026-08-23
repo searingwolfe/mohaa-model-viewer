@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+#  Game content -- MUST NEVER be committed. These are copyrighted assets that
+#  belong to the game's rights holders; users supply their own copy.
+# ---------------------------------------------------------------------------
+*.pk3
+*.skd
+*.skb
+*.skc
+*.tik
+*.tga
+*.dds
+*.bsp
+*.map
+*.shader
+*.urc
+*.scr
+gamefiles/
+paks/
+models/
+standalone/
+
+# ---------------------------------------------------------------------------
+#  Runtime output -- the program writes the config, console log and every built
+#  model into an "output" folder beside bin/. None of it belongs in the repo.
+#  (config + log are also matched by name in case of a flat / portable install,
+#  and *.new covers files staged by a locked in-place update.)
+# ---------------------------------------------------------------------------
+/output/
+mohaa_viewer_config.json
+output_console.log
+*.new
+
+# ---------------------------------------------------------------------------
+#  Build / runtime artefacts
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+*_skd_view.html
+*_tik_view.html
+*_skd_view/
+*_tik_view/
+python_installer.exe
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
