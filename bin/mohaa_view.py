@@ -8344,6 +8344,7 @@ def main(argv):
         try:
             os.makedirs(outdir,exist_ok=True)
             html_path=os.path.join(outdir, f"{stem}_{_vkind}_view.html")
+            obj_path=os.path.join(outdir, stem+".obj")   # keep the .obj beside its viewer
         except OSError as e:
             print(f"  (could not use output folder {outdir}: {e}; writing next to the model)")
     # --theme=light|dark: bake the viewer's initial theme (right-click open in the launcher)
