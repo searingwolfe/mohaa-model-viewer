@@ -9,7 +9,7 @@ Load your `.pk3` archives, browse the model tree, and open any `.skd` or `.tik`
 in a self-contained HTML viewer with animation playback, tag display, texture
 resolution through the shader chain, and live particle effects.
 
-<!-- A screenshot or short GIF of the viewer with an effect playing goes well here. -->
+> **Screenshot / GIF —** an FX effect or explosion playing in the viewer (the hero shot).
 
 ## Why this exists
 
@@ -22,6 +22,8 @@ engine would, so what you see on screen is what the game draws.
 
 ## Features
 
+> **Screenshot —** the launcher with a `.pk3` tree loaded and a model open in the 3D pane.
+
 **Loading & browsing**
 
 * Open one or more `.pk3` archives and navigate the `models/` tree, or drag a
@@ -31,7 +33,7 @@ engine would, so what you see on screen is what the game draws.
   navigation.
 * Open a `.tik` in your text editor, or a `.skd` in LightRay3D / Milkshape 3D,
   directly from the launcher (Options → external programs).
-* Every opened model is also written out as a Wavefront `.obj` next to its viewer.
+* Every opened model is also exported as a Wavefront `.obj` you can open in other 3D tools.
 
 **Rendering & animation**
 
@@ -44,6 +46,8 @@ engine would, so what you see on screen is what the game draws.
   commands and fired on their real frames — the part other tools skip.
 * Hang other models off any bone or tag with **attach-to-bone**, each with its
   own editable scale, offset and angles.
+
+> **Screenshot / GIF —** a skeletal model playing an animation (bonus: a weapon attached to a bone).
 
 **Inspect & tweak**
 
@@ -61,6 +65,8 @@ engine would, so what you see on screen is what the game draws.
   (pitch / yaw / roll) dial.
 * Light / dark theme and a custom backdrop colour, plus a full keyboard-shortcut
   set (press `H` in the viewer).
+
+> **Screenshot —** the live `setsize` box editor, or tag/bone nodes with the Tags-vs-Bones filter.
 
 **Self-contained by design**
 
@@ -82,7 +88,7 @@ engine would, so what you see on screen is what the game draws.
 
 ### Windows
 
-Run **`python_installer_updater.bat`** once. It detects your Windows version and
+Run **`bin\python_installer_updater.bat`** once. It detects your Windows version and
 CPU, installs a suitable Python (Windows 7 → 3.8, Windows 8/8.1 → 3.11,
 Windows 10/11 → latest), verifies the installer's Authenticode signature before
 running it, and installs the packages.
@@ -100,7 +106,7 @@ Right-click the .bat file --> Properties --> General tab --> Security: [✓] Unb
 ```sh
 brew install python-tk          # or use the python.org installer, which bundles Tk
 pip3 install "Pillow>=10.3.0"
-python3 mohaa_launcher.py
+python3 bin/mohaa_launcher.py
 ```
 
 ### Linux
@@ -111,7 +117,7 @@ sudo dnf install python3-tkinter # Fedora / RHEL
 sudo pacman -S tk               # Arch
 
 pip3 install "Pillow>=10.3.0"
-python3 mohaa_launcher.py
+python3 bin/mohaa_launcher.py
 ```
 
 The embedded 3D pane is Windows-only. Everywhere else, models open in your
@@ -121,8 +127,8 @@ default browser — same viewer, same output.
 
 | | |
 |---|---|
-| Settings | `%APPDATA%\MOHAAViewer\` · `~/Library/Application Support/MOHAAViewer/` · `~/.config/MOHAAViewer/` |
-| Built viewers | your chosen output folder (default: `models/` inside the folder above) |
+| Settings & console log | the program's `output/` folder (next to `bin/`); in a flat / portable install, the scripts' own folder |
+| Built viewers | your chosen output folder (default: `output/models/`) |
 | Scratch space | a `mohaaview_*` folder in your system temp directory |
 
 Clear any of them from **Options → Clear built models / Clear %temp% files**.
@@ -140,7 +146,7 @@ reads a small version file from this repository and, if you choose, downloads th
 newer files from GitHub. (The optional Windows setup script also downloads Python
 from python.org and packages from pypi.org when you choose to run it.)
 
-Full notice: [`PRIVACY.md`](PRIVACY.md), or **Help → Privacy & Legal** inside the
+Full notice: [`PRIVACY.md`](docs/PRIVACY.md), or **Help → Privacy & Legal** inside the
 program.
 
 ## Security
@@ -151,7 +157,7 @@ to its workspace, model headers are bounds-checked, parsers are protected agains
 decompression and expansion bombs, and generated pages escape game-file text and
 carry a restrictive Content-Security-Policy.
 
-Found a hole? See [`SECURITY.md`](SECURITY.md). **Please report privately, not in
+Found a hole? See [`SECURITY.md`](docs/SECURITY.md). **Please report privately, not in
 a public issue**, and please don't attach copyrighted game assets to reports.
 
 ## Licence
@@ -159,7 +165,7 @@ a public issue**, and please don't attach copyrighted game assets to reports.
 Released under the **GNU General Public License v2** — see [`LICENSE`](LICENSE).
 
 Engine behaviour is verified against [OpenMoHAA](https://github.com/openmoh/openmohaa),
-which is GPLv2. [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) explains that
+which is GPLv2. [`THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md) explains that
 relationship, why GPLv2 is the appropriate choice here, and lists every
 dependency's licence.
 
