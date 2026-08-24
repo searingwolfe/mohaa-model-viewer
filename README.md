@@ -4,7 +4,6 @@ A browser-based 3D asset viewer for *Medal of Honor: Allied Assault (2002)*, aim
 exact in-game visual parity across every asset type the engine ships: skeletal
 models, animations, vehicles, weapons, projectiles, static props, and the
 particle emitters and FX effects that existing tools do not handle.
-
 #### [Jump to: Install instructions](https://github.com/searingwolfe/mohaa-model-viewer#install)<br>
 
 Load your `.pk3` archives, browse the model tree, and open any `.skd` or `.tik`
