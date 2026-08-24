@@ -10,7 +10,7 @@ Load your `.pk3` archives, browse the model tree, and open any `.skd` or `.tik`
 in a self-contained HTML viewer with animation playback, tag display, texture
 resolution through the shader chain, and live particle effects.
 
-![Model Viewer: Image 1](screenshots/src1.png)
+[Screenshot 1](https://github.com/searingwolfe/mohaa-model-viewer#screenshots)
 
 ## Why this exists
 
@@ -22,6 +22,8 @@ does, rebuilding each effect from the `.tik` / `.shader` commands the way the
 engine would, so what you see on screen is what the game draws.
 
 ## Features
+
+[Screenshot 2](https://github.com/searingwolfe/mohaa-model-viewer#screenshots)
 
 **Loading & browsing**
 
@@ -46,7 +48,7 @@ engine would, so what you see on screen is what the game draws.
 * Hang other models off any bone or tag with **attach-to-bone**, each with its
   own editable scale, offset and angles.
 
-![Model Viewer: Image 3](screenshots/src3.png)
+[Screenshot 3](https://github.com/searingwolfe/mohaa-model-viewer#screenshots)
 
 **Inspect & tweak**
 
@@ -65,7 +67,7 @@ engine would, so what you see on screen is what the game draws.
 * Light / dark theme and a custom backdrop colour, plus a full keyboard-shortcut
   set (press `H` in the viewer).
   
-![Model Viewer: Image 4](screenshots/src4.png)
+[Screenshot 4](https://github.com/searingwolfe/mohaa-model-viewer#screenshots)
 
 **Self-contained by design**
 
@@ -186,3 +188,13 @@ Made by **Searingwolfe**.
 
 Engine reference: the [OpenMoHAA](https://github.com/openmoh/openmohaa) project,
 without which matching the original renderer would not have been possible.
+
+## Screenshots
+
+![Model Viewer: Image 1](screenshots/src1.png)
+![Model Viewer: Image 2](screenshots/src2.png)
+![Model Viewer: Image 3](screenshots/src3.png)
+![Model Viewer: Image 4](screenshots/src4.png)
+![Model Viewer: Image 5](screenshots/src5.png)
+![Model Viewer: Image 6](screenshots/src6.png)
+![Model Viewer: Image 7](screenshots/src7.png)
