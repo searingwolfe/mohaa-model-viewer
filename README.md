@@ -23,6 +23,8 @@ engine would, so what you see on screen is what the game draws.
 
 ## Features
 
+[See screenshots below](https://github.com/searingwolfe/mohaa-model-viewer#screenshots)
+
 **Loading & browsing**
 
 * Open one or more `.pk3` archives and navigate the `models/` tree, or drag a
@@ -68,8 +70,6 @@ engine would, so what you see on screen is what the game draws.
 * Each generated page is a single `.html` file — textures embedded as `data:`
   URIs, a restrictive Content-Security-Policy, and no network access at all
   (see [Privacy](#privacy) and [Security](#security)).
-
-[See screenshots below](https://github.com/searingwolfe/mohaa-model-viewer#screenshots)
 
 ---
 
