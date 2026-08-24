@@ -187,7 +187,6 @@ without which matching the original renderer would not have been possible.
 
 ## Screenshots
 
-![Model Viewer: Image 1](screenshots/src1.png)
 ![Model Viewer: Image 2](screenshots/src2.png)
 ![Model Viewer: Image 3](screenshots/src3.png)
 ![Model Viewer: Image 4](screenshots/src4.png)
