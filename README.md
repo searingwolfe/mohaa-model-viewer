@@ -23,8 +23,6 @@ engine would, so what you see on screen is what the game draws.
 
 ## Features
 
-![Model Viewer: Image 2](screenshots/src2.png)
-
 **Loading & browsing**
 
 * Open one or more `.pk3` archives and navigate the `models/` tree, or drag a
