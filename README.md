@@ -10,7 +10,7 @@ Load your `.pk3` archives, browse the model tree, and open any `.skd` or `.tik`
 in a self-contained HTML viewer with animation playback, tag display, texture
 resolution through the shader chain, and live particle effects.
 
-> **Screenshot / GIF —** an FX effect or explosion playing in the viewer (the hero shot).
+![Model Viewer: Image 1](screenshots/src1.png)
 
 ## Why this exists
 
@@ -23,7 +23,7 @@ engine would, so what you see on screen is what the game draws.
 
 ## Features
 
-> **Screenshot —** the launcher with a `.pk3` tree loaded and a model open in the 3D pane.
+![Model Viewer: Image 2](screenshots/src2.png)
 
 **Loading & browsing**
 
@@ -48,7 +48,7 @@ engine would, so what you see on screen is what the game draws.
 * Hang other models off any bone or tag with **attach-to-bone**, each with its
   own editable scale, offset and angles.
 
-> **Screenshot / GIF —** a skeletal model playing an animation (bonus: a weapon attached to a bone).
+![Model Viewer: Image 3](screenshots/src3.png)
 
 **Inspect & tweak**
 
@@ -66,8 +66,8 @@ engine would, so what you see on screen is what the game draws.
   (pitch / yaw / roll) dial.
 * Light / dark theme and a custom backdrop colour, plus a full keyboard-shortcut
   set (press `H` in the viewer).
-
-> **Screenshot —** the live `setsize` box editor, or tag/bone nodes with the Tags-vs-Bones filter.
+  
+![Model Viewer: Image 4](screenshots/src4.png)
 
 **Self-contained by design**
 
