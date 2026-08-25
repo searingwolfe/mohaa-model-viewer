@@ -255,7 +255,7 @@ VIEWER=os.path.join(HERE,"mohaa_view.py")
 # this has no fx at all, so the stamp has to move or they never get rebuilt.
 # rev 60: the attach-to-bone <select> is now a searchable popup, so pre-60 pages carry
 # markup the new script no longer wires up.
-VIEWER_REV_REQUIRED=60
+VIEWER_REV_REQUIRED=61
 # Sentinel subdir marking an individual-file (Browse / drag-drop / Recent / path-bar)
 # build. It rides through the normal subdir plumbing but redirects the output HTML to a
 # "standalone" folder sibling to "models", instead of into the pak-mirroring models tree.
@@ -573,11 +573,21 @@ class Tooltip:
             except Exception: pass
             self.tip=None
 
-HOTKEYS=[
+# The "All Keyboard shortcuts" window (F1 / the top-right "? Shortcuts" button) is laid out
+# in TWO columns: the launcher's own keys on the left, the 3D viewer's on the right. The
+# right column is deliberately a mirror of the viewer's own "Viewer Keyboard shortcuts"
+# overlay (mohaa_view.py, #helpCard): SAME groups, SAME order, SAME key column, row for row,
+# so the two lists read as one document and neither can quietly drift from the other. Only
+# the descriptions differ, and only where context forces it - this window is read from
+# OUTSIDE the viewer, so it says "the viewer's control panel" / "close the model" where the
+# in-viewer overlay can just say "the control panel" / "close the viewer window". Anything
+# added to one MUST be added to the other, in the same place.
+HOTKEYS_LAUNCHER=[
+ ("","--- Launcher ---"),
  ("Ctrl+O","Add .pk3 pak(s)"),
  ("Ctrl+Shift+O","Open a loose .skd / .tik file"),
  ("Ctrl+F","Focus the search box"),
- ("Esc","Clear search / defocus / cancel loading"),
+ ("Esc","Clear search / close a menu / cancel loading"),
  ("F5","Reload all loaded paks"),
  ("Ctrl+T","Toggle Dark / Light theme"),
  ("Ctrl+Shift+T","Use old (OS-default) popup windows on/off"),
@@ -587,24 +597,42 @@ HOTKEYS=[
  ("Backspace","Go up one folder"),
  ("Right / Left","Expand / collapse folder"),
  ("Up / Down","Move selection"),
- ("Double-click",".skd/.tik opens in the viewer"),
+ ("Double-click",".skd / .tik opens in the viewer"),
  ("Ctrl+Click / Shift+Click","Select multiple files / folders (Enter or right-click batch-builds them)"),
  ("Right-click","Pak context menu (view / remove loaded paks)"),
  ("Drag a file off the window","Open it in its own standalone viewer window"),
- ("","--- 3D viewer (click inside the model pane first) ---"),
+]
+HOTKEYS_VIEWER=[
+ ("","--- 3D viewer - camera (click inside the model pane first) ---"),
  ("drag / wheel","Look around / zoom"),
- ("W / A / S / D","Fly forward / left / back / right"),
+ ("W / S","Move forward / back"),
+ ("A / D","Strafe left / right"),
  ("Q / E","Tilt (roll) left / right"),
  ("Space / C","Move up / down"),
+ ("Up / Down","Move forward / back"),
+ ("Left / Right","Turn (yaw) left / right"),
  ("R","Reset camera"),
  ("V","Toggle Free-look / Tag-lock camera"),
- ("P or F","Play / pause the model & animation"),
+ ("","--- 3D viewer - playback ---"),
+ ("P","Play / pause the model & animation"),
+ ("F","Freeze / resume everything (same as Play / Pause)"),
  ("[ / ]","Step one frame back / forward"),
  ("Backspace","Reset model & effects to time 0"),
- ("1 - 7","Texture / Mesh / Wire / Sprite / Nodes / Labels / Setsizes"),
+ ("","--- 3D viewer - display toggles ---"),
+ ("1 - 7","Texture, Mesh, Wire, Setsizes, Nodes, Labels, Face Anims"),
  ("L","Viewer Light / Dark theme"),
  ("\\","Collapse / expand the viewer's control panel"),
- ("H or ?","Viewer shortcut overlay"),
+ ("","--- 3D viewer - pop-up lists (animations / surfaces / attach) ---"),
+ ("type","Filter the list"),
+ ("Up / Down","Move the highlight"),
+ ("Enter","Open the highlighted row (or take the top match)"),
+ ("Right","Open the highlighted category"),
+ ("Left / Backspace","Go back one level"),
+ ("Home / End","Jump to the first / last row"),
+ ("Esc","Close the list"),
+ ("","--- 3D viewer - window ---"),
+ ("H or ?","Show / hide the viewer's shortcut overlay"),
+ ("Esc","Close the model (back to the start page)"),
 ]
 
 class App(tk.Tk):
@@ -798,9 +826,17 @@ class App(tk.Tk):
         # the row is disabled when there is genuinely nothing to delete.
         bempty = not self._built_any()
         tempty = not self._temp_dirs()
+        # "Close file" is the menu twin of the viewer's Esc: both call _close_viewer(), which
+        # reverts the middle pane to the start page while KEEPING _last_build, so the top
+        # "Open Viewer" button can reopen the same model instantly. Only meaningful for the
+        # embedded pane - a model sent to the external browser is that browser's tab to close -
+        # so the row is disabled unless a WebView2 is actually up.
+        vopen = self._webview is not None
         return [_mi("Add .pk3 pak(s)...",self._choose_pk3,"Ctrl+O"),
                 _mi("Open File...",self._browse_and_run,"Ctrl+Shift+O"),
                 {"type":"cascade","label":"Recent files","items":self._menu_items_recent},
+                _MSEP,
+                _mi("Close file",self._close_viewer,"Esc","normal" if vopen else "disabled"),
                 _MSEP,
                 _mi("Reload paks",self._reload_all_cmd,"F5"),
                 _mi("Clear all paks",self._clear_pk3s),
@@ -2276,19 +2312,55 @@ class App(tk.Tk):
         self.wait_window(w)
         return res["ok"]
 
+    @staticmethod
+    def _fill_hotkeys(frm,rows,col,old):
+        """Grid one column-group of the shortcut list into `frm` at grid columns col / col+1.
+
+        Two groups are placed side by side (launcher keys at 0/1, viewer keys at 2/3). The
+        single-column list this replaced would now be ~47 rows tall and run off the bottom of
+        a 768px-high screen; side by side it is the same height it always was, at the cost of
+        width - so the description column is capped with a font-relative wraplength. Measuring
+        the font (rather than counting characters) keeps the cap honest whatever mono family
+        _mono_family() picked and whatever the OS-default font is under 'old popup windows',
+        and it bounds the window width no matter how long a future description gets."""
+        try:
+            import tkinter.font as _tkfont
+            _f=_tkfont.nametofont("TkDefaultFont") if old else _tkfont.Font(font=FONT_SMALL)
+            wrap=_f.measure("x"*50)          # descriptions past ~50 chars fold to a 2nd line
+        except Exception:
+            wrap=0                           # 0 = Tk's default, i.e. no wrapping
+        lpad = 6 if col==0 else 26           # gutter between the two column-groups
+        r=0
+        for key,desc in rows:
+            if not key:                      # "--- Section ---" header spans both of its columns
+                if old:
+                    tk.Label(frm,text=desc.strip("- "),font="TkDefaultFont").grid(
+                        row=r,column=col,columnspan=2,sticky="w",padx=(lpad,6),pady=(8,2))
+                else:
+                    ttk.Label(frm,text=desc.strip("- "),style="PanelDim.TLabel").grid(
+                        row=r,column=col,columnspan=2,sticky="w",padx=(lpad,6),pady=(8,2))
+                r+=1; continue
+            if old:
+                tk.Label(frm,text=key,font="TkDefaultFont").grid(row=r,column=col,sticky="w",padx=(lpad,18),pady=1)
+                tk.Label(frm,text=desc,font="TkDefaultFont",justify="left",wraplength=wrap).grid(
+                    row=r,column=col+1,sticky="w",padx=6,pady=1)
+            else:
+                ttk.Label(frm,text=key,style="Panel.TLabel",foreground=ACCENT).grid(row=r,column=col,sticky="w",padx=(lpad,18),pady=1)
+                ttk.Label(frm,text=desc,style="Panel.TLabel",justify="left",wraplength=wrap).grid(
+                    row=r,column=col+1,sticky="w",padx=6,pady=1)
+            r+=1
+
     def _show_hotkeys(self):
         # OS-default (white, system font) window when "Use old popup windows" is on,
         # matching the menus/tooltips/confirm dialogs; themed window otherwise.
+        # Titled "All Keyboard shortcuts" because it covers BOTH programs; the viewer's own
+        # H overlay is the viewer-only subset and is titled "Viewer Keyboard shortcuts".
         if OLD_POPUPS:
-            w=tk.Toplevel(self); w.title("Keyboard shortcuts")
+            w=tk.Toplevel(self); w.title("All Keyboard shortcuts")
             w.transient(self); w.resizable(False,False)
             frm=tk.Frame(w); frm.pack(fill="both",expand=True,padx=10,pady=10)
-            r=0
-            for key,desc in HOTKEYS:
-                if not key:
-                    tk.Label(frm,text=desc.strip("- "),font="TkDefaultFont").grid(row=r,column=0,columnspan=2,sticky="w",padx=6,pady=(8,2)); r+=1; continue
-                tk.Label(frm,text=key,font="TkDefaultFont").grid(row=r,column=0,sticky="w",padx=(6,18),pady=1)
-                tk.Label(frm,text=desc,font="TkDefaultFont").grid(row=r,column=1,sticky="w",padx=6,pady=1); r+=1
+            self._fill_hotkeys(frm,HOTKEYS_LAUNCHER,0,True)
+            self._fill_hotkeys(frm,HOTKEYS_VIEWER,2,True)
             btn=tk.Button(w,text="Close",command=w.destroy); btn.pack(pady=(0,10))
             w.bind("<Escape>",lambda e:w.destroy()); w.bind("<F1>",lambda e:w.destroy())
             try:
@@ -2299,15 +2371,11 @@ class App(tk.Tk):
                 w.geometry(f"+{max(x0,x)}+{max(y0,y)}")
             except Exception: pass
             w.grab_set(); btn.focus_set(); return
-        w=tk.Toplevel(self); w.title("Keyboard shortcuts"); w.configure(bg=BG)
+        w=tk.Toplevel(self); w.title("All Keyboard shortcuts"); w.configure(bg=BG)
         w.transient(self); w.resizable(False,False)
         frm=ttk.Frame(w,style="Panel.TFrame"); frm.pack(fill="both",expand=True,padx=10,pady=10)
-        r=0
-        for key,desc in HOTKEYS:
-            if not key:
-                ttk.Label(frm,text=desc.strip("- "),style="PanelDim.TLabel").grid(row=r,column=0,columnspan=2,sticky="w",padx=6,pady=(8,2)); r+=1; continue
-            ttk.Label(frm,text=key,style="Panel.TLabel",foreground=ACCENT).grid(row=r,column=0,sticky="w",padx=(6,18),pady=1)
-            ttk.Label(frm,text=desc,style="Panel.TLabel").grid(row=r,column=1,sticky="w",padx=6,pady=1); r+=1
+        self._fill_hotkeys(frm,HOTKEYS_LAUNCHER,0,False)
+        self._fill_hotkeys(frm,HOTKEYS_VIEWER,2,False)
         btn=ttk.Button(w,text="Close",command=w.destroy,cursor="hand2"); btn.pack(pady=(0,10))
         w.bind("<Escape>",lambda e:w.destroy()); w.bind("<F1>",lambda e:w.destroy())
         try:
@@ -4794,6 +4862,11 @@ class App(tk.Tk):
         # builds are deleted, clears _last_build + the path bar itself after this returns.)
         self._last_info=None; self._anim_outdir=None; self._attach_busy=set()
         self._clear_info()          # revert the bottom-right details panel to "No model loaded"
+        # ...and the status bar, which would otherwise still read "Viewing <name>" over an
+        # empty pane. Safe for the force-rebuild caller too: _open_pk3_model sets its own
+        # status immediately afterwards.
+        try: self._set_status("Ready")
+        except Exception: pass
         try:
             if not self._view_placeholder.winfo_ismapped():
                 self._view_placeholder.pack(fill="both",expand=True)

@@ -2203,7 +2203,7 @@ ANIM_PRELOAD_MAX=150
 #         used to break out of the block) and carries a CSP that pins every source to
 #         self/file/data/blob with connect-src 'none'. Pages baked before rev 37 lack
 #         both, so they must be rebuilt rather than served from the output-folder cache.
-VIEWER_REV=60
+VIEWER_REV=61
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!--mohaa-viewer-rev:__REV__-->
@@ -2406,7 +2406,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div id="sideTab" title="Collapse the control panel (\)">&#10095;</div>
   <div id="helpOv" style="display:none">
    <div id="helpCard">
-    <h3>Keyboard shortcuts</h3>
+    <h3>Viewer Keyboard shortcuts</h3>
     <table>
      <tr class="grp"><td colspan="2">Camera (free-look)</td></tr>
      <tr><td>drag / wheel</td><td>look around / zoom</td></tr>
@@ -2414,17 +2414,28 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
      <tr><td>A / D</td><td>strafe left / right</td></tr>
      <tr><td>Q / E</td><td>tilt (roll) left / right</td></tr>
      <tr><td>Space / C</td><td>move up / down</td></tr>
+     <tr><td>Up / Down</td><td>move forward / back</td></tr>
+     <tr><td>Left / Right</td><td>turn (yaw) left / right</td></tr>
      <tr><td>R</td><td>reset camera</td></tr>
-     <tr><td>V</td><td>toggle Free-look / Tag-lock</td></tr>
+     <tr><td>V</td><td>toggle Free-look / Tag-lock camera</td></tr>
      <tr class="grp"><td colspan="2">Playback</td></tr>
      <tr><td>P</td><td>play / pause the model &amp; animation</td></tr>
-     <tr><td>F</td><td>freeze / resume everything (same as Play/Pause)</td></tr>
+     <tr><td>F</td><td>freeze / resume everything (same as Play / Pause)</td></tr>
      <tr><td>[ / ]</td><td>step one frame back / forward</td></tr>
      <tr><td>Backspace</td><td>reset model &amp; effects to time 0</td></tr>
      <tr class="grp"><td colspan="2">Display toggles</td></tr>
      <tr><td>1&ndash;7</td><td>Texture &middot; Mesh &middot; Wire &middot; Setsizes &middot; Nodes &middot; Labels &middot; Face Anims</td></tr>
      <tr><td>L</td><td>toggle Light / Dark theme</td></tr>
      <tr><td>\</td><td>collapse / expand the control panel</td></tr>
+     <tr class="grp"><td colspan="2">Pop-up lists (animations &middot; surfaces &middot; attach)</td></tr>
+     <tr><td>type</td><td>filter the list</td></tr>
+     <tr><td>Up / Down</td><td>move the highlight</td></tr>
+     <tr><td>Enter</td><td>open the highlighted row (or take the top match)</td></tr>
+     <tr><td>Right</td><td>open the highlighted category</td></tr>
+     <tr><td>Left / Backspace</td><td>go back one level</td></tr>
+     <tr><td>Home / End</td><td>jump to the first / last row</td></tr>
+     <tr><td>Esc</td><td>close the list</td></tr>
+     <tr class="grp"><td colspan="2">Window</td></tr>
      <tr><td>H or ?</td><td>show / hide this panel</td></tr>
      <tr><td>Esc</td><td>close the viewer window</td></tr>
     </table>
@@ -2438,7 +2449,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
      <h2>Model</h2>
      <div class="row">
        <button id="bTheme" style="flex:1" title="Toggle Light / Dark theme (L). Your choice is remembered.">&#9728; Light mode</button>
-       <button id="bHelp" title="Show all keyboard shortcuts (H)">? Shortcuts</button>
+       <button id="bHelp" title="Show the viewer's keyboard shortcuts (H). The launcher's own '? Shortcuts' button lists these AND the launcher/pak-tree keys.">? Shortcuts</button>
      </div>
    </div>
    <div class="sect">
