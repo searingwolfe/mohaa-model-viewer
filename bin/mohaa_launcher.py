@@ -255,7 +255,17 @@ VIEWER=os.path.join(HERE,"mohaa_view.py")
 # this has no fx at all, so the stamp has to move or they never get rebuilt.
 # rev 60: the attach-to-bone <select> is now a searchable popup, so pre-60 pages carry
 # markup the new script no longer wires up.
-VIEWER_REV_REQUIRED=61
+# rev 62: the setsize line and the placement-angle readout both grew pencil editors; pre-62
+# pages have neither the #angEdit button nor the markup the new script expects.
+# rev 63: at<key>.js attachment sidecars. Every one written before this holds a texture
+# resolved the WRONG way (the texture pass was handed a .tik path where the tik index wants
+# a .skd path) and carries none of the shader's render hints. _build_attach serves an
+# existing sidecar straight off disk without ever re-resolving it, so _stamp_anim_cache -
+# which is gated on THIS constant alone - is the only thing that clears them.
+# rev 64: attachment offsets changed UNITS - the boxes are now engine world units (what a
+# .tik/script attachmodel line carries) rather than the viewer's unscaled model units, so a
+# pre-64 page shows the same boxes meaning something different.
+VIEWER_REV_REQUIRED=64
 # Sentinel subdir marking an individual-file (Browse / drag-drop / Recent / path-bar)
 # build. It rides through the normal subdir plumbing but redirects the output HTML to a
 # "standalone" folder sibling to "models", instead of into the pak-mirroring models tree.
@@ -752,21 +762,36 @@ class App(tk.Tk):
     def _load_config(self):
         try: return json.load(open(CONFIG,encoding="utf-8"))
         except Exception: return {}
+    @staticmethod
+    def _norm_angle(x):
+        """One placement angle folded into [0,360), to the viewer's own 3-decimal resolution.
+
+        Kept as an int when it lands on a whole degree so the config file (and the #ang=
+        hash built from it) reads "90" rather than "90.0"; NaN/inf are rejected by the
+        caller, which is why the modulo here is safe."""
+        x=float(x)%360.0
+        x=round(x,3)
+        return int(x) if float(x).is_integer() else x
+
     def _set_view_angles(self,raw):
         """Remember the viewer's Pitch/Yaw/Roll placement dial in mohaa_viewer_config.json.
 
-        The viewer posts "mohaa-ang <pitch>,<yaw>,<roll>" (degrees) whenever the slider
-        moves; _open_file hands the saved triple back on the page's #ang= boot hash so the
-        next model opens already rotated. Values are normalised to the four quarter turns
-        the dial offers, and an unchanged triple is dropped so dragging the slider does not
-        rewrite the config file on every detent."""
-        try: v=[int(round(float(x))) for x in str(raw).split(",")[:3]]
+        The viewer posts "mohaa-ang <pitch>,<yaw>,<roll>" (degrees) whenever the dial moves;
+        _open_file hands the saved triple back on the page's #ang= boot hash so the next
+        model opens already rotated. An unchanged triple is dropped so dragging the slider
+        does not rewrite the config file on every detent.
+
+        rev 62: the values are NO LONGER snapped to the four quarter turns. The dial's pencil
+        editor takes any angle (45, 22.5, -7 ...), and rounding those to the nearest detent
+        here silently threw the typed number away on the next open - the exact number the
+        muzzle-flash placement work exists to find."""
+        try: v=[float(x) for x in str(raw).split(",")[:3]]
         except Exception: return
         if len(v)!=3: return
-        # floor(x/90) on the +45 bias, NOT round(): Python's round() is banker's rounding
-        # (round(0.5)==0) while the viewer's JS quantiser is Math.round (half up), so the two
-        # would disagree on exact half-detents. Floor division agrees with JS on both signs.
-        v=[(((x+45)//90*90)%360+360)%360 for x in v]
+        # reject NaN/inf before the modulo: float('nan')%360 is nan, and json would then
+        # write a bare NaN token that no strict JSON reader (including the browser) accepts.
+        if not all(-1e9<x<1e9 for x in v): return
+        v=[self._norm_angle(x) for x in v]
         if self._cfg.get("view_angles")==v: return
         self._cfg["view_angles"]=v; self._save_config()
 
@@ -774,7 +799,10 @@ class App(tk.Tk):
         """The saved (pitch,yaw,roll) triple, or None when the model sits unrotated."""
         v=self._cfg.get("view_angles")
         if not (isinstance(v,(list,tuple)) and len(v)==3): return None
-        try: v=[int(x)%360 for x in v]
+        try:
+            v=[float(x) for x in v]
+            if not all(-1e9<x<1e9 for x in v): return None
+            v=[self._norm_angle(x) for x in v]
         except Exception: return None
         return v if any(v) else None
 
@@ -4529,6 +4557,7 @@ class App(tk.Tk):
             tdir=os.path.join(self._tmp,"_attach")
             os.makedirs(tdir,exist_ok=True)
             self._attach_idle=None
+            self._attach_skelvfs=None; self._attach_tikmap=None
             skd_path=self._extract_attach_files(vpath,tdir)
             if not skd_path:
                 self._log_q.put(("err",f"{vpath}: no .skd geometry found for this model"))
@@ -4540,9 +4569,29 @@ class App(tk.Tk):
                     import mohaa_view as MV
                     surfs=[s["name"] for s in MV.parse_skd(skd_path)["surfaces"]]
                     manifest=os.path.join(tdir,"_tex_"+key+".json")
-                    nt,ns=MTX.write_textures_manifest(self._vfs,vpath,surfs,self._SH,self._TI,
+                    # Resolve against the .skd's VFS PATH, not the .tik's, and let the
+                    # attachment's own setup{} win - the same local_TI pattern the main
+                    # model build uses. Passing vpath here was the muzzle-flash bug: a
+                    # .tik path is never a key in the index, so resolve_surface_texmap fell
+                    # back to merging every sibling .tik in the folder and `material1` (the
+                    # 3ds Max default surface name, shared by half of models/fx) resolved to
+                    # whichever sibling happened to land last in the dict.
+                    tex_key=self._attach_skelvfs or vpath
+                    local_TI=dict(self._TI); allpairs=[]
+                    if self._attach_tikmap:
+                        try:
+                            local_TI.update(self._attach_tikmap)
+                            for v in self._attach_tikmap.values(): allpairs+=v
+                            if allpairs:
+                                local_TI[tex_key]=allpairs; local_TI[tex_key.lower()]=allpairs
+                        except Exception: pass
+                    nt,ns=MTX.write_textures_manifest(self._vfs,tex_key,surfs,self._SH,local_TI,
                                                       manifest,global_surf=self._GS,
                                                       shader_props=self._PROPS)
+                    self._log_q.put(("dim",f"- attach textures: {nt}/{ns} surfaces"))
+                    if nt<ns:
+                        self._report_surface_misses(manifest,surfs,
+                                                    dict(allpairs) if self._attach_tikmap else None)
                     if nt==0: manifest=None
                 except Exception as e:
                     self._log_q.put(("dim",f"(attachment textures skipped: {e})")); manifest=None
@@ -4600,9 +4649,16 @@ class App(tk.Tk):
                 cands=[skel.lower()]+[n for n in self._vfs.names()
                                       if n.endswith("/"+os.path.basename(skel).lower())]
                 want=next((c for c in cands if self._vfs.exists(c)),None)
+            # rev 63: this .tik's OWN `surface <n> shader <s>` map, for the texture pass.
+            # The global tik index is keyed by .skd path (build_tik_index), so handing it a
+            # .tik path missed every time and fell through to the sibling-folder guess -
+            # which for models/fx/muzflash.tik meant some OTHER fx model's `material1`.
+            try: self._attach_tikmap=MTX.parse_tik_setup(txt)
+            except Exception: self._attach_tikmap=None
         elif low.endswith(".skd"):
             want=vpath
         if not want: return None
+        self._attach_skelvfs=want          # the key build_tik_index actually uses
         data=self._vfs.read(want)
         if data is None: return None
         target=os.path.join(tdir,os.path.basename(want))

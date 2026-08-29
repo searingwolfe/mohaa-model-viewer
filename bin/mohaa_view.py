@@ -2203,7 +2203,26 @@ ANIM_PRELOAD_MAX=150
 #         used to break out of the block) and carries a CSP that pins every source to
 #         self/file/data/blob with connect-src 'none'. Pages baked before rev 37 lack
 #         both, so they must be rebuilt rather than served from the output-folder cache.
-VIEWER_REV=61
+# rev 62: two editors that used to be read-only or absent. (a) A model whose .tik declares
+#         no `setsize` (and has no sibling .map to borrow a box from) now shows a dimmed
+#         placeholder `setsize ( 0 0 0 ) ( 0 0 0 )` whose pencil MATERIALISES the box and
+#         un-greys the Display > Setsizes toggle. (b) The placement-angle dial gained a
+#         pencil of its own, so pitch/yaw/roll take ANY value instead of only the four
+#         quarter-turn detents, and the slider thumb parks between tick marks to show it.
+#         Pages baked before rev 62 have neither, so they must be rebuilt.
+# rev 63: an ATTACHED model is now textured like the model it hangs off. Two halves: the
+#         launcher resolves its surfaces against the attachment's own .tik (it was handing
+#         the texture pass a .tik path where a .skd path was wanted, so muzflash.tik picked
+#         up an unrelated sibling's `material1`), and the at<key>.js sidecar now carries the
+#         shader's render hints - additive, cull none, autosprite, animmap frames, alphaFunc
+#         - instead of flattening them to a bare image. A muzzle flash therefore draws as an
+#         additive two-sided sprite rather than an opaque card. Sidecars written before rev
+#         63 hold the wrong texture and no hints, so they must be rebuilt (the .rev stamp in
+#         the sidecar folder clears them).
+# rev 64: the attach-to-bone OFFSET is now in engine world units - the number a .tik or
+#         script `attachmodel` line actually carries - instead of the viewer's own unscaled
+#         model units. Calibrated in-game against 15cmcannon and 20mmflak; see ATT_OFS.
+VIEWER_REV=64
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!--mohaa-viewer-rev:__REV__-->
@@ -2320,13 +2339,18 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
  input[type=text]:not(.amSearch):focus,input[type=number]:focus{outline:1px solid var(--accent);
    outline-offset:0}
  /* PLACEMENT-ANGLE slider: four hard detents (0 / 90 / 180 / 270) with real tick marks.
+    The TRACK, though, is a full turn: it runs 0..4 quarter turns, so the last quarter - from
+    the 270 mark to the right edge - is where a fourth-quadrant angle lives (a typed -7
+    normalises to 353, which sits at 3.922). There is deliberately no mark at the right edge:
+    that point is 360, which IS 0, and the control wraps there rather than resting on it, so
+    marking it would just be the 0 tick drawn twice. rev 62.
     The native <datalist> tickmarks Chromium draws are a couple of near-invisible grey
     pixels against this panel, so #angsl is custom-styled instead - which also PINS the
     thumb at 12px, and that pin is what makes the ticks line up. A range thumb's centre
     travels from thumbWidth/2 to width-thumbWidth/2, never the full width, so the tick
     strip is inset by exactly 6px at each end; the four marks are then placed by plain
-    background-position percentages (0 / 33.3 / 66.7 / 100), which resolve against
-    (strip width - 1px) and therefore land dead on the thumb centre for values 0..3.
+    background-position percentages (0 / 25 / 50 / 75), which resolve against
+    (strip width - 1px) and therefore land dead on the thumb centre for values 0..3 of 4.
     Scoped to .angwrap so the frame/speed sliders keep their stock accent-color look. */
  .angwrap{position:relative;flex:1;min-width:0;display:flex;align-items:center;padding-bottom:8px}
  .angwrap input[type=range]{width:100%;height:14px;margin:0;background:transparent;
@@ -2341,9 +2365,9 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
  .angwrap::after{content:"";position:absolute;left:6px;right:6px;bottom:2px;height:6px;
    pointer-events:none;
    background:linear-gradient(var(--dim),var(--dim)) no-repeat 0 0/1px 100%,
-              linear-gradient(var(--dim),var(--dim)) no-repeat 33.333% 0/1px 100%,
-              linear-gradient(var(--dim),var(--dim)) no-repeat 66.667% 0/1px 100%,
-              linear-gradient(var(--dim),var(--dim)) no-repeat 100% 0/1px 100%}
+              linear-gradient(var(--dim),var(--dim)) no-repeat 25% 0/1px 100%,
+              linear-gradient(var(--dim),var(--dim)) no-repeat 50% 0/1px 100%,
+              linear-gradient(var(--dim),var(--dim)) no-repeat 75% 0/1px 100%}
  #taglist{flex:none;overflow:visible;padding:6px 8px}   /* full list; the PANEL scrolls */
  .tag{display:flex;justify-content:space-between;gap:8px;padding:4px 7px;border-radius:5px;cursor:pointer;white-space:nowrap}
  .tag:hover,.tag.sel{background:var(--btn)}
@@ -2507,10 +2531,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
      <div class="row co">&nbsp;</div>
      <div class="row co" style="align-items:center">
        <button id="angAxis" style="min-width:52px;padding:5px 6px" title="Which of the entity's three placement angles the slider is editing. Click to cycle Pitch -&gt; Yaw -&gt; Roll; each axis keeps its own value.">Pitch</button>
-       <span class="angwrap"><input type="range" id="angsl" min="0" max="3" step="1" value="0"
-         title="Entity placement angle for the axis named on the left, in quarter turns: the four ticks are 0 / 90 / 180 / 270 degrees. A .tik carries no orientation - in-game it comes from the entity's `angles` key in the .bsp/.map, which the engine feeds to AnglesToAxis (q_math.c:774-800) to build the refEntity axis. Set it here to view a wall-, ceiling- or vehicle-mounted emitter the way it is actually placed. Remembered."></span>
-       <span id="angslv" style="min-width:106px;text-align:right;color:var(--dim);white-space:nowrap"
-         title="The full placement orientation: ( pitch yaw roll ) in degrees. All three are shown at once, so the two axes the slider is not currently driving stay visible.">( 0 0 0 )</span>
+       <span class="angwrap"><input type="range" id="angsl" min="0" max="4" step="any" value="0"
+         title="Entity placement angle for the axis named on the left, in quarter turns: the four ticks are 0 / 90 / 180 / 270 degrees. The track is a full turn and it WRAPS - arrow-right off the 270 end comes back at 0, arrow-left off the 0 end goes to 270 - so you can keep stepping round in either direction. A .tik carries no orientation - in-game it comes from the entity's `angles` key in the .bsp/.map, which the engine feeds to AnglesToAxis (q_math.c:774-800) to build the refEntity axis. Set it here to view a wall-, ceiling- or vehicle-mounted emitter the way it is actually placed. Dragging (and the arrow keys) always land on one of the four detents; for anything in between, type it with the pencil on the right - the thumb then parks between two ticks. Remembered."></span>
+       <span id="angslv" style="min-width:100px;text-align:right;color:var(--dim);white-space:nowrap"
+         title="The full placement orientation: ( pitch yaw roll ) in degrees. All three are shown at once, so the two axes the slider is not currently driving stay visible.">( 0 0 0 )</span><button id="angEdit" style="padding:0 6px;line-height:1.5;font-size:12px" title="Edit the placement angles by hand - any value, not just the four quarter turns (45, 22.5, -7 ...). The slider thumb moves to match, parking between tick marks for an off-detent angle. Values are kept when you close the editor.">&#9998;</button>
      </div>
      <div class="row co" style="align-items:center">backdrop
        <input type="color" id="bgcol" value="#0e1116" style="width:44px;height:22px;padding:1px;border:1px solid var(--line);border-radius:6px;background:var(--btn);cursor:pointer" title="Backdrop colour behind the model. Overrides the theme's default; remembered.">
@@ -2871,6 +2895,16 @@ let LT=DATA.tris, LUV=DATA.uvs, LSR=DATA.surfRanges, LTEX=surfTex;
 function isLodSprite(si){const t=LTEX[si];return !!(t&&t.autosprite2&&t.distfade&&t.distfade.inv);}
 const hasLodSprite=DATA.surfRanges.some(s=>s.autosprite2&&s.distfade&&s.distfade.inv);
 const hasEffectSurf=DATA.surfRanges.some(s=>s.autosprite||s.additive||s.pulse||(s.frames&&s.frames.length>1));
+// rev 63: the effect clock can also be started AFTER load. hasEffectSurf is baked from the
+// host's own surfaces, so on a plain static model (a cannon) the loop never ran - and an
+// attached muzzle flash then had no clock for its animmap frames or its camera-facing
+// billboard to advance against. effLoop is a hoisted function declaration, so calling this
+// from attRebuild (defined earlier in the file) is fine; the flag keeps it to one loop.
+let _effStarted=false;
+function startEffLoop(){if(_effStarted)return;_effStarted=true;requestAnimationFrame(effLoop);}
+// True once an attachment (or the host) has a surface that needs that clock.
+function liveEffectSurf(){return LTEX.some(t=>t&&(t.additive||t.autosprite||t.autosprite2
+  ||t.pulse||t.texrotate||(t.frames&&t.frames.length>1)));}
 // surfaces whose base stage has a `tcmod rotate` (spinning propeller discs) need the
 // continuous effect clock running so their texcoords advance even when the model itself
 // is idle / not "playing" - see the effLoop start gate below.
@@ -5540,12 +5574,34 @@ tbtn('bTex','tex');tbtn('bMesh','mesh');tbtn('bWire','wire');tbtn('bNodes','node
   drop('bGlow',    DATA.surfRanges.some(s=>s.lightglow));   // DEFORM_LIGHTGLOW corona
   drop('bTreeSpr', hasLodSprite);                           // autoSprite2 + oneMinusDistFade
 })();
-// disable the Setsizes toggle when there's no box to show
-(function(){const bs=document.getElementById('bSize');if(bs&&!DATA.setsize){bs.disabled=true;bs.style.opacity=0.4;bs.title='No setsize or .map bounding box for this model';}})();
+// disable the Setsizes toggle when there's no box to show. rev 62: that is no longer a
+// permanent verdict - the setsize line's pencil can grow a box on a model that ships without
+// one, so the greyed tooltip points at it and ssSyncBtn() (below) re-runs this decision
+// whenever the synthetic box appears or is discarded.
+(function(){const bs=document.getElementById('bSize');if(bs&&!DATA.setsize){bs.disabled=true;bs.style.opacity=0.4;bs.title='No setsize or .map bounding box for this model \u2013 use the pencil on the setsize line to add one';}})();
 // disable the Texture toggle when NO surface resolved to a texture (e.g. models/miscobj/hammer,
 // whose `surface all shader hammer` points at textures/models/items/hammer.tga - a texture that
 // isn't shipped in any pak). hasTex is DATA.surfRanges.some(s=>s.tex||s.pulse); strip the default
 // 'on' class too so the greyed button reads as off, matching the disabled Setsizes button.
+//
+// rev 63: not a verdict for the whole session any more. view.tex starts as hasTex - the HOST's
+// own textures - so on an untextured host the fill was off AND unreachable, and an ATTACHED
+// sprite could never paint however well its own texture resolved. texSyncBtn re-derives the
+// state from the LIVE surface list, so attaching a muzzle flash to a bare .skd un-greys the
+// button and switches the fill on; removing it puts both back.
+function texSyncBtn(){
+  const bt=document.getElementById('bTex');if(!bt)return;
+  const live=(typeof LTEX!=='undefined'&&LTEX)?LTEX.some(t=>t&&(t.img||t.pulse)):hasTex;
+  if(!hasTex){                       // host brought none: the attachment owns this button
+    bt.disabled=!live;
+    bt.style.opacity=live?'':'0.4';
+    bt.title=live?'Show / hide resolved skin textures (1) \u2013 from the attached model; this one has none of its own'
+                 :'No resolved texture for this model';
+    if(view.tex&&!live)view.tex=false;
+    else if(!view.tex&&live)view.tex=true;   // a texture nothing can show is not worth resolving
+  }
+  bt.classList.toggle('on',!!view.tex);
+}
 (function(){const bt=document.getElementById('bTex');if(bt&&!hasTex){bt.disabled=true;bt.style.opacity=0.4;bt.classList.remove('on');bt.title='No resolved texture for this model';}})();
 // camera mode: free-look (fly) vs tag-lock (orbit a clicked tag)
 (function(){
@@ -5584,17 +5640,51 @@ const nTags=DATA.tags.filter(t=>t.kind==='tag'||t.origin).length,nOrig=DATA.tags
 // live-edits DATA.setsize, so the red Setsizes box (drawSetsizeBox, painted
 // only while that toggle is on) tracks every keystroke. Toggled off it discards
 // the edits and restores the file-original values captured once here at load.
+// rev 62: a model that declares no `setsize` - and has no sibling .map to borrow a box
+// from - is no longer a dead line. It reads a DIMMED `setsize ( 0 0 0 ) ( 0 0 0 )` (dim
+// because those zeros are the viewer's placeholder, not something the file said) and its
+// pencil MATERIALISES that box: DATA.setsize is created, the Display > Setsizes toggle is
+// un-greyed and switched on so the red wireframe tracks every keystroke, and the numbers
+// can be dialled in and copied straight out as a `setsize` line for the .tik. Closing the
+// pencil takes the synthetic box away again and re-greys the toggle - the same "discard"
+// contract the revert path gives a model that shipped with one.
 const SS_ORIG=DATA.setsize?JSON.parse(JSON.stringify(DATA.setsize)):null;
+const SS_SYNTH=!DATA.setsize;               // no box in the file: the pencil creates one
 let ssEdit=false;
+// Set when opening the editor found the Setsizes toggle OFF and switched it on, so closing
+// can hand the view back exactly as it found it. Only ever undoes the viewer's OWN auto-on:
+// a toggle the user pressed themselves while editing is left alone.
+let ssAutoOn=false;
+// Keep the Display panel's Setsizes toggle honest about whether there is a box to draw.
+// `on` undefined = just re-derive the enabled/disabled state; true/false also drives the
+// view flag, so opening the editor on a boxless model shows the box without a second click.
+function ssSyncBtn(on){
+  const bs=document.getElementById('bSize');if(!bs)return;
+  bs.disabled=!DATA.setsize;
+  bs.style.opacity=DATA.setsize?'':'0.4';
+  bs.title=DATA.setsize
+    ?(SS_SYNTH?'Wireframe box of the setsize you are editing (4) \u2013 this model declares none of its own'
+              :'Wireframe box of the model\u2019s setsize / .map bounding box (4)')
+    :'No setsize or .map bounding box for this model \u2013 use the pencil on the setsize line to add one';
+  if(on!==undefined)view.setsize=!!on&&!!DATA.setsize;
+  else if(!DATA.setsize)view.setsize=false;
+  bs.classList.toggle('on',view.setsize);
+}
 function renderSetsize(){
   const host=document.getElementById('setsizeLine');
   if(!host)return;
   host.innerHTML='';
-  if(!DATA.setsize)return;                    // boxless model: nothing to edit
-  const mn=DATA.setsize[0],mx=DATA.setsize[1];
+  // boxless model: fall back to the ( 0 0 0 ) ( 0 0 0 ) placeholder so there is always a
+  // line to read and a pencil to press. DATA.setsize itself stays null until that press.
+  const mn=DATA.setsize?DATA.setsize[0]:[0,0,0],mx=DATA.setsize?DATA.setsize[1]:[0,0,0];
   if(!ssEdit){
-    host.appendChild(document.createTextNode(
-      'setsize ('+mn.join(' ')+') ('+mx.join(' ')+') '));
+    const t=document.createElement('span');
+    t.textContent='setsize ('+mn.join(' ')+') ('+mx.join(' ')+') ';
+    if(!DATA.setsize){
+      t.style.opacity='0.55';
+      t.title='This model declares no setsize, and no sibling .map supplies one. '
+             +'Click the pencil to start a box at ( 0 0 0 ) ( 0 0 0 ).';}
+    host.appendChild(t);
   }else{
     // number field + nowrap group, mirroring attPanelRender's num()/grp() so it
     // matches the attach-to-bone offset / angles editors exactly.
@@ -5620,14 +5710,31 @@ function renderSetsize(){
   b.className=ssEdit?'on':'';                    // green while editing
   b.style.cssText='padding:0 6px;margin-left:2px;line-height:1.5;font-size:12px';
   b.title=ssEdit
-    ?'Editing setsize \u2013 click to discard changes and restore the file-original values'
-    :'Edit this model\u2019s setsize (updates the red Setsizes box live)';
+    ?(SS_SYNTH?'Editing a setsize this model does not declare \u2013 click to discard it again'
+              :'Editing setsize \u2013 click to discard changes and restore the file-original values')
+    :(SS_SYNTH?'Add a setsize to this model \u2013 starts at ( 0 0 0 ) ( 0 0 0 ), un-greys the Setsizes toggle and shows the red box'
+              :'Edit this model\u2019s setsize \u2013 shows the red Setsizes box and updates it live');
   b.onclick=()=>{
     ssEdit=!ssEdit;
-    if(!ssEdit&&SS_ORIG){                        // closing the editor: revert to file-original
-      for(let i=0;i<2;i++)for(let k=0;k<3;k++)DATA.setsize[i][k]=SS_ORIG[i][k];
-      draw();
+    if(ssEdit){
+      // OPENING. A boxless model first gets a zero box to type into; then - for every model,
+      // declared box or not - the Setsizes toggle is un-greyed and switched on, because a box
+      // you cannot see is not worth dialling numbers into. This used to fire only for the
+      // synthetic case, which made the pencil behave differently depending on whether the .tik
+      // happened to carry a setsize.
+      if(!DATA.setsize)DATA.setsize=[[0,0,0],[0,0,0]];
+      ssAutoOn=!view.setsize;                    // remember whether the box was ours to show
+      ssSyncBtn(true);
+    }else{
+      // CLOSING. Values revert (file-original) or the synthetic box goes away entirely, and
+      // the red box is hidden again IF opening is what revealed it - leaving a toggle the user
+      // never pressed switched on would be the same inconsistency in the other direction.
+      if(SS_ORIG){for(let i=0;i<2;i++)for(let k=0;k<3;k++)DATA.setsize[i][k]=SS_ORIG[i][k];}
+      else DATA.setsize=null;                    // synthetic: nothing left to draw
+      ssSyncBtn((ssAutoOn&&view.setsize)?false:undefined);
+      ssAutoOn=false;
     }
+    draw();
     renderSetsize();
   };
   host.appendChild(b);
@@ -5638,6 +5745,7 @@ function renderSetsize(){
 // whenever the selection actually spans one of the editors, and hands the clipboard a
 // flat one-line string built from the live field values instead, in MOHAA .tik spacing:
 //   * setsize (while its editor is open) -> 'setsize ( x y z ) ( x y z )'
+//   * the placement angles (ditto)       -> 'angles ( pitch yaw roll )'
 //   * each attach-to-bone row touched    -> 'scale s offset ( x y z ) angles ( x y z )'
 // A selection inside a single field reads as collapsed to the Selection API, and copies
 // anywhere else on the page never intersect these elements, so both are left untouched.
@@ -5654,6 +5762,14 @@ document.addEventListener('copy',ev=>{
     const mn=DATA.setsize[0],mx=DATA.setsize[1];
     ev.clipboardData.setData('text/plain','setsize ( '+mn.join(' ')+' ) ( '+mx.join(' ')+' )');
     ev.preventDefault();return;}
+  // placement-angle editor (only while its pencil is open, i.e. the readout holds 3 inputs)
+  const agv=document.getElementById('angslv');
+  if(agv&&inRange(agv)){
+    const ai=agv.getElementsByTagName('input');
+    if(ai.length===3){
+      ev.clipboardData.setData('text/plain',
+        'angles ( '+ai[0].value+' '+ai[1].value+' '+ai[2].value+' )');
+      ev.preventDefault();return;}}
   // attach-to-bone rows: one flat line per attachment the selection touches. The 7 text
   // inputs in a box are, in DOM order, scale then offset(x,y,z) then angles(pitch,yaw,roll).
   const al=document.getElementById('attList');
@@ -5855,6 +5971,11 @@ function attGeomFail(key,msg){
 // panel. Both land next. Until then ATT stays empty, nothing calls attRequest(), and the
 // page renders exactly as it does today - the bridge and cache below are live and
 // testable on their own.
+// Shader render hints an attached surface carries over from its sidecar. Same names
+// build_payload writes on a HOST surface, so mkSurfTex and every draw path treat the two
+// identically - an attachment is just more surfaces once it is in LSR/LTEX.
+const ATT_SR_KEYS=['additive','autosprite','autosprite2','lightglow','twosided',
+                   'clamp','texrotate','fps','frames','atest','distfade','pulse'];
 function attRebuild(){
   // Rebuild the LIVE arrays: base geometry first, then every ready attachment appended as
   // extra surfaces with their indices shifted past the host's vertices. Everything
@@ -5874,13 +5995,22 @@ function attRebuild(){
         for(let t=s.start;t<s.end;t++){const tr=g.t[t];T.push([tr[0]+vbase,tr[1]+vbase,tr[2]+vbase]);}
         const rec={name:s.name,start:st,end:T.length};
         if(s.tex)rec.tex=s.tex;
+        // rev 63: forward the shader hints the sidecar now carries. This rebuild is the ONLY
+        // path an attachment's surface takes into LSR/LTEX, so anything not copied here is
+        // invisible to the renderer no matter what the sidecar holds - which is the second
+        // half of why an attached muzzle flash drew as a flat opaque quad.
+        for(const k of ATT_SR_KEYS)if(s[k])rec[k]=s[k];
         SR.push(rec);TX.push(mkSurfTex(rec));
       }
       for(const uv of (g.uv||[]))UV.push(uv[0],uv[1]);
       vbase+=g.v.length;
     }
     LT=T;LUV=UV;LSR=SR;LTEX=TX;ATT_VN=vbase-DATA.verts.length;
+    // an attachment may have brought the page its first effect surface
+    try{if(liveEffectSurf())startEffLoop();}catch(e){}
   }
+  // ...and its first TEXTURE, on a host that resolved none of its own
+  try{texSyncBtn();}catch(e){}
   applyFrame();                                  // re-skin so `model` gets the new tail
   if(typeof GLR!=='undefined'&&GLR&&GLR.rebuildSurfaces)GLR.rebuildSurfaces();
   try{attPanelRender();}catch(e){}
@@ -5939,6 +6069,29 @@ function attMat3Mul(A,B){
     o[i*3+j]=A[i*3]*B[j]+A[i*3+1]*B[3+j]+A[i*3+2]*B[6+j];
   return o;}
 
+// ---- OFFSET UNITS ---------------------------------------------------------------------
+// The offset boxes hold the number a .tik / script `attachmodel ... offset ( x y z )` line
+// carries, which is in engine WORLD units. The viewer, though, renders the host .skd
+// UNSCALED, so its world is 1/load_scale LARGER than the game's - the same mismatch
+// drawSetsizeBox already corrects, and for the same reason (openmohaa
+// tr_staticmodels.cpp:450-451 multiplies verts by the tik's setup `scale` at load). Dividing
+// the offset by that factor is what makes a placement dialled in here paste straight into the
+// game and land in the same spot; before this the boxes read ~1/load_scale too large and
+// every number the viewer produced had to be converted by hand.
+//
+// CALIBRATED against two turrets, each placed by eye in the viewer and then in-game:
+//   15cmcannon (tik `scale 0.52`)  viewer ( -4  233 -498 ) -> game ( -2   120  -257 )
+//   20mmflak   (tik `scale 0.35`)  viewer ( 2.1 -512 185 ) -> game ( 0.7 -182.5 66.2 )
+// Every axis of both lands within ~2 units of viewer*load_scale, and the two models' residuals
+// fall on OPPOSITE sides of that prediction (cannon under, flak over) - eyeball error in the
+// in-game placement rather than a second factor. The angles were IDENTICAL in both columns for
+// both models, so the rotation chain was already right and only the offset was ever wrong.
+//
+// The attachment MESH deliberately gets no such correction: in-game the engine draws an
+// attached model at the PARENT entity's scale, i.e. scale*load_scale*verts in game units,
+// which is scale*verts in the viewer's own units - already what attAppend does below, and why
+// the same `scale` value was correct in both places throughout the calibration.
+const ATT_OFS=(DATA.setsizeScale&&DATA.setsizeScale>1e-6)?DATA.setsizeScale:1;
 function attAppend(base){
   if(!ATT_VN||!curWorld)return base;
   const out=new Float32Array(base.length+ATT_VN*3);
@@ -5949,7 +6102,9 @@ function attAppend(base){
     const R=curWorld.R[a.tag],T2=curWorld.T[a.tag];
     if(!R||!T2)continue;
     // user angles ON TOP of the model's own authoring correction
-    const s=(+a.scale)||1,o=a.off||[0,0,0],
+    // world units in the boxes -> the viewer's unscaled model units for the maths
+    const ao=a.off||[0,0,0],o=[ao[0]/ATT_OFS,ao[1]/ATT_OFS,ao[2]/ATT_OFS];
+    const s=(+a.scale)||1,
           M=attMat3Mul(attAngMat(a.ang),attAngMat(a.bang||[0,0,0]));
     let w=a.vbase*3;
     for(let i=0;i<g.v.length;i++){
@@ -6541,7 +6696,10 @@ function attPanelRender(){
     const g2=grp();
     g2.appendChild(document.createTextNode('offset ('));
     for(let k=0;k<3;k++)
-      g2.appendChild(num(a.off[k],30,'Offset '+'XYZ'[k]+' along the bone\u2019s own axes',
+      g2.appendChild(num(a.off[k],30,'Offset '+'XYZ'[k]+' along the bone\u2019s own axes, in '
+        +'engine world units \u2013 the same number a .tik / script attachmodel line carries'
+        +(ATT_OFS!==1?' (this model loads at scale '+ATT_OFS+', which the viewer divides out '
+                     +'so what you type here is what you type in-game)':''),
         Object.assign((v)=>{a.off[k]=v;},{get:()=>a.off[k]})));
     g2.appendChild(document.createTextNode(')'));
     const g3=grp();
@@ -6981,7 +7139,9 @@ const _canPlay=()=>(curAnim>=0||EM.length>0);
 // Click rules: paused -> resume (and (re)start a stopped anim); running -> freeze
 // everything in place; stopped anim -> (re)start it (old Play semantics, incl. one-shot
 // re-fire with a particle/init-sfx reset).
-const _effRunning=()=>(EM.length>0||hasEffectSurf);
+// hasEffectSurf alone described the HOST only; an attached sprite is an effect the button
+// should report on too, so ask the live surface list (rev 63).
+const _effRunning=()=>(EM.length>0||hasEffectSurf||liveEffectSurf());
 function updatePlayBtn(){const run=!paused&&(playing||(curAnim<0&&_effRunning()));
  playBtn.textContent=run?'\u23f8 Pause':'\u25b6 Play';playBtn.classList.toggle('on',run);}
 function startPlayback(){playing=true;last=performance.now();
@@ -7062,7 +7222,7 @@ function effLoop(now){
   }
   if(!interacting)requestDraw();  // still redraw so the frozen scene follows camera orbit
   requestAnimationFrame(effLoop);}
-if(EM.length||hasEffectSurf||hasTexRot||hasFlap)requestAnimationFrame(effLoop);
+if(EM.length||hasEffectSurf||hasTexRot||hasFlap)startEffLoop();
 // MODEL section: Light/Dark toggle. Toggles a class on <html>; the canvas grid/label colours
 // are refreshed from the CSS vars and the scene is redrawn. Button label shows the mode it
 // switches TO.
@@ -7074,11 +7234,33 @@ if(EM.length||hasEffectSurf||hasTexRot||hasFlap)requestAnimationFrame(effLoop);
 // of the three components the slider edits; each component keeps its own value, so cycling the
 // button swaps the slider to that axis's setting (0 until it has been moved) and never disturbs
 // the other two.
+// rev 62: the four detents are no longer the only reachable values. The pencil to the RIGHT of
+// the ( pitch yaw roll ) readout swaps it for three number fields that accept ANY angle - the
+// muzzle-flash / turret placement work needs 45s and 22.5s, not just quarter turns - and
+// setAngles no longer quantises what it is handed. The <input type=range> is therefore
+// step="any" with the thumb positioned at deg/90, so an off-detent angle parks it BETWEEN two
+// tick marks instead of lying about where the model is pointing. The TRACK therefore spans a
+// full turn (0..4 quarter turns) even though only four detents are marked: with a 0..3 range
+// everything in the fourth quadrant (a typed -7 normalises to 353) had nowhere to sit and
+// clamped to the 270 mark. The right edge is 360, which is the same orientation as 0, so it is
+// left unmarked and the control WRAPS there instead of resting on it - stepping right off 270
+// arrives at 0, stepping left off 0 arrives at 270, round and round for as long as you hold the
+// key. That wrap is why the arrow keys are handled in a keydown of our own: a native range
+// clamps at its ends and simply stops firing input, which read as the control being stuck.
+// Dragging and the arrow keys still land on whole detents, which is what the tick marks
+// promise; the fields are the only way to leave them. Unlike the setsize pencil - which previews a value the FILE owns and
+// so reverts on close - a typed angle survives closing the editor: this dial is a view setting
+// that is already persisted, and throwing the number away would defeat the point of typing it.
 {const _axBtn=document.getElementById('angAxis'),
        _agEl=document.getElementById('angsl'),
-       _agV=document.getElementById('angslv');
+       _agV=document.getElementById('angslv'),
+       _agB=document.getElementById('angEdit');
  const _AXN=['Pitch','Yaw','Roll'];
  let _axi=0;                                     // always opens on Pitch, per model
+ let _agEdit=false;                              // pencil: readout text vs. three number fields
+ // 3 decimals is what the launcher's config round-trip preserves; trailing zeros are dropped
+ // so a plain quarter turn still reads '90' rather than '90.000'.
+ const _agFmt=v=>String(Math.round((+v||0)*1000)/1000);
  function _agSave(){
    // Persisted twice on purpose: localStorage covers the page opened straight in a browser,
    // and the WebView2 bridge covers the embedded pane - the launcher writes the triple into
@@ -7087,15 +7269,55 @@ if(EM.length||hasEffectSurf||hasTexRot||hasFlap)requestAnimationFrame(effLoop);
    try{if(window.chrome&&chrome.webview)chrome.webview.postMessage('mohaa-ang '+EANG.join(','));}catch(_e){}}
  function _agSync(){
    if(_axBtn)_axBtn.textContent=_AXN[_axi];
-   const d=EANG[_axi]|0;
-   // the slider tracks ONLY the axis the button currently names...
-   if(_agEl)_agEl.value=String((Math.round(d/90)%4+4)%4);
+   // the slider tracks ONLY the axis the button currently names. deg/90 rather than a rounded
+   // detent index: with step="any" that is what puts the thumb at the true fraction between
+   // two ticks for an angle the pencil typed in.
+   // 0..4 quarter turns; EANG is already folded into [0,360) so this never reaches 4 (the
+   // wrap seam) - it only ever approaches it from the left, which is what the last quarter of
+   // the track is for.
+   if(_agEl)_agEl.value=String((((EANG[_axi]%360)+360)%360)/90);
+   if(_agB)_agB.className=_agEdit?'on':'';
+   if(!_agV)return;
    // ...while the readout is the whole orientation, in the engine's own (pitch yaw roll)
    // order - the same triple a .map entity would carry in its `angles` key. Showing all
    // three keeps the two axes the slider is not driving from silently disappearing.
-   if(_agV)_agV.textContent='( '+EANG[0]+' '+EANG[1]+' '+EANG[2]+' )';}
+   if(!_agEdit){
+     _agV.style.minWidth='100px';
+     _agV.textContent='( '+_agFmt(EANG[0])+' '+_agFmt(EANG[1])+' '+_agFmt(EANG[2])+' )';
+     return;}
+   // Editing: three number fields, sized and wired like the setsize / attach-to-bone editors
+   // (commit on change, i.e. Enter or blur). Rebuilt only when the readout is not ALREADY the
+   // editor, so a slider drag - which lands back in here - refreshes the values in place
+   // instead of destroying the field the caret is sitting in.
+   const ins=_agV.getElementsByTagName('input');
+   if(ins.length===3){
+     // The FOCUSED field is refreshed too. Every path that reaches here is a deliberate change
+     // the readout has to show - slider, axis button, a committed field, the launcher hook -
+     // and commit-on-change means a field never fires mid-keystroke, so there is no half-typed
+     // value being protected; skipping the focused one just left it lying (drag the slider with
+     // the caret in Pitch and the field would still read the old angle). Assigning only on a
+     // real difference keeps the caret from jumping when that field is already correct.
+     for(let k=0;k<3;k++){const t=_agFmt(EANG[k]);if(ins[k].value!==t)ins[k].value=t;}
+     return;}
+   _agV.style.minWidth='0';
+   _agV.textContent='';
+   _agV.appendChild(document.createTextNode('('));
+   for(let k=0;k<3;k++){
+     const e=document.createElement('input');e.type='text';e.value=_agFmt(EANG[k]);
+     // 40px, not the 30px the setsize / offset fields use: those hold integers, these hold
+     // things like 22.5 and 337.5, and a clipped '337.' is worse than a slightly tighter slider -
+     // which, while you have exact numbers in front of you, is the control you need least.
+     e.style.cssText='width:40px';
+     e.title=_AXN[k]+' in degrees - any value, not just the four quarter turns.';
+     e.onchange=()=>{const v=parseFloat(e.value),nx=EANG.slice();
+       nx[k]=isFinite(v)?v:0;setAngles(nx[0],nx[1],nx[2],true);};
+     _agV.appendChild(e);}
+   _agV.appendChild(document.createTextNode(')'));}
  function setAngles(p,y,r,save){
-   const q=v=>{v=Math.round((isNaN(+v)?0:+v)/90)*90%360;return v<0?v+360:v;};
+   // Normalised into [0,360) but NOT quantised: the pencil is allowed to hand this any angle,
+   // and the slider path has already snapped to a detent before it gets here. Rounded to 3
+   // decimals so float drift never turns 45 into 44.99999999999999 in the readout.
+   const q=v=>{v=(isNaN(+v)?0:+v)%360;if(v<0)v+=360;return Math.round(v*1000)/1000;};
    EANG=[q(p),q(y),q(r)];
    EROT=(EANG[0]||EANG[1]||EANG[2])?anglesToRot(EANG[0],EANG[1],EANG[2]):null;
    _agSync();
@@ -7106,14 +7328,43 @@ if(EM.length||hasEffectSurf||hasTexRot||hasFlap)requestAnimationFrame(effLoop);
    if(save!==false)_agSave();}
  window.setViewerAngles=setAngles;               // launcher / console hook
  if(_axBtn)_axBtn.onclick=()=>{_axi=(_axi+1)%3;_agSync();};
- if(_agEl)_agEl.oninput=()=>{const nx=EANG.slice();
-   nx[_axi]=(parseInt(_agEl.value,10)||0)*90;
-   setAngles(nx[0],nx[1],nx[2],true);};
+ if(_agB)_agB.onclick=()=>{_agEdit=!_agEdit;_agSync();
+   if(_agEdit){const i0=_agV&&_agV.getElementsByTagName('input')[0];if(i0){i0.focus();i0.select();}}};
+ // Land the current axis on detent t, counted in quarter turns and taken round the circle:
+ // 4 is a full turn and comes back to 0, -1 goes to 270. Everything that moves the slider goes
+ // through here, so the wrap is the same whether it came from a drag or a key.
+ function _agDetent(t){
+   t=((t%4)+4)%4;
+   const nx=EANG.slice();nx[_axi]=t*90;
+   setAngles(nx[0],nx[1],nx[2],true);}
+ if(_agEl)_agEl.oninput=()=>{
+   // Dragging / clicking the track: step="any" makes the raw value continuous, so snap it to
+   // the nearest detent. Past 3.5 the nearest one IS the seam, and 4 folds to 0 - dragging
+   // into the last eighth of the track therefore sends the thumb home, which is exactly what
+   // going the whole way round does.
+   const raw=parseFloat(_agEl.value);
+   if(isFinite(raw))_agDetent(Math.round(raw));};
+ // Arrow keys, handled instead of the native stepping. A range input clamps at min/max, so at
+ // either end the value stopped changing and no input event fired at all - the dial read as
+ // jammed. preventDefault takes the key away from the control and steps it ourselves, which
+ // also means the step is a whole detent rather than the (max-min)/100 = 0.04 a step="any"
+ // range would move. From an off-detent angle (a typed 353) it walks to the next detent in the
+ // direction of travel rather than a fixed distance. Home/End/PageUp/PageDown are left to the
+ // native control, whose raw value lands back in oninput above and snaps like a drag.
+ if(_agEl)_agEl.addEventListener('keydown',e=>{
+   let d=0;
+   if(e.key==='ArrowRight'||e.key==='ArrowUp')d=1;
+   else if(e.key==='ArrowLeft'||e.key==='ArrowDown')d=-1;
+   else return;
+   e.preventDefault();
+   const cur=(((EANG[_axi]%360)+360)%360)/90;     // fractional when the pencil typed the angle
+   _agDetent(d>0?Math.floor(cur+1e-9)+1:Math.ceil(cur-1e-9)-1);});
  // restore order: the launcher config (#ang= boot hash) wins, else localStorage
  let _a0=null;
  if(window.__HOSTANG__&&window.__HOSTANG__.length===3)_a0=window.__HOSTANG__;
  else{try{const _s=localStorage.getItem('mohaaViewerAngles');
-          if(_s){const _p=_s.split(',').map(Number);if(_p.length===3)_a0=_p;}}catch(_e){}}
+          if(_s){const _p=_s.split(',').map(Number);
+                 if(_p.length===3&&_p.every(v=>isFinite(v)))_a0=_p;}}catch(_e){}}
  if(_a0&&_a0.some(v=>v))setAngles(_a0[0],_a0[1],_a0[2],false); else _agSync();
 }
 const themeBtn=document.getElementById('bTheme');
@@ -7872,13 +8123,32 @@ def main(argv):
                 # ({"tex":url,"additive":..,"frames":[...]}) whenever the shader carries
                 # render hints - static_yellowtank has an rgbGen stage, so the airtank's
                 # texture arrived as an object, was stored raw, and the page had nothing
-                # usable to draw with. An attachment is rigid and unanimated, so the base
-                # diffuse (or the first frame) is all it needs.
+                # usable to draw with.
+                #
+                # rev 63: those hints are now CARRIED rather than thrown away. "An attachment
+                # is rigid and unanimated, so the base diffuse is all it needs" held for solid
+                # props, but a sprite is not its diffuse: muzmodel is `map flashnode1.tga` +
+                # `blendFunc GL_SRC_ALPHA GL_ONE` + `cull none`, and drawn as a plain opaque
+                # one-sided quad that is a black card with a smear on it, visible from one
+                # side only. The viewer's mkSurfTex already understands every one of these
+                # keys - the surface just has to reach it still wearing them.
                 if isinstance(_du,dict):
+                    for _k in ("additive","autosprite","autosprite2","lightglow","twosided",
+                               "clamp","texrotate","fps","frames","atest","distfade","pulse"):
+                        _v=_du.get(_k)
+                        if _v: _sr[_k]=_v
+                    # `cull none` / `twosided` reaches the manifest as the raw shader keyword
+                    # on some entries and as a bool on others; normalise both to the flag the
+                    # page reads. A one-sided muzzle flash disappears from half the angles.
+                    if str(_du.get("cull","")).lower() in ("none","disable","twosided","two-sided"):
+                        _sr["twosided"]=True
                     _du=_du.get("tex") or ((_du.get("frames") or [None])[0])
                 if _du and isinstance(_du,str): _sr["tex"]=_du
             _nt=sum(1 for _x in _asr if _x.get("tex"))
-            print(f"- attach textures: {_nt}/{len(_asr)} surfaces")
+            _neff=sum(1 for _x in _asr if _x.get("additive") or _x.get("autosprite")
+                      or _x.get("autosprite2") or _x.get("frames") or _x.get("pulse"))
+            print(f"- attach textures: {_nt}/{len(_asr)} surfaces"
+                  +(f" ({_neff} effect/sprite)" if _neff else ""))
 
         _rec={"n":os.path.splitext(os.path.basename(_atbuild))[0],
               "src":_atbuild.replace("\\","/"),
