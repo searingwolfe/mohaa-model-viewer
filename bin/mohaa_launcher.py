@@ -265,7 +265,9 @@ VIEWER=os.path.join(HERE,"mohaa_view.py")
 # rev 64: attachment offsets changed UNITS - the boxes are now engine world units (what a
 # .tik/script attachmodel line carries) rather than the viewer's unscaled model units, so a
 # pre-64 page shows the same boxes meaning something different.
-VIEWER_REV_REQUIRED=64
+# rev 65: attachment sidecars again - a multi-part model (player/human) cached before this
+# holds only its body mesh, and a rigged one holds an unposed, folded skeleton.
+VIEWER_REV_REQUIRED=65
 # Sentinel subdir marking an individual-file (Browse / drag-drop / Recent / path-bar)
 # build. It rides through the normal subdir plumbing but redirects the output HTML to a
 # "standalone" folder sibling to "models", instead of into the pak-mirroring models tree.
@@ -653,6 +655,7 @@ class App(tk.Tk):
         self.geometry("1380x820"); self.minsize(1000,600)
         self._cfg=self._load_config(); self._pyexe=find_python()
         self._attach_busy=set()      # attachment keys currently building (see _build_attach)
+        self._attach_parts=[]        # extra skelmodel parts (head/hands/hat) for the build
         self._theme=self._cfg.get("theme","dark")
         if self._theme not in THEMES: self._theme="dark"
         apply_theme(self,self._theme)
@@ -4557,7 +4560,7 @@ class App(tk.Tk):
             tdir=os.path.join(self._tmp,"_attach")
             os.makedirs(tdir,exist_ok=True)
             self._attach_idle=None
-            self._attach_skelvfs=None; self._attach_tikmap=None
+            self._attach_skelvfs=None; self._attach_tikmap=None; self._attach_parts=[]
             skd_path=self._extract_attach_files(vpath,tdir)
             if not skd_path:
                 self._log_q.put(("err",f"{vpath}: no .skd geometry found for this model"))
@@ -4567,7 +4570,13 @@ class App(tk.Tk):
             if MTX is not None and self._tex_ready and self._vfs is not None:
                 try:
                     import mohaa_view as MV
-                    surfs=[s["name"] for s in MV.parse_skd(skd_path)["surfaces"]]
+                    # every assembled part's surfaces, de-duplicated in order - the head and
+                    # hands carry their own (`head`, `hand`) and would otherwise go untextured
+                    surfs=[]
+                    for _sp in [skd_path]+self._attach_parts:
+                        try: surfs+=[s["name"] for s in MV.parse_skd(_sp)["surfaces"]]
+                        except Exception: pass
+                    _seen=set(); surfs=[x for x in surfs if not (x in _seen or _seen.add(x))]
                     manifest=os.path.join(tdir,"_tex_"+key+".json")
                     # Resolve against the .skd's VFS PATH, not the .tik's, and let the
                     # attachment's own setup{} win - the same local_TI pattern the main
@@ -4599,6 +4608,7 @@ class App(tk.Tk):
                  "--attachkey="+key,"--attachout="+self._anim_outdir,"--no-open"]
             if manifest: cmd.append("--textures="+manifest)
             if getattr(self,"_attach_idle",None): cmd.append("--attachidle="+self._attach_idle)
+            for _pt in getattr(self,"_attach_parts",[]): cmd.append("--attachpart="+_pt)
             p=subprocess.run(cmd,capture_output=True,text=True,timeout=180,**NOWIN)
             for line in (p.stdout or "").splitlines():
                 if line.strip(): self._log_q.put(("stdout",line))
@@ -4632,6 +4642,17 @@ class App(tk.Tk):
         to the workspace, so a hostile pak cannot use this route either."""
         low=(vpath or "").lower()
         want=None
+        parts=[]; txt=""
+        # One part -> its VFS path. The `path` line may already be baked into the
+        # skelmodel token, or be stale, so fall back to a basename sweep as the .skd
+        # branch below always did.
+        def _part_vfs(_base,_skel):
+            if not _skel: return None
+            w=("/".join(x for x in [(_base or "").strip("/"),_skel.strip("/")] if x)).lower()
+            if self._vfs.exists(w): return w
+            cands=[_skel.lower()]+[n for n in self._vfs.names()
+                                   if n.endswith("/"+os.path.basename(_skel).lower())]
+            return next((c for c in cands if self._vfs.exists(c)),None)
         if low.endswith(".tik"):
             raw=self._vfs.read(vpath)
             if raw is None: return None
@@ -4643,12 +4664,7 @@ class App(tk.Tk):
             except Exception:
                 return None
             if not skel: return None
-            want=("/".join(x for x in [(base or "").strip("/"),skel.strip("/")] if x)).lower()
-            if not self._vfs.exists(want):
-                # `path` may already be embedded in the skelmodel line, or be wrong
-                cands=[skel.lower()]+[n for n in self._vfs.names()
-                                      if n.endswith("/"+os.path.basename(skel).lower())]
-                want=next((c for c in cands if self._vfs.exists(c)),None)
+            want=_part_vfs(base,skel)
             # rev 63: this .tik's OWN `surface <n> shader <s>` map, for the texture pass.
             # The global tik index is keyed by .skd path (build_tik_index), so handing it a
             # .tik path missed every time and fell through to the sibling-folder guess -
@@ -4663,15 +4679,58 @@ class App(tk.Tk):
         if data is None: return None
         target=os.path.join(tdir,os.path.basename(want))
         with open(target,"wb") as f: f.write(data)
+        # EVERY OTHER skelmodel the .tik lists. A player/human model is not one mesh: the
+        # officer is german_officer.skd + head2.skd + hand.skd + officer_hat.skd, four
+        # `path`/`skelmodel` pairs whose bones union into one skeleton (MV.merge_skds, the
+        # same assembly the main model build does). Taking parts[0] alone attached a
+        # headless, handless body.
+        for (_pb,_ps) in parts[1:]:
+            _pv=_part_vfs(_pb,_ps)
+            if not _pv: 
+                self._log_q.put(("dim",f"(attachment part not found: {_ps})")); continue
+            _pd=self._vfs.read(_pv)
+            if not _pd: continue
+            _pt=os.path.join(tdir,os.path.basename(_pv))
+            with open(_pt,"wb") as f: f.write(_pd)
+            self._attach_parts.append(_pt)
+        if self._attach_parts:
+            self._log_q.put(("dim","- attach parts: "+", ".join(
+                [os.path.basename(target)]+[os.path.basename(p) for p in self._attach_parts])))
         # Idle .skc: the model's authored rest pose. Named by the tik's own
         # `animations { idle X.skc }` where there is one, else the .skd's own stem.
         self._attach_idle=None
         cands=[]
         if low.endswith(".tik"):
+            # THE POSE. A TIKI model's rest pose is frame 0 of an animation, not an identity
+            # skeleton, so without one every bone gets an identity rotation and the mesh folds
+            # in on itself - which is exactly what an attached player model did.
+            #
+            # The old lookup was a regex for `idle <file>.skc` plus a guess at the folder. That
+            # cannot work for a player model: the alias lives in an $include'd file
+            # (models/player/base/anims_shared.txt) under a `$path models/human/animation`
+            # scope, so the token on the line is the RELATIVE `scripted/flak88/offic_idle.skc`
+            # and the real file is models/human/animation/scripted/flak88/offic_idle.skc.
+            # build_anim_catalog is the resolver that already applies those $path scopes across
+            # the whole $include chain (it is what the main model build uses), so ask it.
+            try:
+                _cat=MTX.build_anim_catalog(txt,self._vfs,vpath)
+                _an=_cat.get("anims") or []
+                _pick=(next((a for a in _an if str(a.get("n","")).lower()=="idle"),None)
+                       or next((a for a in _an if str(a.get("n","")).lower().startswith("idle")),None))
+                if _pick and _pick.get("s"):
+                    _sd=self._vfs_read_skc(_pick["s"])
+                    if _sd:
+                        _ip=os.path.join(tdir,os.path.basename(_pick["s"].replace("\\","/")))
+                        with open(_ip,"wb") as f: f.write(_sd)
+                        self._attach_idle=_ip
+                        self._log_q.put(("dim",f"- attach pose: {_pick['n']} -> {_pick['s']}"))
+            except Exception as _e:
+                self._log_q.put(("dim",f"(attachment pose lookup failed: {_e})"))
             try:
                 m=re.search(r"^\s*idle\s+(\S+\.skc)", txt, re.M|re.I)
                 if m: cands.append(m.group(1).strip('"'))
             except Exception: pass
+        if self._attach_idle: return target
         cands.append(os.path.splitext(os.path.basename(want))[0]+".skc")
         d0="/".join(want.split("/")[:-1])
         for c in cands:

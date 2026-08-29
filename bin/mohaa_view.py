@@ -2222,7 +2222,11 @@ ANIM_PRELOAD_MAX=150
 # rev 64: the attach-to-bone OFFSET is now in engine world units - the number a .tik or
 #         script `attachmodel` line actually carries - instead of the viewer's own unscaled
 #         model units. Calibrated in-game against 15cmcannon and 20mmflak; see ATT_OFS.
-VIEWER_REV=64
+# rev 65: an attached model is ASSEMBLED and POSED like the main build. --attachpart lets
+#         the launcher hand over the head/hands/hat skelmodels a player .tik lists beside its
+#         body, merged onto one skeleton; and the bind pose is reported with its bone coverage
+#         so a skeleton that ends up unposed (which folds the mesh in on itself) says so.
+VIEWER_REV=65
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!--mohaa-viewer-rev:__REV__-->
@@ -8058,6 +8062,20 @@ def main(argv):
             _ad=parse_skd(_atbuild)
         except Exception as _e:
             print(f"! attach {_atkey}: {_e}"); return 1
+        # rev 65: `--attachpart=<file.skd>` (repeatable) - the OTHER skelmodels the .tik lists.
+        # A player/human model is four of them (body + head + hands + hat), unioned onto one
+        # skeleton by bone NAME, which is what merge_skds does for the main model build. Before
+        # this the attach path took the body alone and attached a headless, handless torso.
+        _aparts=[a2.split("=",1)[1] for a2 in argv[1:] if a2.startswith("--attachpart=")]
+        if _aparts:
+            _amerge=[_ad]
+            for _pp in _aparts:
+                try: _amerge.append(parse_skd(_pp))
+                except Exception as _e: print(f"  (attach part {os.path.basename(_pp)} unusable: {_e})")
+            if len(_amerge)>1:
+                _ad=merge_skds(_amerge)
+                print(f"- attach assembled {len(_amerge)} parts -> {_ad['numBone']} bones, "
+                      f"{len(_ad['surfaces'])} surfaces")
         _abones=_ad["bones"]
         # A TIKI model's REST pose is frame 0 of its idle animation, not an identity
         # skeleton - the .skd stores no rotation for POSROT bones, so the authored
@@ -8080,6 +8098,24 @@ def main(argv):
                           f"({_ai['numChan']} channels)")
             except Exception as _e:
                 print(f"  (attach idle pose unusable: {_e})")
+        # COVERAGE. Every bone the pose does not name keeps an identity rotation below, and on a
+        # 40-bone character that reads as the mesh folding in on itself rather than as a missing
+        # detail - so say how much of the skeleton the pose actually reached. Silence here is
+        # what made an unposed player attachment look like a geometry bug.
+        _askel={_b["name"] for _b in _abones}
+        _acov=len({_n.rsplit(" ",1)[0] for _n in (_abase or {})} & _askel)
+        if not _abase or not _acov:
+            print(f"! attach {_atkey}: NO bind pose found - all {len(_abones)} bones fall back to "
+                  f"an identity rotation, which collapses a rigged mesh. The .tik's `idle` "
+                  f"animation is what supplies the rest pose.")
+        elif len(_askel)>=4 and _acov*2<len(_askel):
+            # only meaningful on a skeleton big enough to fold: a 1- or 2-bone prop covered
+            # 1/1 is fully posed, and the main build's own coverage threshold (max(2, n//2))
+            # would have called that a miss.
+            print(f"! attach {_atkey}: bind pose covers only {_acov}/{len(_askel)} bones - the "
+                  f"rest keep an identity rotation and may fold.")
+        else:
+            print(f"- attach bind pose covers {_acov}/{len(_askel)} bones")
         for _b in _abones:
             _abase.setdefault(_b["name"]+" rot",[0.0,0.0,0.0,1.0])
         _awR,_awT=compute_world(_abones,_abase)
