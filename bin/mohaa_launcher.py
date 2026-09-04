@@ -706,9 +706,19 @@ class App(tk.Tk):
         self._anim_busy=set()       # ids currently building, so a double-click is one build
         self._webview=None; self._embed_url=None
         # external programs: text editor (platform default) + legacy model viewer (unset)
-        if not self._cfg.get("text_editor"):
-            self._cfg["text_editor"]=("notepad.exe" if sys.platform.startswith("win")
-                                      else ("open" if sys.platform=="darwin" else "xdg-open"))
+        # Seed an ABSOLUTE path, never a bare command name: _launch_with only ever runs an
+        # existing file at an absolute path (deliberately - resolving a bare name through
+        # PATH, and on Windows the current directory, is the thing being closed off), so a
+        # config holding "notepad.exe" made a fresh install fail with "The saved text editor
+        # program is not a valid file (notepad.exe)" the first time a .tik was opened.
+        # _default_program_path probes the system folders directly. Heal a config that a
+        # previous build left holding a bare name too; the bare name is kept only when
+        # nothing resolves, so the old Options message is still reachable as a last resort.
+        _te=(self._cfg.get("text_editor") or "").strip()
+        if (not _te) or (os.path.basename(_te)==_te and not os.path.isfile(_te)):
+            self._cfg["text_editor"]=(self._default_program_path("text_editor") or _te or
+                                      ("notepad.exe" if sys.platform.startswith("win")
+                                       else ("open" if sys.platform=="darwin" else "xdg-open")))
         self._menus=[]; self._menubtns=[]      # themed menubar parts, recoloured on toggle
         self._treetip=None; self._treetip_row=None       # armed-hover tree tooltip
         self._treetip_after=None; self._treetip_armed=None
@@ -1728,6 +1738,52 @@ class App(tk.Tk):
             self._cfg[key]=p; self._save_config()
             self._log_line(f"{menu_label}: {p}","dim")
 
+    def _default_program_path(self, key):
+        """Absolute path to the platform's own built-in program for `key`, or "".
+
+        Only ever returns something under a SYSTEM location that actually exists - it is
+        never a PATH lookup on Windows, where CreateProcess would search the current
+        directory first and a stray notepad.exe next to the release could be picked up.
+        That is what makes the result safe to launch without the user having chosen it in
+        Options --> Change Text Editor...
+
+        Windows  notepad.exe has moved across releases: the %SystemRoot% copy covers
+                 9x/NT..10 and most Win11 builds, System32 covers releases where the root
+                 copy was removed, SysWOW64 covers 64-bit, and recent Win11 builds that
+                 dropped the legacy copies leave only the WindowsApps execution alias -
+                 an AppExecLink reparse point that os.path.isfile can refuse to stat, so
+                 it is accepted on lexists.
+        macOS    /usr/bin/open (TextEdit.app is a bundle DIRECTORY, so it cannot be handed
+                 to Popen the way _launch_with does; `open <file>` is the equivalent).
+        Linux    xdg-open, then the usual graphical editors, then a terminal one.
+        Only text_editor has a built-in default; legacy_viewer stays user-chosen."""
+        if key!="text_editor": return ""
+        if sys.platform.startswith("win"):
+            win=os.environ.get("SystemRoot") or os.environ.get("WINDIR") or "C:\\Windows"
+            lad=(os.environ.get("LOCALAPPDATA") or "").strip()
+            alias=os.path.join(lad,"Microsoft","WindowsApps","notepad.exe") if lad else ""
+            for c in (os.path.join(win,"notepad.exe"),
+                      os.path.join(win,"System32","notepad.exe"),
+                      os.path.join(win,"SysWOW64","notepad.exe")):
+                try:
+                    if os.path.isfile(c): return c
+                except OSError: pass
+            if alias:
+                try:
+                    if os.path.exists(alias) or os.path.lexists(alias): return alias
+                except OSError: pass
+            return ""
+        if sys.platform=="darwin":
+            return "/usr/bin/open" if os.path.isfile("/usr/bin/open") else ""
+        for name in ("xdg-open","gedit","kate","mousepad","gnome-text-editor","nano","vi"):
+            w=shutil.which(name)
+            if not w: continue
+            try:
+                w=os.path.realpath(w)
+                if os.path.isabs(w) and os.path.isfile(w): return w
+            except OSError: pass
+        return ""
+
     def _program_folder_default(self, key):
         """Fallback (folder, item-to-highlight) for "Open ... folder" when the program
         has never been configured, or is a bare command name ("notepad.exe", "open",
@@ -1871,9 +1927,21 @@ class App(tk.Tk):
         # bare name through PATH (and, on Windows, the current directory) is the exact
         # behaviour being closed off.
         if not (os.path.isabs(prog) and os.path.isfile(prog)):
-            self._log_q.put(("err",f"Error. The saved {label} program is not a valid file "
-                                   f"({prog[:120]}). Please go to Options --> Change {menu_label}..."))
-            return
+            # SELF-HEAL A BARE COMMAND NAME. A config written by an older build - or carried
+            # over between machines - can hold "notepad.exe" / "open" / "xdg-open", which are
+            # exactly the values this launcher used to seed itself. Sending the user to
+            # Options for a program they never picked is the wrong answer, so resolve those
+            # against the platform's own system folders (still never PATH/CWD on Windows) and
+            # write the absolute path back. A path the USER chose that has since moved or been
+            # renamed has a directory in it, fails this test, and still gets the error below.
+            fixed=self._default_program_path(key) if os.path.basename(prog)==prog else ""
+            if not fixed:
+                self._log_q.put(("err",f"Error. The saved {label} program is not a valid file "
+                                       f"({prog[:120]}). Please go to Options --> Change {menu_label}..."))
+                return
+            prog=fixed; self._cfg[key]=fixed
+            self._save_config()
+            self._log_q.put(("dim",f"{menu_label}: {fixed}"))
         try:
             subprocess.Popen([prog,filepath])
             self._log_q.put(("dim",f"opened with {os.path.basename(prog)}: {os.path.basename(filepath)}"))
@@ -3561,21 +3629,36 @@ class App(tk.Tk):
                 m2=re.search(r'surface\s+\S+\s+shader\s+(\S+)', sub_text, re.I)
                 if m2:
                     sh=m2.group(1).strip()
+                    # BLEND MODE of the sub-model's surface, resolved FIRST because it also
+                    # decides how the texture must be encoded (below). muzflash.tik is
+                    # `surface material1 shader muzmodel`, and muzmodel (effects.shader) is
+                    # `blendFunc GL_SRC_ALPHA GL_ONE` - the card is ADDED to the scene, so
+                    # flashnode1.tga's black surround contributes nothing in-game. The flag
+                    # makes the viewer's mesh path composite additively and skip the flat
+                    # shade (such a stage has no rgbGen, so it is CGEN_IDENTITY_LIGHTING,
+                    # tr_shader.c:1755-1765).
+                    _sp2=(self._PROPS or {}).get(sh.lower())
+                    _add=bool(_sp2 and _sp2.get("additive"))
+                    if _add: out["add"]=True
                     mp=self._SH.get(sh.lower()) if self._SH else None
                     t=self._vfs.find_texture(mp) if mp else self._vfs.find_texture(sh)
                     if t:
-                        d=MTX.texture_to_dataurl(self._vfs,t,max_dim=512,keep_alpha=True)
+                        # ADDITIVE SURFACES NEED A REAL ALPHA CHANNEL. flashnode1.tga is a
+                        # 24-bit TGA: in GL that is fine, because `blendFunc GL_SRC_ALPHA
+                        # GL_ONE` takes its alpha from `alphagen vertex` (the entity colour)
+                        # and adds rgb*a, so the black surround adds ZERO. Canvas 2-D
+                        # 'lighter' is dst+src over a TRANSPARENT canvas, so an opaque black
+                        # texel still adds alpha 1 and paints an opaque BLACK RECTANGLE
+                        # around the muzzle flash (mg42_gun / jeep_30cal `fire`) even though
+                        # its rgb contributes nothing. keep_alpha only preserves an alpha
+                        # channel that already exists, and this texture has none, so the
+                        # export fell through to RGB JPEG. emitter_clean is the same encoder
+                        # the additive SPRITE path already uses: lossless PNG, near-black
+                        # floored to fully transparent, brighter texels fully opaque - which
+                        # is exactly "adds nothing where the texture is black".
+                        d=MTX.texture_to_dataurl(self._vfs,t,max_dim=512,keep_alpha=True,
+                                                 emitter_clean=_add)
                         if d: out["tex"]=d
-                    # BLEND MODE of the sub-model's surface. muzflash.tik is `surface material1
-                    # shader muzmodel`, and muzmodel (effects.shader) is `blendFunc GL_SRC_ALPHA
-                    # GL_ONE` - the card is ADDED to the scene, so flashnode1.tga's black
-                    # surround contributes nothing in-game. Without this flag the viewer drew the
-                    # chunk source-over and that surround showed as an opaque BLACK RECTANGLE
-                    # around the muzzle flash on mg42_gun / jeep_30cal. Ship it so the mesh path
-                    # composites additively (and skips the flat shade - such a stage has no
-                    # rgbGen, so it is CGEN_IDENTITY_LIGHTING, tr_shader.c:1755-1765).
-                    _sp2=(self._PROPS or {}).get(sh.lower())
-                    if _sp2 and _sp2.get("additive"): out["add"]=True
             except Exception:
                 pass
             return out

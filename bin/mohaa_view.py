@@ -4281,8 +4281,18 @@ function stepParts(dt){
    // SHORTEST ARC old->new, so the sprite ROLLS its way to each new random angle rather than
    // snapping - wild but smooth. Reproduce: pick a new random target every 100ms and
    // shortest-arc interpolate p.roll from the previous target to it across the window.
+   //
+   // THE FIRST 100ms WINDOW IS A HOLD, NOT A TURN. On a tempmodel's very first frame
+   // AddTempModels (:1000-1012) runs TempModelPhysics because lastEntValid is still false;
+   // that call rolls angles[ROLL] AND, at its tail (:796-802), snaps lastEnt = ent - so
+   // lastEnt.axis and ent.axis are the SAME rolled axis and the lerp at :854-859 returns a
+   // constant until the next real physics tick at t = 100ms. Seeding rollT with a fresh
+   // random angle instead started every particle mid-turn, which is the "spinning too much"
+   // on electric_arc's lightning2 (`life .09` - it DIES at 90ms, before the engine ever
+   // re-rolls it, so in-game it is rolled once and holds that angle for its whole life) and
+   // on every other short-lived randomroll sprite.
    if(p.rroll){
-     if(p.rollT===undefined){ p.rollF=p.roll; p.rollT=Math.random()*6.2832; p.rrt=0; }
+     if(p.rollT===undefined){ p.rollF=p.roll; p.rollT=p.roll; p.rrt=0; }
      p.rrt+=dt;
      if(p.rrt>=0.1){ p.rrt-=0.1; p.rollF=p.rollT; p.rollT=Math.random()*6.2832; }
      let _d=(p.rollT-p.rollF)%6.2832;                // shortest signed delta in (-2pi,2pi)
@@ -4756,28 +4766,33 @@ function drawParticles(){
      } else {
        // camera-facing quad. SPRITE_PARALLEL_ORIENTED (tr_sprite.c:105-121) rotates the
        // view axes by the sprite's roll (cr/sr from ent.axis[1], which AnglesToAxis built
-       // from the avelocity-integrated angles); plain SPRITE_PARALLEL (:123-130) copies the
-       // view axes with right NEGATED and never rolls - the engine ignores angles/avelocity
-       // for it, so an explicit `spritegen parallel` must not spin here. Emitters with no
-       // resolved spritegen (sprtype null) default to SPRITE_PARALLEL in-engine (tr_shader.c
-       // :2989 zero-inits sprite.type) but keep the legacy roll path here: parallel_oriented
-       // is by far the most common authored type, and effects signed off under the old
-       // behaviour stay pixel-identical.
+       // from the avelocity-integrated angles). EVERY OTHER sprite type ignores the entity
+       // axis completely: SPRITE_PARALLEL (:123-130) copies the view axes with right NEGATED,
+       // SPRITE_PARALLEL_UPRIGHT (:135-149) builds its own world axes, and an `oriented`
+       // shader that reaches this branch only does so because `deformVertexes lightglow`
+       // rebuilt the quad from the camera. So roll - from `randomroll`, from `avelocity`,
+       // from an `angles` ROLL component - is INVISIBLE on all of them in-game.
        //
-       // COUNTER-ROTATING tcMod BUNDLE (explosed / explosed2, sprites.shader: `tcmod rotate
-       // 40` + nextbundle `tcmod rotate -40`) - the double-texture churn lives in _bundleFrame
-       // (brot vs rotate). Whether the WHOLE sprite ALSO rolls depends purely on spritegen:
-       //   - explosed (explosion_bridge): NO spritegen -> SPRITE_PARALLEL -> never rolls, so
-       //     `avelocity 0 0 300` is a no-op; the entity roll must be SUPPRESSED or it spins
-       //     the whole sprite and hides the churn (the bridge fix).
-       //   - explosed2 (explosion_conflagration): `spritegen parallel_oriented` -> DOES roll,
-       //     so `avelocity 0 0 range 60 600` genuinely spins each puff at a random 60-660 deg/s
-       //     ON TOP of the ±40 churn (slow puffs read as double-spin, fast ones spin visibly
-       //     clockwise). The entity roll must be KEPT.
-       // So _crb only suppresses roll for the SPRITE_PARALLEL family (null / 'parallel'),
-       // never for parallel_oriented.
-       const _crb=_bnd&&(_bnd.brot||_bnd.rotate);              // counter-rotating tcMod bundle
-       const _noRoll=(p.sprtype==='parallel')||(_crb&&p.sprtype!=='parallel_oriented');
+       // A shader with NO `spritegen` line is SPRITE_PARALLEL: ParseShader only ever assigns
+       // sprite.type inside the spritegen branch (tr_shader.c:2402-2418) and the global shader
+       // is zeroed first (:3424), SPRITE_PARALLEL being 0 (tr_local.h:530-535). An unresolved
+       // sprite shader lands on the default shader, which is zeroed the same way. sprtype null
+       // therefore means SPRITE_PARALLEL, NOT "unknown, assume it rolls" - the old reading,
+       // which is what spun electric_panelmelt's coronas: drop1/drop2 are `corona_util.spr` /
+       // `corona_reg.spr` + `randomroll`, and neither shader carries a spritegen line, so
+       // in-game they never turn at all.
+       //
+       // The suppression is a property of the SPRITE renderer, which only runs for RT_SPRITE
+       // tempmodels - i.e. `.spr` models (and VSS puffs, drawn through VSSSource.spr). A
+       // `.tik` sub-model tempmodel is an RT_MODEL refEntity rendered on its full axis, so
+       // randomroll genuinely turns it; those normally draw through the mesh branch above, but
+       // one whose geometry failed to extract falls through to here and must KEEP its roll.
+       // (explosed / explosion_bridge - no spritegen, `avelocity 0 0 300` - is covered by the
+       // same rule that used to need the counter-rotating-tcMod special case; explosed2 /
+       // explosion_conflagration is `spritegen parallel_oriented` and still spins.)
+       const _mref=((EM[p.ei]&&EM[p.ei].model)||'').toLowerCase().replace(/"/g,'');
+       const _isSpr=!!(p.vol||p.sprtype||_mref.endsWith('.spr'));
+       const _noRoll=_isSpr&&(p.sprtype!=='parallel_oriented');
        if(_noRoll) ctx.scale(-1,1);   // VectorNegate(view right), no roll
        else ctx.rotate(p.roll);
        const w=(p.texw>=p.texh)?longSz:shortSz, h=(p.texw>=p.texh)?shortSz:longSz;
