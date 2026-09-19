@@ -101,7 +101,7 @@ Then launch the main GUI program with **`RUN -- Medal of Honor Model Viewer.bat`
 If "Smart App Control" blocked the .bat file from opening:
 Right-click the .bat file --> Properties --> General tab --> Security: [✓] Unblock file.
 
-Once fully opened, you must do: File → "Add .pk3 pak(s)...", highlight and select all ".pak" or ".pk3" files. <br>
+Once fully opened, you must do: File → "Add .pk3 pak(s)...", highlight and select all relevant ".pak" or ".pk3" files. <br>
 This ensures that all .tik models, .skd, .skc, .skb, and all textures are inputted / loaded in together for the 3D viewer rendering.
 
 ### macOS
