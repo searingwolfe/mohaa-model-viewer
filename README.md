@@ -94,7 +94,7 @@ Windows 10/11 → latest), verifies the installer's Authenticode signature befor
 running it, and installs the necessary packages.
 
 It deliberately **does not modify your `PATH`** — Python's own installer handles
-that, and hand-editing the registry `PATH` is how environments get broken.
+that, and hand-editing the registry `PATH` is how environments often get broken.
 
 Then launch with **`RUN -- Medal of Honor Model Viewer.bat`**, or drag a `.skd` / `.tik` onto it.
 
