@@ -85,7 +85,8 @@ engine would, so what you see on screen is what the game draws.
 
 ### Windows
 
-Right-click the green "<> Code" button and "Download .zip" to download all files shown on your current page. Save to any folder.
+Right-click the green "<> Code" button and "Download .zip" to download all files shown on your current pageE.
+Extract its contents and save to any folder.
 
 Run **`bin\python_installer_updater.bat`** once. It detects your Windows version and
 CPU, installs a suitable Python (Windows 7 → 3.8, Windows 8/8.1 → 3.11,
