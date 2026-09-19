@@ -85,7 +85,7 @@ engine would, so what you see on screen is what the game draws.
 
 ### Windows
 
-Right-click the green "<> Code" button and "Download .zip" to download all listed files. <br>
+Right-click the green "<> Code" button and "Download .zip" to download all listed files in a compressed .zip. <br>
 Extract its contents and save to any folder.
 
 Run **`bin\python_installer_updater.bat`** once. It detects your Windows version and
