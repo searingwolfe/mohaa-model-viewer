@@ -86,7 +86,7 @@ engine would, so what you see on screen is what the game draws.
 ### Windows
 
 Right-click the green "<> Code" button and "Download .zip" to download all listed files in a compressed .zip. <br>
-Extract its single-folder contents labeled "mohaa-model-viewer-main" and save to any folder.
+Extract the folder labeled "mohaa-model-viewer-main" and save anywhere on your PC.
 
 Run **`bin\python_installer_updater.bat`** once. It detects your Windows version and
 CPU, installs a suitable Python (Windows 7 → 3.8, Windows 8/8.1 → 3.11,
