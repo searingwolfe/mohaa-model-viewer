@@ -91,7 +91,7 @@ Extract the folder labeled "mohaa-model-viewer-main" and save anywhere on your P
 Run **`bin\python_installer_updater.bat`** once if needed. It detects your Windows version and
 CPU, installs a suitable Python (Windows 7 → 3.8, Windows 8/8.1 → 3.11,
 Windows 10/11 → latest), verifies the installer's Authenticode signature before
-running it, and installs the packages.
+running it, and installs the necessary packages.
 
 It deliberately **does not modify your `PATH`** — Python's own installer handles
 that, and hand-editing the registry `PATH` is how environments get broken.
