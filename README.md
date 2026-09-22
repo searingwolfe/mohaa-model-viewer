@@ -97,7 +97,8 @@ that, and hand-editing the registry `PATH` is how environments often get broken.
 
 * Then launch the main GUI program with **`RUN -- Medal of Honor Model Viewer.bat`**, or drag a `.skd` / `.tik` onto it.
 
-* If "Smart App Control" blocked the .bat file from opening: Right-click the `.bat` file --> Properties --> General tab --> Security: [✓] Unblock file.
+* If "Smart App Control" blocked the .bat file from opening: <br>
+Right-click the `.bat` file --> Properties --> General tab --> Security: [✓] Unblock file.
 
 * Once fully opened, you must do: File → `"Add .pk3 pak(s)..."`, highlight and select all relevant `.pak` and/or `.pk3` files. <br>
 This ensures that all `.tik` models, `.skd`, `.skc`, `.skb` anim files, and all textures are inputted / loaded in together for the 3D viewer rendering.
