@@ -187,8 +187,8 @@ game content.
 
 Made by **Searingwolfe**.
 
-Engine reference: the [OpenMoHAA](https://github.com/openmoh/openmohaa) project,
-without which matching the original renderer would not have been possible.
+Engine reference: the [OpenMoHAA](https://github.com/openmoh/openmohaa) project. <br>
+Without the game's raw code, matching the original renderer would not have been possible.
 
 ## Screenshots
 
