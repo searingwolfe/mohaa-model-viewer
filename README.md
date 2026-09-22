@@ -85,23 +85,21 @@ engine would, so what you see on screen is what the game draws.
 
 ### Windows
 
-Right-click the green `<> Code` button and `Download .zip` to download all listed files in a compressed .zip. <br>
+* Right-click the green `<> Code` button and `Download .zip` to download all listed files in a compressed .zip. <br>
 Extract the folder labeled "mohaa-model-viewer-main" and save anywhere on your PC.
 
-Run **`bin\python_installer_updater.bat`** once if needed. It detects your Windows version and
+* Run **`bin\python_installer_updater.bat`** once if needed. It detects your Windows version and
 CPU, installs a suitable Python (Windows 7 → 3.8, Windows 8/8.1 → 3.11,
 Windows 10/11 → latest), verifies the installer's Authenticode signature before
-running it, and installs the necessary packages.
-
+running it, and installs the necessary packages. <br>
 It deliberately **does not modify your `PATH`** — Python's own installer handles
 that, and hand-editing the registry `PATH` is how environments often get broken.
 
-Then launch the main GUI program with **`RUN -- Medal of Honor Model Viewer.bat`**, or drag a `.skd` / `.tik` onto it.
+* Then launch the main GUI program with **`RUN -- Medal of Honor Model Viewer.bat`**, or drag a `.skd` / `.tik` onto it.
 
-If "Smart App Control" blocked the .bat file from opening:
-Right-click the `.bat` file --> Properties --> General tab --> Security: [✓] Unblock file.
+* If "Smart App Control" blocked the .bat file from opening: Right-click the `.bat` file --> Properties --> General tab --> Security: [✓] Unblock file.
 
-Once fully opened, you must do: File → `"Add .pk3 pak(s)..."`, highlight and select all relevant `.pak` and/or `.pk3` files. <br>
+* Once fully opened, you must do: File → `"Add .pk3 pak(s)..."`, highlight and select all relevant `.pak` and/or `.pk3` files. <br>
 This ensures that all `.tik` models, `.skd`, `.skc`, `.skb` anim files, and all textures are inputted / loaded in together for the 3D viewer rendering.
 
 ### macOS
