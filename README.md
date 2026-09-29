@@ -4,7 +4,7 @@ A browser-based 3D asset viewer for *Medal of Honor: Allied Assault (2002)*, aim
 exact in-game visual parity across every asset type the engine ships: skeletal
 models, animations, vehicles, weapons, projectiles, static props, and the
 particle emitters and FX effects that existing tools do not handle.
-#### [Jump to: Install instructions](https://github.com/searingwolfe/mohaa-model-viewer#install)<br>
+#### [Jump to: Install instructions](#install)<br>
 
 Load your `.pk3` archives, browse the model tree, and open any `.skd` or `.tik`
 in a self-contained HTML viewer with animation playback, tag display, texture
@@ -23,18 +23,21 @@ engine would, so what you see on screen is what the game draws.
 
 ## Features
 
-[See screenshots below](https://github.com/searingwolfe/mohaa-model-viewer#screenshots)
+[See screenshots below](#screenshots)
 
 **Loading & browsing**
 
 * Open one or more `.pk3` archives and navigate the `models/` tree, or drag a
-  loose `.skd` / `.tik` straight onto the launcher.
+  loose `.skd` / `.tik` onto the launcher (or onto the RUN `.bat`).
 * Loaded paks and preferences are remembered between sessions, with a
   recent-files list, tree search (`Ctrl+F`) and Explorer-style keyboard
   navigation.
-* Open a `.tik` in your text editor, or a `.skd` in LightRay3D / Milkshape 3D,
-  directly from the launcher (Options → external programs).
-* Every opened model is also exported as a Wavefront `.obj` you can open in other 3D tools.
+* Select several files to build them in one batch, or drag a file out of the
+  window to open it in its own browser tab.
+* Right-click a file to open a `.tik` in your text editor, or a `.skd` in
+  LightRay3D / Milkshape 3D (set them under Options → Change Text Editor /
+  Change Legacy Model Viewer).
+* Every built model is also exported as a Wavefront `.obj` you can open in other 3D tools.
 
 **Rendering & animation**
 
@@ -42,28 +45,40 @@ engine would, so what you see on screen is what the game draws.
   `.shader` chain, plus `.skc` / `.tik` animation playback — play/pause, loop,
   reset, per-frame scrub and a speed control.
 * The animation browser follows the model's own `$include` / `includes{}`
-  structure, so you can reach every anim the asset can play.
+  structure, so you can reach every anim the asset can play. The first 150 are
+  built into the page (adjustable in Options); the rest are built the first time
+  you pick them.
 * **Particle emitters, FX scripts and explosions**, rebuilt from the effect
   commands and fired on their real frames — the part other tools skip.
+* Show or hide individual surfaces, starting from what the `.tik` hides at spawn;
+  an animation's own surface commands apply as it plays.
 * Hang other models off any bone or tag with **attach-to-bone**, each with its
-  own editable scale, offset and angles.
+  own editable scale, offset (in `.tik` units) and angles.
+* WebGL rendering with a real depth buffer, or the 2D-canvas renderer (switch with
+  View → Viewer renderer in the launcher, or Display → WebGL in the viewer; 2D is used
+  automatically when WebGL isn't available).
+
+On-demand animations and attach-to-bone need the launcher's embedded pane; a page
+opened in a plain browser shows everything already built into it.
 
 **Inspect & tweak**
 
-* Display toggles: Texture, Mesh, Wireframe, Setsizes box, Nodes, Labels, Face
-  Anims, Corona orbit and the long-range Tree Sprite stand-in.
+* Display toggles: Texture, Mesh, Wire, Setsizes, Nodes, Labels, Face Anims,
+  Corona orbit, WebGL and, for trees, the long-range Tree Sprite stand-in.
 * **Edit a model's `setsize` bounding box live** — a pencil toggle on the setsize
   line turns the two `( x y z )` triples into number fields that redraw the red
   box as you type, then revert to the file's original values when you toggle it
-  back off.
+  back off. A model with no `setsize` shows a `( 0 0 0 ) ( 0 0 0 )` placeholder
+  you can fill in the same way.
 * Copy the `setsize` line, or any attach-to-bone `scale / offset / angles` row,
   as one flat line in MOHAA `.tik` spacing — ready to paste straight into a
   script.
 * Free-look (WASD fly) and Tag-lock (orbit a clicked tag) cameras; tag/bone nodes
-  and labels with a Tags-vs-Bones filter; an entity placement-angle
-  (pitch / yaw / roll) dial.
+  and labels with a Tags-vs-Bones filter.
+* An entity placement-angle (pitch / yaw / roll) dial that snaps to quarter
+  turns, with a pencil for typing any angle.
 * Light / dark theme and a custom backdrop colour, plus a full keyboard-shortcut
-  set (press `H` in the viewer).
+  set (`H` in the viewer, `F1` in the launcher).
 
 **Self-contained by design**
 
@@ -75,33 +90,54 @@ engine would, so what you see on screen is what the game draws.
 
 ## Requirements
 
-* **Python 3.7 or newer** (3.11+ recommended). Needs the `tkinter` GUI module.
+* **Python 3.8 or newer** (3.11+ recommended), with the `tkinter` GUI module.
 * **Pillow 10.3 or newer** — required; MOHAA textures are `.tga` and nothing else
-  decodes them.
+  decodes them. (Pillow 10.3 is also why Python 3.8 is the minimum.)
 * Your own legally obtained copy of the game, for its `.pk3` files.
-* Optional, Windows only: an embedded 3D pane instead of a browser tab.
+* Optional, Windows only: an embedded 3D pane instead of a browser tab
+  (`pythonnet`, `pywebview==4.4.1`, `tkwebview2` and the Microsoft Edge WebView2
+  Runtime, which ships with Windows 10/11).
+
+The packages are listed in [`docs/requirements.txt`](docs/requirements.txt). On
+Windows, the RUN `.bat` checks for all of these and installs what's missing.
 
 ## Install
 
 ### Windows
 
-* Right-click the green `<> Code` button and `Download .zip` to download all listed files in a compressed .zip. <br>
-Extract the folder labeled "mohaa-model-viewer-main" and save anywhere on your PC.
+* Click the green `<> Code` button and choose `Download ZIP`. <br>
+Extract the `mohaa-model-viewer-main` folder anywhere on your PC.
 
-* Run **`bin\python_installer_updater.bat`** once if needed. It detects your Windows version and
-CPU, installs a suitable Python (Windows 7 → 3.8, Windows 8/8.1 → 3.11,
-Windows 10/11 → latest), verifies the installer's Authenticode signature before
-running it, and installs the necessary packages. <br>
+* Start the program with **`RUN -- Medal of Honor Model Viewer.bat`**, or drag a
+`.skd` / `.tik` onto it. Before opening the launcher it:
+  1. looks for **Python 3.8 or newer with tkinter**. If there isn't one, it asks
+     whether to install it now: **Y** runs `bin\python_installer_updater.bat` (below),
+     **N** closes the window so you can install Python yourself from
+     [python.org](https://www.python.org/downloads/) (tick "tcl/tk" in the installer);
+  2. installs **Pillow** if it's missing (required for textures);
+  3. installs the **embedded 3D pane** packages if they're missing (optional; on
+     Windows 8.1 and newer);
+  4. tells you if the Microsoft Edge WebView2 Runtime is missing, in which case
+     models open in your browser. WebGL needs nothing extra.
+
+  It then opens the launcher and its own window closes.
+
+* **`bin\python_installer_updater.bat`** installs a Python that suits your Windows
+version and CPU (Windows 7 → 3.8, Windows 8/8.1 → 3.11, Windows 10/11 → latest),
+verifies the installer's Authenticode signature before running it, and installs
+the packages. The RUN `.bat` offers to run it for you, and you can also run it on
+its own to update the packages. <br>
 It deliberately **does not modify your `PATH`** — Python's own installer handles
 that, and hand-editing the registry `PATH` is how environments often get broken.
 
-* Then launch the main GUI program with **`RUN -- Medal of Honor Model Viewer.bat`**, or drag a `.skd` / `.tik` onto it.
+* If Windows blocks the `.bat` (SmartScreen or Smart App Control): <br>
+Right-click the `.bat` file → Properties → General tab → Security: [✓] Unblock → OK.
 
-* If "Smart App Control" blocked the .bat file from opening: <br>
-Right-click the `.bat` file --> Properties --> General tab --> Security: [✓] Unblock file.
-
-* Once fully opened, you must do: File → `"Add .pk3 pak(s)..."`, highlight and select all relevant `.pak` and/or `.pk3` files. <br>
-This ensures that all `.tik` models, `.skd`, `.skc`, `.skb` anim files, and all textures are inputted / loaded in together for the 3D viewer rendering.
+* Once it's open, use File → `Add .pk3 pak(s)...` and select all the game's `.pk3`
+files (Pak0.pk3 and up, plus any expansion or mod paks; later paks override
+earlier ones). <br>
+The models, animations, scripts and textures are spread across them, so load them
+all together.
 
 ### macOS
 
@@ -125,15 +161,21 @@ python3 bin/mohaa_launcher.py
 The embedded 3D pane is Windows-only. Everywhere else, models open in your
 default browser — same viewer, same output.
 
+## Updating
+
+**Help → Check for updates** compares your version with the latest one in this
+repository and, if you choose, downloads the new version's files, copies them over the
+program folder, and restarts. Your settings and built models in `output/` are left alone.
+
 ## Where your files go
 
 | | |
 |---|---|
 | Settings & console log | the program's `output/` folder (next to `bin/`); in a flat / portable install, the scripts' own folder |
-| Built viewers | your chosen output folder (default: `output/models/`) |
+| Built viewers | your chosen output folder (default: `output/models/`, mirroring the pak's folders); files opened directly go to `output/standalone/` |
 | Scratch space | a `mohaaview_*` folder in your system temp directory |
 
-Clear any of them from **Options → Clear built models / Clear %temp% files**.
+Built viewers and scratch files can be cleared from **File → Clear built models / Clear %temp% files**.
 
 ---
 
@@ -145,8 +187,9 @@ happens on your machine.
 
 The program uses the network only when you ask it to: **Help → Check for updates**
 reads a small version file from this repository and, if you choose, downloads the
-newer files from GitHub. (The optional Windows setup script also downloads Python
-from python.org and packages from pypi.org when you choose to run it.)
+newer files from GitHub. (On Windows, the RUN `.bat` also installs missing Python
+packages from pypi.org, and the Python installer it offers downloads Python from
+python.org if you say yes.)
 
 Full notice: [`PRIVACY.md`](docs/PRIVACY.md), or **Help → Privacy & Legal** inside the
 program.
@@ -168,8 +211,7 @@ Released under the **GNU General Public License v2** — see [`LICENSE`](LICENSE
 
 Engine behaviour is verified against [OpenMoHAA](https://github.com/openmoh/openmohaa),
 which is GPLv2. [`THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md) explains that
-relationship, why GPLv2 is the appropriate choice here, and lists every
-dependency's licence.
+relationship and lists every dependency's licence.
 
 ## Legal
 
@@ -182,6 +224,21 @@ file formats this tool reads.
 **No game assets are distributed with this project**, and none may be committed
 to it. You must supply your own copy of the game. Do not redistribute extracted
 game content.
+
+## For developers
+
+Project notes live in [`docs/changelog/`](docs/changelog/README.md): the
+[changelog](docs/changelog/CHANGELOG.md), an
+[architecture overview](docs/changelog/project-overview.md) with known issues,
+the [development workflow](docs/changelog/development-workflow.md),
+[engine notes](docs/changelog/engine-notes.md), and a reference of every
+[emitter command](docs/changelog/emitter-commands.md) the viewer supports. The
+source code cites the exact OpenMoHAA files and lines it follows.
+
+## Contact
+
+Bugs, questions and suggestions: [open an issue](https://github.com/searingwolfe/mohaa-model-viewer/issues).
+Security problems: report privately as described in [`SECURITY.md`](docs/SECURITY.md).
 
 ## Credits
 

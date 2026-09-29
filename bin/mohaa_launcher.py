@@ -1,27 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # ==============================================================================
-#  mohaa_launcher.py  --  Launcher for mohaa_view.py
-#  - Browse / drag-drop a loose .skd or .tik, OR
-#  - Open MOHAA .pk3 pak(s) and navigate the models/ tree to any .skd/.tik.
-#  Loaded paks + preferences are remembered between sessions.
-#  Keep this file next to mohaa_view.py (and mohaa_textures.py for skins).
-#
-#  UI features:
-#   - File / Options / View / Help menu bar (with accelerators)
-#   - Dark & Light themes (Options > Theme, or Ctrl+T / header button)
-#   - Tooltips on every control
-#   - Search box filtering the pak tree (Ctrl+F, Esc clears)
-#   - Explorer-style tree keys: Enter opens/descends, Backspace goes up,
-#     Right/Left expand/collapse, F5 reloads paks
-#   - Right-click the tree / pak header for a context menu listing every
-#     loaded pak (with per-pak remove) + quick actions
-#   - Recent-files list, status bar, log context menu (copy / clear)
+#  mohaa_launcher.py  --  desktop launcher for mohaa_view.py
+#  Open a loose .skd/.tik, or load MOHAA .pk3 paks and browse their models/ tree.
+#  Each model is built into a viewer page by mohaa_view.py and shown in an embedded
+#  WebView2 pane (or the default browser). Loaded paks and preferences persist
+#  between sessions. Expects mohaa_view.py and mohaa_textures.py alongside.
 # ==============================================================================
 import sys, os, re, subprocess, threading, queue, glob, json, zipfile, tempfile, shutil, hashlib
-# Tk is stdlib but NOT always installed: Debian/Ubuntu/Fedora ship it as a separate
-# python3-tk / python3-tkinter package, and a bare ImportError traceback tells a Linux
-# user nothing. Fail with instructions instead.
+# Some Linux distros package Tk separately; exit with install instructions rather
+# than a bare ImportError.
 try:
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
@@ -41,12 +29,10 @@ try:
 except Exception:
     MTX=None
 
-# Optional embedded 3D viewer: Edge WebView2 inside the tk window (Windows only).
-# Needs `pip install pythonnet pywebview==4.4.1 tkwebview2` plus the WebView2
-# runtime (ships with Win10/11; Edge). If anything is missing WEBVIEW2 stays None
-# and every open falls back to the external browser - exactly the old behaviour.
-# pywebview is pinned to 4.4.1: tkwebview2 3.5.0 constructs pywebview's Window/
-# EdgeChrome internals directly and 4.4.1 is signature-verified against that call.
+# Optional embedded viewer: Edge WebView2 inside the Tk window (Windows only).
+# Requires `pip install pythonnet pywebview==4.4.1 tkwebview2` and the WebView2 runtime.
+# If unavailable, WEBVIEW2 stays None and models open in the external browser.
+# pywebview is pinned to 4.4.1 because tkwebview2 3.5.0 constructs its internals directly.
 WEBVIEW2=None; _WV_HAVE_RT=None; _WEBVIEW_ERR=""
 if sys.platform.startswith("win"):
     try:
@@ -54,9 +40,8 @@ if sys.platform.startswith("win"):
     except Exception as _e:
         _WEBVIEW_ERR=str(_e)
 
-# Suppress console-window flashes from child console processes (python probes,
-# viewer builds) - vital when the launcher itself runs under pythonw (no console),
-# where every plain Popen of a console exe would otherwise pop a black window.
+# Hide the console windows of child processes (Python probes, viewer builds); needed
+# when the launcher itself runs under pythonw.
 NOWIN=dict(creationflags=0x08000000) if sys.platform.startswith("win") else {}   # CREATE_NO_WINDOW
 
 # ------------------------------------------------------------------ themes ---
@@ -70,16 +55,15 @@ THEMES={
              BTN_BG="#eef1f4",BTN_HOV="#ddebff",ERR_C="#cf222e",SEL_BG="#ddf4ff",
              TIP_BG="#ffffff",TIP_TXT="#1f2328",ENTRY_BG="#ffffff"),
 }
-# module-level colour names (kept for compatibility with all existing code
-# paths); apply_theme() re-points them at the active palette.
+# Module-level colour names used throughout the UI; apply_theme() re-points them at the
+# active palette.
 BG=PANEL=LINE=TXT=DIM=ACCENT=TAG_C=ORIGIN=BONE_C=BTN_BG=BTN_HOV=ERR_C=SEL_BG=TIP_BG=TIP_TXT=ENTRY_BG=""
 globals().update(THEMES["dark"])
 
 def _mono_family():
-    """First monospace family actually present. Consolas is Windows-only; asking Tk for
-    it on macOS/Linux silently falls back to a PROPORTIONAL default, which breaks every
-    column-aligned thing in the UI (the file tree and the Output console). Tk always
-    resolves the logical name "TkFixedFont", so that is the last-resort answer."""
+    """First installed monospace family. Consolas is Windows-only, and Tk silently
+    substitutes a proportional font for a missing family, which breaks the aligned file
+    tree and console. "TkFixedFont" is the fallback."""
     try:
         import tkinter.font as _tkf
         have={f.lower() for f in _tkf.families()}
@@ -100,22 +84,21 @@ def init_fonts():
 FONT_MONO=("Consolas",10); FONT_SMALL=("Consolas",9); FONT_TITLE=("Consolas",13,"bold")
 
 # ---------------------------------------------------------------- privacy ---
-# Shown in Help --> Privacy & Legal and summarised in About. Kept here, in the
-# program, rather than only in PRIVACY.md, because a user who downloads a zip and
-# never visits the repository still has to be able to read it. Keep this text and
-# PRIVACY.md in step when either changes.
+# Shown in Help --> Privacy & Legal and summarised in About. Kept in the program so
+# users who never visit the repo can read it; keep in sync with docs/PRIVACY.md.
 PRIVACY_SUMMARY=("This program collects nothing and sends nothing, and has no\n"
                  "telemetry. It uses the network only when you check for updates.")
 
 PRIVACY_TEXT = """PRIVACY NOTICE  --  MOHAA Model Viewer
-Last updated: 22 August 2026
+Last updated: 29 September 2026
 
 1. THE SHORT VERSION
    This program does not collect, transmit, sell, share or profile anything.
    It contains no telemetry, no analytics, no crash reporting, no advertising
    and no tracking identifiers, and it never checks for updates on its own. The
-   only time it uses the network is when YOU open Help --> Check for updates;
-   everything else it does happens entirely on your computer.
+   program uses the network only when YOU open Help --> Check for updates, and
+   the Windows startup script only to install missing Python packages (see 3);
+   everything else happens entirely on your computer.
 
 2. WHAT IS STORED, AND WHERE
    The program writes three things, all on your own machine, all readable and
@@ -125,10 +108,11 @@ Last updated: 22 August 2026
         Written to the program's "output" folder (the one beside the "bin" folder
         that holds the scripts). In a flat / portable install - all files in one
         folder - it sits in that folder instead. Same on Windows, macOS and Linux.
-        Contains: the .pk3 paths you loaded, your chosen output folder, theme,
-        window layout, view angles, and the paths of any external programs you
-        configured. It contains file paths, which on most systems include your
-        user name.
+        Contains: the .pk3 paths you loaded, the recent-files list (unless
+        Options --> Don't save recent files is on), your chosen output folder,
+        theme, window layout, view angles, and the paths of any external
+        programs you configured. It contains file paths, which on most systems
+        include your user name.
 
      b) Console log  --  output_console.log, in the same folder as (a).
         A copy of the Output pane. Overwritten on each launch. It contains the
@@ -137,7 +121,7 @@ Last updated: 22 August 2026
      c) Working files
         A temporary workspace under your system temp folder (mohaaview_*), and
         the generated .html viewers in your chosen output folder. Both are
-        removable from Options --> Clear %temp% files / Clear built models.
+        removable from File --> Clear built models / Clear %temp% files.
 
    None of this is transmitted anywhere. If you want it gone, delete the folders
    above; the program will simply start fresh.
@@ -157,9 +141,11 @@ Last updated: 22 August 2026
        privacy policy, not this one. It happens only when you open that window and
        click to install; nothing is ever checked automatically.
 
-     - The optional setup script, python_installer_updater.bat, downloads Python
-       from python.org and packages from pypi.org when you choose to run it, under
-       those sites' own privacy policies.
+     - On Windows, the startup script (RUN -- Medal of Honor Model Viewer.bat)
+       installs any missing Python packages from pypi.org. If no suitable Python
+       is found and you agree when asked, it runs python_installer_updater.bat,
+       which downloads Python from python.org. Both sites apply their own
+       privacy policies.
 
    The viewer itself makes no other network requests.
 
@@ -206,24 +192,18 @@ Last updated: 22 August 2026
    version.
 
 9. CONTACT
-   Questions about this notice: open an issue on the project's repository, or
-   use the contact address given in the repository README.
+   Questions about this notice: open an issue on the project's GitHub
+   repository (github.com/searingwolfe/mohaa-model-viewer).
 """
 
 HERE=os.path.dirname(os.path.abspath(__file__))
 
 def _write_base_dir():
-    """Base folder the program WRITES into - the config json, the console log and the
-    default 'models'/'standalone' output folders all live directly under here.
+    """Folder the program writes to (config, console log, default output folders).
 
-    Layout-aware, so the same code works before and after the release reorg with no
-    setting to flip:
-      * scripts in a folder named 'bin'  ->  a sibling 'output' folder (bin/../output),
-        created if missing. This is the shipped layout:  bin/ (the .py files),
-        docs/ (documentation), output/ (config + log + the built models/ tree).
-      * anything else - all files flat in one folder, or portable use  ->  that same
-        folder (HERE), so the config and log sit right beside the .py files.
-    Falls back to HERE if the target can't be created (e.g. a read-only location)."""
+    If the scripts live in a 'bin' folder (the shipped layout: bin/, docs/, output/), this
+    is the sibling 'output' folder, created if needed. Otherwise (flat/portable install)
+    it is HERE. Falls back to HERE if 'output' can't be created."""
     try:
         if os.path.basename(HERE).lower()=="bin":
             d=os.path.join(os.path.dirname(HERE),"output")
@@ -234,46 +214,20 @@ def _write_base_dir():
     return HERE
 DATADIR=_write_base_dir()
 VIEWER=os.path.join(HERE,"mohaa_view.py")
-# Minimum mohaa-viewer-rev a saved HTML must carry to be served from the output-
-# folder cache. Older pages (or pre-rev pages with no marker) are rebuilt, so new
-# viewer features actually show up instead of a stale page. Keep in step with
-# VIEWER_REV in mohaa_view.py. rev 3: dead-GL-canvas backdrop fix.
-# rev 4: embed-hash boot (in-launcher layout + theme applied before first paint).
-# rev 35: Display-panel placement-angle dial (pitch/yaw/roll) replaces the smoke-light
-# slider; the page must be able to read the #ang= boot hash, so pre-35 caches are stale.
-# rev 36: drawn tick marks on that dial + a ( pitch yaw roll ) readout.
-# Raised to the live VIEWER_REV rather than +1: the source-mtime gate below is the usual
-# rebuild trigger, but mtimes come back scrambled when the scripts are round-tripped
-# through a zip, and then the baked rev is the only thing left that can catch it.
-# rev 37: pages built before the inline-<script> escaping + CSP hardening must be
-# rebuilt, so the cache floor moves with VIEWER_REV.
-# rev 58: load-time `surface <n> +nodraw` from the tik's init{server{}} / setup{} blocks,
-# and the surfaces <select> replaced by a popup that stays open across toggles - pre-58
-# pages have neither, and their cached DATA has no tikNodraw key at all.
-# rev 59: sidecar animations now carry their own `fx.surf` (the frame commands the
-# catalogue always had but the sidecar builder discarded). Every sidecar cached before
-# this has no fx at all, so the stamp has to move or they never get rebuilt.
-# rev 60: the attach-to-bone <select> is now a searchable popup, so pre-60 pages carry
-# markup the new script no longer wires up.
-# rev 62: the setsize line and the placement-angle readout both grew pencil editors; pre-62
-# pages have neither the #angEdit button nor the markup the new script expects.
-# rev 63: at<key>.js attachment sidecars. Every one written before this holds a texture
-# resolved the WRONG way (the texture pass was handed a .tik path where the tik index wants
-# a .skd path) and carries none of the shader's render hints. _build_attach serves an
-# existing sidecar straight off disk without ever re-resolving it, so _stamp_anim_cache -
-# which is gated on THIS constant alone - is the only thing that clears them.
-# rev 64: attachment offsets changed UNITS - the boxes are now engine world units (what a
-# .tik/script attachmodel line carries) rather than the viewer's unscaled model units, so a
-# pre-64 page shows the same boxes meaning something different.
-# rev 65: attachment sidecars again - a multi-part model (player/human) cached before this
-# holds only its body mesh, and a rigged one holds an unposed, folded skeleton.
-VIEWER_REV_REQUIRED=65
-# Sentinel subdir marking an individual-file (Browse / drag-drop / Recent / path-bar)
-# build. It rides through the normal subdir plumbing but redirects the output HTML to a
-# "standalone" folder sibling to "models", instead of into the pak-mirroring models tree.
-# The null byte guarantees it can never collide with a real pak folder name.
+# Largest pak entry that is extracted or read into memory; bigger ones are skipped as
+# decompression bombs. Same limit as the pak index (mohaa_textures.Vfs.MAX_ENTRY).
+PAK_ENTRY_MAX=getattr(getattr(MTX,"Vfs",None),"MAX_ENTRY",192*1024*1024)
+# Minimum mohaa-viewer-rev a cached HTML must carry to be reused; older pages are
+# rebuilt so new viewer features show up. Keep equal to VIEWER_REV in mohaa_view.py.
+# Source mtimes are the usual rebuild trigger, but a zip round-trip can scramble them,
+# so the baked rev is the backstop. Also gates the animation/attachment sidecar caches
+# (see _stamp_anim_cache).
+VIEWER_REV_REQUIRED=67
+# Sentinel subdir for single-file builds (Browse / drag-drop / Recent / path bar). It
+# routes the output HTML to a "standalone" folder beside "models" instead of the
+# pak-mirroring tree; the null byte means it can't collide with a real folder name.
 STANDALONE_SUBDIR="\x00standalone"
-# Migrated from HERE on first run so existing installs keep their settings.
+# Copy the config from the old flat location (HERE) on first run.
 CONFIG=os.path.join(DATADIR,"mohaa_viewer_config.json")
 if not os.path.exists(CONFIG):
     try:
@@ -283,46 +237,42 @@ if not os.path.exists(CONFIG):
 
 # ============================================================================
 #  Version + update channel
-#  VERSION is baked into this build and shown in the status bar, the About box
-#  and the Help --> Check for updates window. The updater reads version.txt on
-#  the repo's main branch; if it names a newer version, the branch zip is pulled
-#  and bin/, the RUN .bat and docs/ are refreshed in place.
-#  ON EACH RELEASE: bump VERSION here AND write the same number into version.txt
-#  at the repo root, then commit both.
+#  VERSION is shown in the status bar, the About box and the update window. The
+#  updater reads docs/version.txt on the repo's main branch; if it names a newer
+#  version, it downloads that version's release tag (v<version>) and refreshes bin/,
+#  docs/ and the RUN .bat. On each release, bump VERSION here and in docs/version.txt,
+#  then tag the release commit v<version>.
 # ============================================================================
 VERSION="1.0.000"
 VERSION_LABEL="version "+VERSION
-# GitHub coordinates the update check points at. The repo is private / not yet
-# created for now; until it is public these URLs 404 and the check simply reports
-# that it could not reach GitHub and changes nothing on disk.
+# GitHub coordinates for the update check. If GitHub can't be reached, the check
+# reports it and changes nothing on disk.
 GITHUB_OWNER="searingwolfe"
 GITHUB_REPO="mohaa-model-viewer"
 GITHUB_BRANCH="main"
 UPDATE_UA="MOHAA-Model-Viewer/"+VERSION
-# raw version marker + the branch zipball (codeload is what github.com/.../archive
-# redirects to anyway) + the human page the update window links to.
+# Version marker, release-tag zip, branch zip (codeload is where github.com/.../archive
+# redirects), and the project page linked from the update window. The tag zip installs
+# exactly the version the check reported; the branch zip is the fallback when that version
+# was never tagged.
 UPDATE_VERSION_URL=f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{GITHUB_BRANCH}/docs/version.txt"
+UPDATE_TAG_FMT="v{version}"
+UPDATE_TAG_ZIP_URL=f"https://codeload.github.com/{GITHUB_OWNER}/{GITHUB_REPO}/zip/refs/tags/{{tag}}"
 UPDATE_ZIP_URL=f"https://codeload.github.com/{GITHUB_OWNER}/{GITHUB_REPO}/zip/refs/heads/{GITHUB_BRANCH}"
 UPDATE_PAGE_URL=f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
 
 def _install_root():
-    """Folder the updater refreshes: the RUN .bat's directory (the parent of the
-    bin/ that holds these scripts) in the shipped layout, else HERE for a flat /
-    portable install. The downloaded repo tree (bin/, docs/, RUN .bat) is copied
-    over it."""
+    """Folder the updater refreshes: the parent of bin/ (where the RUN .bat lives) in the
+    shipped layout, else HERE for a flat install."""
     return os.path.dirname(HERE) if os.path.basename(HERE).lower()=="bin" else HERE
 
 def find_python():
-    """The interpreter used for child mohaa_view.py builds - sys.executable FIRST.
+    """Interpreter for child mohaa_view.py builds: sys.executable first.
 
-    Two reasons it must not be a PATH lookup. Correctness: this launcher is already
-    running under a Python that imported mohaa_textures and (usually) Pillow, so probing
-    for "py"/"python" can hand the build to a DIFFERENT interpreter that silently lacks
-    Pillow - every model then renders untextured with no obvious cause. Security: on
-    Windows a bare program name is resolved by CreateProcess, which searches the CURRENT
-    DIRECTORY before PATH, so a py.exe planted in the extracted release folder would be
-    executed instead. Under pythonw.exe sys.executable is pythonw.exe, which runs the
-    capture_output=True child fine (no console is needed for a redirected build)."""
+    A PATH lookup could pick a different Python without Pillow (models would silently
+    render untextured), and on Windows a bare program name searches the current directory
+    before PATH, so a planted py.exe could run instead. pythonw.exe is fine here because
+    the build's output is captured."""
     exe=sys.executable
     if exe and os.path.isfile(exe): return exe
     for name in ("py","python","python3"):        # frozen/embedded host with no sys.executable
@@ -334,10 +284,9 @@ def find_python():
     return None
 
 def _virtual_screen(w):
-    """(x0,y0,x1,y1) of the FULL desktop across all monitors. Tk's
-    winfo_screenwidth/height report only the primary monitor on Windows, so
-    clamping popups against them shoves every menu back onto monitor 1 when the
-    app sits on a second monitor. Windows: SM_X/Y/CX/CYVIRTUALSCREEN (76-79)."""
+    """(x0,y0,x1,y1) of the whole desktop across all monitors. On Windows, Tk's
+    winfo_screenwidth/height cover only the primary monitor, which would push popups back
+    onto it. Uses SM_X/Y/CX/CYVIRTUALSCREEN (76-79)."""
     if sys.platform.startswith("win"):
         try:
             import ctypes
@@ -398,17 +347,14 @@ def apply_theme(root, name):
     st.configure("TCheckbutton",background=BG,foreground=TXT,font=FONT_SMALL)
     st.map("TCheckbutton",background=[("active",BG)])
 
-# When True, every popup (tooltips, drop-down menus, right-click menus) uses the
-# OS-default look: white, system font, native tk.Menu. When False (default) they
-# use the custom themed windows below, which follow dark/light mode - including
-# the border, which native Windows menus always draw white.
+# True: popups (tooltips, drop-downs, context menus) use the OS-default look and native
+# tk.Menu. False (default): custom themed windows that follow dark/light mode, including
+# the border that native Windows menus always draw white.
 OLD_POPUPS=False
 
 def _add_popup_shadow(win):
-    """Soft drop shadow behind a borderless popup (menus/tooltips), like native
-    Windows menus have: a second Toplevel offset +3+3 at 30% black, kept just
-    below the popup and auto-destroyed with it. Best-effort - silently skipped
-    where per-window alpha isn't available."""
+    """Soft drop shadow behind a borderless popup: a 30% black Toplevel offset +3+3 that
+    is destroyed with the popup. Skipped where per-window alpha isn't supported."""
     sh=None
     try:
         win.update_idletasks()
@@ -585,15 +531,10 @@ class Tooltip:
             except Exception: pass
             self.tip=None
 
-# The "All Keyboard shortcuts" window (F1 / the top-right "? Shortcuts" button) is laid out
-# in TWO columns: the launcher's own keys on the left, the 3D viewer's on the right. The
-# right column is deliberately a mirror of the viewer's own "Viewer Keyboard shortcuts"
-# overlay (mohaa_view.py, #helpCard): SAME groups, SAME order, SAME key column, row for row,
-# so the two lists read as one document and neither can quietly drift from the other. Only
-# the descriptions differ, and only where context forces it - this window is read from
-# OUTSIDE the viewer, so it says "the viewer's control panel" / "close the model" where the
-# in-viewer overlay can just say "the control panel" / "close the viewer window". Anything
-# added to one MUST be added to the other, in the same place.
+# The "All Keyboard shortcuts" window (F1) has two columns: launcher keys on the left,
+# viewer keys on the right. HOTKEYS_VIEWER mirrors the viewer's own shortcut overlay
+# (mohaa_view.py, #helpCard) row for row: same groups, order and keys, with wording
+# adjusted only where this window is read from outside the viewer. Keep them in sync.
 HOTKEYS_LAUNCHER=[
  ("","--- Launcher ---"),
  ("Ctrl+O","Add .pk3 pak(s)"),
@@ -663,11 +604,8 @@ class App(tk.Tk):
         self._log_q=queue.Queue(); self._drop_paths=[]
         self._status_base="Ready"; self._pak_suffix=""    # status-bar left cell = "<state>  --  N pak(s)"
         self._upd_state=None; self._upd_dl_btn=None        # Check-for-updates window state
-        # Output-console mirror: every line shown in the Output pane is also appended to
-        # output_console.log in the program's write folder (DATADIR - the 'output' folder
-        # in the shipped layout, else beside the .py files). Opened in "w" so it starts
-        # fresh each launch; line-buffered so a crash still leaves the log on disk.
-        # Best-effort - a read-only folder just disables the mirror.
+        # Mirror every Output-pane line to output_console.log in DATADIR. Truncated on each
+        # launch and line-buffered so a crash still leaves the log; skipped if not writable.
         self._logfile=None
         try:
             self._logfile=open(os.path.join(DATADIR,"output_console.log"),"w",
@@ -679,10 +617,11 @@ class App(tk.Tk):
         self._tree_entry={}
         self._all_files=[]           # (relpath, kind) kind in {"skd","tik"} from the last pak scan
         self._filter_after=None
-        self._tips=[]                # Tooltip instances (retext not needed; colours read at show time)
+        self._tips=[]                # Tooltip instances (colours are read at show time)
         self._auto_open=tk.BooleanVar(value=bool(self._cfg.get("auto_open",True)))
         self._remember=tk.BooleanVar(value=bool(self._cfg.get("remember_paks",True)))
-        self._theme_var=tk.StringVar(value=self._theme)
+        # Viewer renderer (View > Viewer renderer): "gl" (default) or "2d".
+        self._renderer_var=tk.StringVar(value=("2d" if self._cfg.get("renderer")=="2d" else "gl"))
         self._outdir_on=tk.BooleanVar(value=bool(self._cfg.get("outdir_enabled",True)))
         self._outdir=self._cfg.get("outdir") or os.path.join(DATADIR,"models")
         self._run_opts={}          # one-shot per-build viewer options (right-click open)
@@ -691,13 +630,12 @@ class App(tk.Tk):
         self._last_subdir=None     # pak-relative output subfolder of the last build
         self._reuse_html=tk.BooleanVar(value=bool(self._cfg.get("reuse_html",True)))
         self._no_recent=tk.BooleanVar(value=bool(self._cfg.get("no_recent",False)))
-        # embedded 3D viewer pane (WebView2). Created lazily on first open so a
-        # broken install can never block startup - failures fall back to browser.
+        # Embedded WebView2 pane, created lazily on first open so a broken install can't block
+        # startup (failures fall back to the browser).
         self._embed_on=tk.BooleanVar(value=bool(self._cfg.get("embed_viewer",True)))
-        # Animation catalogue: the model's whole animation reach, resolved through its
-        # $include / $path / includes{} structure. Only models at or under this count
-        # get every animation baked into the page; above it the page ships the menu and
-        # each animation is built on first click into the cache folder beside the HTML.
+        # Animation catalogue: every animation the model can reach through $include / $path /
+        # includes{}. anim_preload caps how many of the .tik's own animations are baked into
+        # the page; the rest are built on first click into a cache folder beside the HTML.
         self._anim_preload=tk.StringVar(value=str(self._cfg.get("anim_preload",150)))
         self._animcat=None          # the catalogue dict for the model now on screen
         self._animcat_file=None     # ...written out as JSON for mohaa_view.py
@@ -705,15 +643,10 @@ class App(tk.Tk):
         self._anim_outdir=None      # <html stem>/ - where built animations are cached
         self._anim_busy=set()       # ids currently building, so a double-click is one build
         self._webview=None; self._embed_url=None
-        # external programs: text editor (platform default) + legacy model viewer (unset)
-        # Seed an ABSOLUTE path, never a bare command name: _launch_with only ever runs an
-        # existing file at an absolute path (deliberately - resolving a bare name through
-        # PATH, and on Windows the current directory, is the thing being closed off), so a
-        # config holding "notepad.exe" made a fresh install fail with "The saved text editor
-        # program is not a valid file (notepad.exe)" the first time a .tik was opened.
-        # _default_program_path probes the system folders directly. Heal a config that a
-        # previous build left holding a bare name too; the bare name is kept only when
-        # nothing resolves, so the old Options message is still reachable as a last resort.
+        # External programs: text editor (platform default) and legacy model viewer (unset).
+        # Seed an absolute path: _launch_with only runs existing files at absolute paths (no
+        # PATH or current-directory lookup), so a bare "notepad.exe" would fail. A bare name is
+        # kept only if nothing resolves.
         _te=(self._cfg.get("text_editor") or "").strip()
         if (not _te) or (os.path.basename(_te)==_te and not os.path.isfile(_te)):
             self._cfg["text_editor"]=(self._default_program_path("text_editor") or _te or
@@ -727,44 +660,37 @@ class App(tk.Tk):
         OLD_POPUPS=bool(self._old_popups.get())
         self._open_popup=None; self._popup_owner=None; self._popup_serial=None
         self._batch=[]; self._batch_total=0; self._batch_waiting=False   # sequential folder builds
-        # Escape-to-cancel state: the running viewer subprocess, the model name
-        # currently being built, and a build generation counter - extraction/build
-        # threads capture the counter and bail out when it changes (cancel).
+        # Escape-to-cancel state: the running viewer subprocess, the model being built, and a
+        # build generation counter that worker threads check so they can bail out on cancel.
         self._proc=None; self._building_name=None; self._build_gen=0
-        # open-in-viewer serialization latch: True while a build that WILL open
-        # the viewer is in flight. New open requests are rejected until it clears
-        # (stops spam-clicking a file from stacking tabs/builds). Build-only work
-        # (right-click "Build only", batch builds) neither sets nor checks this.
+        # True while a build that will open the viewer is running; further open requests are
+        # rejected until it clears so click-spam can't stack builds. Build-only work
+        # (right-click "Build only", batch builds) ignores it.
         self._opening_view=False
-        # a pk3 open requested before the texture/VFS index finished: latched here
-        # and fired automatically by _poll_log the moment the index is ready. Stored
-        # as (entry, build_gen) so an Escape-cancel (which bumps build_gen) drops it.
+        # A pak open requested before the texture/VFS index is ready; _poll_log fires it once
+        # the index finishes. Stored as (entry, build_gen) so an Escape-cancel drops it.
         self._pending_open=None
-        # persistent dismiss checks: clicking outside an open custom popup closes it
+        # Clicking outside an open custom popup closes it.
         self.bind_all("<ButtonPress-1>",self._popup_dismiss_check,add="+")
         self.bind_all("<ButtonPress-3>",self._popup_dismiss_check,add="+")
-        # keyboard reclaim: clicking any launcher widget while the embedded
-        # WebView2 pane holds the Win32 keyboard takes typing + launcher hotkeys
-        # back (see _reclaim_focus). Clicks on the viewer pane never reach Tk, so
-        # Chromium keeps the keyboard there and viewer hotkeys stay active.
+        # Clicking any launcher widget takes the keyboard back from the embedded WebView2 (see
+        # _reclaim_focus). Clicks inside the viewer pane never reach Tk, so the viewer keeps
+        # its hotkeys there.
         self.bind_all("<ButtonPress-1>",self._reclaim_focus,add="+")
         self.bind_all("<ButtonPress-3>",self._reclaim_focus,add="+")
-        # move / minimize dismissal: a moved or minimized window leaves hover tooltips
-        # and right-click / menubar popups stranded at stale screen coordinates. <Configure>
-        # on the toplevel fires on move+resize, <Unmap> on minimize - both close every
-        # transient overlay (see _dismiss_transients).
+        # Moving or minimizing the window closes tooltips and popups that would otherwise be
+        # left at stale screen positions (see _dismiss_transients).
         self.bind("<Configure>",self._dismiss_transients,add="+")
         self.bind("<Unmap>",self._dismiss_transients,add="+")
-        # focus-loss dismissal: a PopupMenu is an overrideredirect + -topmost Toplevel,
-        # so switching to another desktop app (Notepad, a browser) left the drop-down
-        # painted on top of it. <FocusOut> on the toplevel catches that switch.
+        # PopupMenus are topmost Toplevels, so close them when the app loses focus; otherwise
+        # they stay painted over other applications.
         self.bind("<FocusOut>",self._popup_focus_out,add="+")
         _win_dark_menus(self._theme=="dark")
         self._build_menu(); self._build_ui(); self._bind_hotkeys(); self._poll_log()
         self.after(150,self._enable_win_drop)
         self.after(250,self._apply_titlebar)
         self.protocol("WM_DELETE_WINDOW",self._on_close)
-        # migrate old single-pk3 config to the multi-pk3 list
+        # Migrate the old single-pk3 config key to the pk3 list.
         saved=self._cfg.get("pk3s")
         if not saved and self._cfg.get("pk3"): saved=[self._cfg["pk3"]]
         saved=[p for p in (saved or []) if os.path.exists(p)]
@@ -777,32 +703,25 @@ class App(tk.Tk):
         except Exception: return {}
     @staticmethod
     def _norm_angle(x):
-        """One placement angle folded into [0,360), to the viewer's own 3-decimal resolution.
-
-        Kept as an int when it lands on a whole degree so the config file (and the #ang=
-        hash built from it) reads "90" rather than "90.0"; NaN/inf are rejected by the
-        caller, which is why the modulo here is safe."""
+        """Fold one placement angle into [0,360), rounded to the viewer's 3 decimals. Whole
+        degrees become ints so the config and #ang= hash read "90", not "90.0". Callers reject
+        NaN/inf first."""
         x=float(x)%360.0
         x=round(x,3)
         return int(x) if float(x).is_integer() else x
 
     def _set_view_angles(self,raw):
-        """Remember the viewer's Pitch/Yaw/Roll placement dial in mohaa_viewer_config.json.
+        """Save the viewer's pitch/yaw/roll placement dial to the config.
 
-        The viewer posts "mohaa-ang <pitch>,<yaw>,<roll>" (degrees) whenever the dial moves;
-        _open_file hands the saved triple back on the page's #ang= boot hash so the next
-        model opens already rotated. An unchanged triple is dropped so dragging the slider
-        does not rewrite the config file on every detent.
-
-        rev 62: the values are NO LONGER snapped to the four quarter turns. The dial's pencil
-        editor takes any angle (45, 22.5, -7 ...), and rounding those to the nearest detent
-        here silently threw the typed number away on the next open - the exact number the
-        muzzle-flash placement work exists to find."""
+        The viewer posts "mohaa-ang <pitch>,<yaw>,<roll>" when the dial changes; _open_file
+        passes the saved triple back through the page's #ang= hash so the next model opens with
+        the same rotation. Any angle is kept (the dial's pencil editor accepts arbitrary values).
+        An unchanged triple is ignored so dragging doesn't rewrite the config on every detent."""
         try: v=[float(x) for x in str(raw).split(",")[:3]]
         except Exception: return
         if len(v)!=3: return
-        # reject NaN/inf before the modulo: float('nan')%360 is nan, and json would then
-        # write a bare NaN token that no strict JSON reader (including the browser) accepts.
+        # Reject NaN/inf: they survive the modulo, and json would write a bare NaN that strict
+        # JSON readers (including the browser) reject.
         if not all(-1e9<x<1e9 for x in v): return
         v=[self._norm_angle(x) for x in v]
         if self._cfg.get("view_angles")==v: return
@@ -834,10 +753,9 @@ class App(tk.Tk):
         return m
 
     def _build_menu(self):
-        # custom themed menubar: Windows' native menu bar can't be recoloured by Tk,
-        # so File/Options/View/Help are Menubuttons on a themed frame. Their drop-downs
-        # (and every context menu) are custom PopupMenus so even the BORDER follows the
-        # theme - unless "Use old popup windows" is checked, which posts native tk.Menus.
+        # Custom themed menubar: Tk can't recolour the native Windows menu bar, so File/Options/
+        # View/Help are Menubuttons whose drop-downs are themed PopupMenus (or native tk.Menus
+        # when "Use old popup windows" is on).
         bar=tk.Frame(self,bg=PANEL); bar.pack(fill="x",side="top"); self._menubar=bar
         self._menubar_line=tk.Frame(self,bg=LINE,height=1); self._menubar_line.pack(fill="x",side="top")
         def addbtn(label,provider,ul=0):
@@ -867,11 +785,9 @@ class App(tk.Tk):
         # the row is disabled when there is genuinely nothing to delete.
         bempty = not self._built_any()
         tempty = not self._temp_dirs()
-        # "Close file" is the menu twin of the viewer's Esc: both call _close_viewer(), which
-        # reverts the middle pane to the start page while KEEPING _last_build, so the top
-        # "Open Viewer" button can reopen the same model instantly. Only meaningful for the
-        # embedded pane - a model sent to the external browser is that browser's tab to close -
-        # so the row is disabled unless a WebView2 is actually up.
+        # "Close file" mirrors the viewer's Esc: _close_viewer() returns the middle pane to the
+        # start page but keeps _last_build, so "Open Viewer" can reopen the model instantly.
+        # Only enabled while the embedded pane exists.
         vopen = self._webview is not None
         return [_mi("Add .pk3 pak(s)...",self._choose_pk3,"Ctrl+O"),
                 _mi("Open File...",self._browse_and_run,"Ctrl+Shift+O"),
@@ -897,13 +813,7 @@ class App(tk.Tk):
         return items+[_MSEP,_mi("Clear recent",self._clear_recent)]
 
     def _menu_items_options(self):
-        return [{"type":"cascade","label":"Theme","items":lambda:[
-                    {"type":"radio","label":"Dark","variable":self._theme_var,"value":"dark",
-                     "command":lambda:self._set_theme("dark")},
-                    {"type":"radio","label":"Light","variable":self._theme_var,"value":"light",
-                     "command":lambda:self._set_theme("light")}]},
-                _MSEP,
-                {"type":"check","label":"Remember loaded paks between sessions","variable":self._remember,"command":self._save_opts},
+        return [{"type":"check","label":"Remember loaded paks between sessions","variable":self._remember,"command":self._save_opts},
                 {"type":"check","label":"Auto-open viewer after build","variable":self._auto_open,"command":self._save_opts},
                 {"type":"check","label":"Embed 3D viewer in this window (needs tkwebview2)","variable":self._embed_on,"command":self._toggle_embed},
                 {"type":"check","label":"Don't save recent files (empty all)","variable":self._no_recent,"command":self._toggle_no_recent},
@@ -932,7 +842,13 @@ class App(tk.Tk):
                 _MSEP,
                 _mi("Toggle Dark / Light",self._toggle_theme,"Ctrl+T"),
                 {"type":"check","label":"Use old popup windows","variable":self._old_popups,
-                 "command":self._toggle_old_popups,"accel":"Ctrl+Shift+T"}]
+                 "command":self._toggle_old_popups,"accel":"Ctrl+Shift+T"},
+                _MSEP,
+                {"type":"cascade","label":"Viewer renderer","items":lambda:[
+                    {"type":"radio","label":"WebGL (default)","variable":self._renderer_var,"value":"gl",
+                     "command":lambda:self._set_renderer("gl")},
+                    {"type":"radio","label":"2D canvas","variable":self._renderer_var,"value":"2d",
+                     "command":lambda:self._set_renderer("2d")}]}]
 
     def _menu_items_help(self):
         return [_mi("Keyboard shortcuts",self._show_hotkeys,"F1"),
@@ -1001,11 +917,9 @@ class App(tk.Tk):
         if self._open_popup is not None: self._open_popup.unpost()
 
     def _dismiss_transients(self,e=None):
-        """Close every transient overlay - open right-click / menubar popup, the armed
-        tree tooltip, and any live hover tooltip - when the window is moved or minimized.
-        Bound to <Configure> (move/resize) and <Unmap> (minimize). Only reacts to events
-        on the toplevel itself (child <Configure> events from sash drags etc. have a
-        different widget and are ignored) so it never fights normal in-window resizing."""
+        """Close every transient overlay (popup menu, tree tooltip, hover tooltips) when the
+        window is moved or minimized. <Configure> events from child widgets are ignored, so
+        in-window resizing (sash drags) is unaffected."""
         if e is not None and getattr(e,"widget",None) not in (self,None): return
         try:
             if self._open_popup is not None: self._open_popup.unpost()
@@ -1017,12 +931,11 @@ class App(tk.Tk):
             except Exception: pass
 
     def _popup_focus_out(self,_e=None):
-        """Close menus/tooltips when the LAUNCHER loses focus to another desktop window.
+        """Close menus/tooltips when the launcher loses focus to another application.
 
-        <FocusOut> also fires for focus moves *inside* the app (child widgets, the
-        embedded WebView2 pane, a popup's own Toplevel), so the decision is deferred
-        one tick and then asks Tk who owns the focus now: focus_displayof() returns
-        None only when no window of this application holds it."""
+        <FocusOut> also fires for focus moves inside the app (child widgets, the WebView2 pane,
+        popups), so check one tick later: focus_displayof() is None only when no window of this
+        app has focus."""
         if self._open_popup is None and not getattr(self,"_tips",None): return
         def _check():
             try:
@@ -1050,10 +963,9 @@ class App(tk.Tk):
             f/=1024.0
         return "%.2f GB"%f
 
-    # Folders a "Clear built models" must never rmtree, however the output folder got
-    # pointed at them. The dialog does say it deletes the whole folder, but one mis-set
-    # Options --> output folder plus one confirmation click should not be able to take
-    # out Documents or a home directory - the delete is recursive and unrecoverable.
+    # Safety guard for "Clear built models" (a recursive, unrecoverable delete): refuse
+    # roots, the home folder and common system/user folders even if the output folder was
+    # pointed at one, and require the folder to be named 'models' or 'standalone'.
     def _unsafe_to_wipe(self, d):
         try: d=os.path.abspath(d)
         except Exception: return "unresolvable path"
@@ -1066,7 +978,7 @@ class App(tk.Tk):
                      "onedrive","dropbox","program files","program files (x86)","windows",
                      "system32","users","applications","library","etc","usr","bin","var"):
             if os.path.normcase(leaf)==os.path.normcase(name): return "a system/user folder (%s)"%leaf
-        # Only ever created BY us, so requiring the name is a cheap, exact guard.
+        # Only folders this program creates have these names.
         if os.path.normcase(leaf) not in ("models","standalone"):
             return "not a 'models' or 'standalone' folder built by this program"
         return None
@@ -1084,12 +996,10 @@ class App(tk.Tk):
         return roots
 
     def _built_scan(self):
-        """Everything this launcher BUILDS, and nothing else. Only two artefact shapes
-        are ever written into the output folder: '<stem>_skd_view.html' /
-        '<stem>_tik_view.html' (_viewer_html_name) and the matching '<stem>_..._view/'
-        folder that caches on-demand animations (_anim_outdir = the html path minus its
-        extension, a*.js inside). Anything else there is the user's own file and is
-        deliberately left alone. Returns (files, dirs, total_bytes)."""
+        """Everything this launcher built, and nothing else: '<stem>_skd_view.html' /
+        '<stem>_tik_view.html' pages (_viewer_html_name) and their matching '<stem>_..._view/'
+        animation-cache folders (_anim_outdir). Other files in the output folder are left
+        alone. Returns (files, dirs, total_bytes)."""
         files=[]; dirs=[]; nb=0
         for root in self._built_roots():
             for dp,dn,fn in os.walk(root):
@@ -1114,9 +1024,8 @@ class App(tk.Tk):
         return False
 
     def _temp_dirs(self):
-        """Every workspace this tool has ever created: %TEMP%/mohaaview_* - the
-        tempfile.mkdtemp(prefix='mohaaview_') made in _reload_all. Includes leftovers
-        from previous or crashed sessions, which is usually most of them."""
+        """All %TEMP%/mohaaview_* workspaces created by _reload_all, including leftovers from
+        earlier or crashed sessions."""
         try: base=tempfile.gettempdir()
         except Exception: return []
         out=[]
@@ -1143,9 +1052,8 @@ class App(tk.Tk):
         lines.append(("The 3D viewer will close and return to the start page.","dim"))
         if not self._confirm_dialog("Clear built models",lines,ok_text="Delete"): return
         self._close_viewer()          # can't leave a page open whose files are being deleted
-        # the builds are gone, so there is nothing for Open Viewer to reopen: drop the
-        # remembered build and reset the path bar (otherwise it would show a stale
-        # "pk3 model: <n>" whose HTML no longer exists).
+        # The builds are gone: forget the last build and clear the path bar so neither points
+        # at a deleted page.
         self._last_build=None
         try: self._path_var.set("")
         except Exception: pass
@@ -1161,13 +1069,9 @@ class App(tk.Tk):
                        % (n,self._fmt_bytes(nb)),"ok")
 
     def _own_pycache(self):
-        """This program's OWN __pycache__ next to the .py files (HERE), and only that.
-        The launcher does `import mohaa_textures / mohaa_view`, so CPython writes
-        __pycache__/mohaa_*.cpython-XX.pyc beside the scripts. It is an install artefact,
-        not a built-model or %TEMP% file, and Python regenerates it on next run - but a
-        user wanting a clean 'reinstall' state expects it gone, so a temp-clear removes
-        it. Guarded to fire ONLY when the folder actually holds one of our modules, so an
-        unrelated __pycache__ is never touched."""
+        """This program's own __pycache__ beside the scripts (HERE), only if it holds one of our
+        modules. Cleared along with the temp files for a clean reinstall state; Python
+        regenerates it on the next run."""
         pc=os.path.join(HERE,"__pycache__")
         if not os.path.isdir(pc): return None
         try: names=os.listdir(pc)
@@ -1236,12 +1140,9 @@ class App(tk.Tk):
         except Exception: pass
 
     def _restore_panes(self):
-        """Re-place the sashes at the saved positions. The panes are nested (bottomrow
-        lives inside rightside, which lives inside outer), so a sash must only be placed
-        after its container's geometry has settled - otherwise it is laid out against a
-        stale width/height and drifts. Placement therefore goes outermost-first with an
-        update between each. sash_place clamps to each pane's minsize, so a value that no
-        longer fits the current window size lands at the nearest legal spot. Idempotent."""
+        """Restore the saved sash positions. The panes are nested (bottomrow in rightside in
+        outer), so place them outermost-first with an update between each; otherwise a sash is
+        laid out against stale geometry. sash_place clamps to each pane's minsize."""
         p=self._cfg.get("panes")
         if not p: return
         try: outer,rightside,bottomrow=self._panes
@@ -1307,8 +1208,7 @@ class App(tk.Tk):
         return b
 
     def _build_ui(self):
-        # ---- top bar (diagram row 1): title . model path . Browse . Open Viewer
-        #      . tool buttons (Add-pak + search live in the left panel) -----------
+        # ---- top bar: title, model path, Browse, Open Viewer, tool buttons ----------
         top=ttk.Frame(self); top.pack(fill="x",padx=10,pady=(8,6))
         ttk.Label(top,text="MOHAA Model Viewer",style="Title.TLabel").pack(side="left")
         self._theme_btn=self._mkbtn(top,text="\u25d0 Theme",style="Tool.TButton",command=self._toggle_theme,
@@ -1331,18 +1231,12 @@ class App(tk.Tk):
         self._lines=[tk.Frame(self,bg=LINE,height=1)]; self._lines[0].pack(fill="x",padx=8)
         body=ttk.Frame(self); body.pack(fill="both",expand=True,padx=10,pady=8)
 
-        # Resizable layout (see diagram): three draggable dividers built from nested
-        # tk.PanedWindows -
+        # Resizable layout from nested tk.PanedWindows:
         #   outer     (horizontal): [ file tree | rightside ]
-        #   rightside (vertical)  : [ 3D viewer (top) / bottom row ]
+        #   rightside (vertical)  : [ 3D viewer / bottomrow ]
         #   bottomrow (horizontal): [ output console | model-info panel ]
-        # The output console and the model-info panel share ONE top edge - the rightside
-        # vertical sash - because both live inside the single 'bottomrow' pane. Dragging
-        # that sash moves both their ceilings together, so no empty gap can open between
-        # the viewer and them ("upper ceilings stay connected"). tk (not ttk) panes so the
-        # sash colour follows the theme and shows a grabbable handle; refs in self._panes
-        # are recoloured on theme toggle. minsize on every pane stops a divider being
-        # dragged far enough to swallow a neighbour.
+        # The console and info panel share one sash, so their top edges always move together.
+        # tk (not ttk) panes so the sash follows the theme; minsize keeps every pane visible.
         _pw=dict(bg=LINE,bd=0,sashwidth=6,sashpad=0,sashrelief="flat",
                  showhandle=False,opaqueresize=True)
         outer=tk.PanedWindow(body,orient="horizontal",**_pw); outer.pack(fill="both",expand=True)
@@ -1350,17 +1244,16 @@ class App(tk.Tk):
         bottomrow=tk.PanedWindow(rightside,orient="horizontal",**_pw)
         self._panes=[outer,rightside,bottomrow]
 
-        # ---- left panel (diagram col 1): full-height pak file tree ----------
+        # ---- left panel: full-height pak file tree --------------------------------
         left=ttk.Frame(outer,style="Panel.TFrame",width=300)
-        # row 1: the pak summary label gets the whole row, so it never runs into a button
+        # Row 1: the pak summary label gets the whole row.
         lh=ttk.Frame(left,style="Panel.TFrame"); lh.pack(fill="x",padx=8,pady=(8,2))
         self._pk3_label=ttk.Label(lh,text="No .pk3 loaded",style="PanelDim.TLabel",cursor="hand2")
         self._pk3_label.pack(side="left")
         self._pk3_label.bind("<Button-3>",self._show_pak_menu)
         self._tip(self._pk3_label,"Right-click to list / manage every loaded Pak")
-        # row 2: search box filtering the pak tree + the Add-pak button. Button is
-        # packed FIRST so it always keeps its full size; the entry expands into
-        # whatever is left.
+        # Row 2: search box + Add-pak button. The button is packed first so it keeps its full
+        # width; the entry takes the rest.
         sr=ttk.Frame(left,style="Panel.TFrame"); sr.pack(fill="x",padx=8,pady=(2,4))
         self._mkbtn(sr,text="Add .pk3(s)...",command=self._choose_pk3,
                     tip="Add one or more MOHAA pak files (Pak0.pk3, Pak2.pk3, expansions...).\nLater paks override earlier ones.\n(Ctrl+O)").pack(side="right")
@@ -1381,22 +1274,19 @@ class App(tk.Tk):
         self._tree.bind("<Return>",self._on_tree_enter)
         self._tree.bind("<BackSpace>",self._on_tree_backspace)
         self._tree.bind("<Button-3>",self._show_pak_menu)
-        # click-again tooltips: shown only when single-clicking a row that is ALREADY
-        # selected (and only while still hovering that row) - no hover-spam.
+        # Click-again tooltips: a second click on the selected row arms a hover tooltip.
         self._tree.bind("<Button-1>",self._on_tree_click,add="+")
         self._tree.bind("<Motion>",self._on_tree_motion,add="+")
         self._tree.bind("<Leave>",lambda e:self._hide_treetip(),add="+")
-        # drag-out: press a file row, drag OUTSIDE the launcher window, release ->
-        # the model opens in its own standalone browser viewer window, so several
-        # models can be viewed side by side.
+        # Drag-out: dragging a file row outside the window opens that model in its own
+        # standalone browser window, so several models can be viewed side by side.
         self._dragout=None; self._dragout_live=False; self._dragout_xy=(0,0)
         self._tree.bind("<ButtonPress-1>",self._dragout_press,add="+")
         self._tree.bind("<B1-Motion>",self._dragout_motion,add="+")
         self._tree.bind("<ButtonRelease-1>",self._dragout_release,add="+")
 
-        # ---- 3D viewer (diagram top): now spans the FULL width above the bottom row
-        # (the model-info panel moved down beside the console). Hosts an embedded WebView2
-        # (created lazily by _ensure_webview) or a placeholder when embedding is off/missing.
+        # ---- 3D viewer pane (full width above the bottom row). Hosts the embedded WebView2
+        # (created lazily by _ensure_webview) or a placeholder when embedding is unavailable.
         upper=ttk.Frame(rightside,style="Panel.TFrame")
         self._viewpane=ttk.Frame(upper,style="Panel.TFrame")
         self._viewpane.pack(fill="both",expand=True)
@@ -1409,7 +1299,7 @@ class App(tk.Tk):
                                          justify="center",anchor="center")
         self._view_placeholder.pack(fill="both",expand=True)
 
-        # ---- bottom-left (diagram): output console --------------------------
+        # ---- bottom-left: output console ------------------------------------------
         lf=ttk.Frame(bottomrow,style="Panel.TFrame")
         self._outlab=ttk.Label(lf,text="Output",style="PanelDim.TLabel"); self._outlab.pack(anchor="w",padx=8,pady=(6,0))
         logwrap=ttk.Frame(lf,style="Panel.TFrame"); logwrap.pack(fill="both",expand=True,padx=6,pady=(2,6))
@@ -1420,22 +1310,20 @@ class App(tk.Tk):
         self._log.tag_config("ok",foreground=ACCENT); self._log.tag_config("err",foreground=ERR_C)
         self._log.tag_config("dim",foreground=DIM)
         self._log.bind("<Button-3>",self._show_log_menu)
-        # Escape-to-cancel is scoped to the Output window: clicking it focuses it
-        # (a disabled Text doesn't always take focus by itself), and only a focused
-        # Output window receives the Escape binding below.
+        # Escape cancels a build only while the Output pane has focus; clicking it focuses it
+        # (a disabled Text doesn't always take focus on its own).
         self._log.bind("<Button-1>",lambda e:self._log.focus_set(),add="+")
         self._log.bind("<Escape>",self._cancel_build)
         self._tip(self._log,"Build / extraction log.\nRight-click to copy or clear.\nEscape to cancel loading / building.")
 
-        # ---- bottom-right (diagram): title / surfaces / anims / tags / bones list
+        # ---- bottom-right: model info (title, surfaces / anims / tags / bones) ------
         info=ttk.Frame(bottomrow,style="Panel.TFrame",width=270); info.pack_propagate(False)
         self._info_title=ttk.Label(info,text="No model loaded",style="Panel.TLabel",foreground=DIM)
         self._info_title.pack(anchor="w",padx=10,pady=(8,2))
         self._info_stats=ttk.Label(info,text="",style="PanelDim.TLabel",wraplength=245,justify="left")
         self._info_stats.pack(anchor="w",padx=10,pady=(0,4))
-        # surfaces / anims / tags / bones as a read-only Text widget: text can be
-        # selected and copied like the Output window, coloured per tag/origin/bone,
-        # wheel-scrolls natively, right-clicks for Copy all / Select all / editor.
+        # Read-only Text so the list can be selected and copied, coloured per tag/origin/bone,
+        # with a right-click menu.
         tagwrap=ttk.Frame(info,style="Panel.TFrame"); tagwrap.pack(fill="both",expand=True,padx=6,pady=(0,4))
         self._tag_text=tk.Text(tagwrap,bg=PANEL,fg=TXT,insertbackground=TXT,font=FONT_SMALL,
                                relief="flat",height=8,wrap="none",state="disabled",
@@ -1446,22 +1334,20 @@ class App(tk.Tk):
         self._retheme_tag_text()
         self._tag_text.bind("<Button-3>",self._show_tag_menu)
         self._tip(self._tag_text,"Surfaces / anims / tags / bones of the last-built model.\nSelect + copy freely.\nRight-click for Copy all / Select all / Open in Text Editor.")
-        # Re-open buttons live outside the list so they are always reachable
+        # Re-open buttons sit outside the list so they stay reachable.
         self._reopen_bar=ttk.Frame(info,style="Panel.TFrame"); self._reopen_bar.pack(fill="x",padx=10,pady=(2,8))
 
         # ---- assemble the panes (add() order = left->right / top->bottom) ----
-        # stretch='always' panes soak up extra space when the window grows; 'never'
-        # panes keep their set size. Initial sizes: tree 300w, info 270w, bottom row
-        # ~210h. minsize keeps every pane grabbable and non-collapsing.
+        # stretch='always' panes absorb extra space when the window grows; 'never' panes keep
+        # their size.
         outer.add(left,minsize=180,width=300,stretch="never")
         outer.add(rightside,minsize=340,stretch="always")
         rightside.add(upper,minsize=160,stretch="always")
         rightside.add(bottomrow,minsize=130,height=210,stretch="never")
         bottomrow.add(lf,minsize=220,stretch="always")
         bottomrow.add(info,minsize=200,width=270,stretch="never")
-        # restore the saved sash positions once the panes have a real on-screen size
-        # (two staggered attempts: the first catches the usual case, the second covers a
-        # slow first map). See _restore_panes / _save_panes.
+        # Restore saved sash positions once the panes are mapped; the second attempt covers a
+        # slow first map.
         self.after(160,self._restore_panes); self.after(480,self._restore_panes)
 
         # ---- status bar ----------------------------------------------------
@@ -1476,10 +1362,8 @@ class App(tk.Tk):
         return f"{base}  --  {suf}" if suf else base
 
     def _set_status(self,left=None,right=None):
-        # The left cell shows "<state>  --  N pak(s)"; the right cell is reserved for
-        # the program version. Callers still pass the pak count as `right` (e.g.
-        # "9 pak(s)" / "0 paks") - it now rides on the LEFT as the suffix, not the
-        # right cell, so both pieces of info sit together and the version stays put.
+        # Left cell: "<state>  --  N pak(s)" (callers pass the pak count as `right`).
+        # The right cell always shows the program version.
         try:
             if left is not None: self._status_base=left
             if right is not None:
@@ -1495,14 +1379,31 @@ class App(tk.Tk):
 
     def _set_theme(self,name):
         if name not in THEMES: return
-        self._theme=name; self._theme_var.set(name)
+        self._theme=name
         self._cfg["theme"]=name; self._save_config()
         apply_theme(self,name); self._retheme_widgets(); self._apply_titlebar()
-        # keep the embedded 3D viewer's theme in lockstep (merged Theme button)
+        # Keep the embedded viewer's theme in sync.
         self._embed_js(f"try{{if(typeof setTheme==='function')setTheme({'true' if name=='light' else 'false'})}}catch(e){{}}")
 
     def _toggle_theme(self,_e=None):
         self._set_theme("light" if self._theme=="dark" else "dark")
+
+    def _renderer(self):
+        return "2d" if self._cfg.get("renderer")=="2d" else "gl"
+
+    def _set_renderer(self,val,from_page=False):
+        """View > Viewer renderer: "gl" (WebGL, default) or "2d" (canvas). Saved to the config,
+        passed to each page as #renderer=, and applied live to the open page. from_page: the
+        page's own Display > WebGL toggle changed it, so only the config and menu follow."""
+        val="2d" if str(val).strip().lower()=="2d" else "gl"
+        self._renderer_var.set(val)
+        if self._renderer()==val: return
+        self._cfg["renderer"]=val; self._save_config()
+        if self._embed_url:
+            self._embed_url=re.sub(r"&renderer=(?:gl|2d)","&renderer="+val,self._embed_url)
+        if not from_page:
+            self._embed_js("try{if(typeof setViewerRenderer==='function')setViewerRenderer(%s)}catch(e){}"
+                           %("true" if val=="gl" else "false"))
 
     def _retheme_tag_text(self):
         t=self._tag_text
@@ -1539,10 +1440,9 @@ class App(tk.Tk):
 
     # ---- click-again tree tooltips -------------------------------------------
     def _on_tree_click(self,e):
-        """A second single-click on an ALREADY-selected row doesn't show anything by
-        itself - it merely ARMS the normal hover tooltip for that row: the standard
-        hover delay starts, and the tip appears only if the pointer is still on the
-        row when it elapses. Clicking any other row disarms."""
+        """A second click on an already-selected row arms the hover tooltip for that row: it
+        appears after the normal delay if the pointer is still there. Clicking another row
+        disarms it."""
         self._hide_treetip()
         row=self._tree.identify_row(e.y)
         if not row: self._treetip_armed=None; return
@@ -1636,15 +1536,14 @@ class App(tk.Tk):
         return os.path.join(os.path.dirname(os.path.abspath(model_path)), self._viewer_html_name(model_path))
 
     def _anim_preload_n(self):
-        """How many catalogued animations may be baked straight into the page."""
+        """How many of the .tik's own animations may be baked into the page."""
         try: return max(0,int(self._anim_preload.get()))
         except (TypeError,ValueError): return 150
 
     def _vfs_read_skc(self,vpath):
-        """Read one animation out of the paks. The catalogue resolves the exact
-        path the engine would use (currentScript->path + token, tiki_parse.cpp:
-        470-472); a basename match is only the fallback for the handful of retail
-        entries whose $path is stale."""
+        """Read one animation from the paks. The catalogue resolves the path the engine would
+        use (currentScript->path + token, tiki_parse.cpp:470-472); a basename match is the
+        fallback for the few retail entries whose $path is stale."""
         if self._vfs is None or not vpath: return None
         d=self._vfs.read(vpath)
         if d is not None: return d
@@ -1653,14 +1552,11 @@ class App(tk.Tk):
         return self._vfs.read(k) if k else None
 
     def _stamp_anim_cache(self):
-        """Drop cached a<id>.js sidecars when the builder that wrote them is out of date.
+        """Clear cached a<id>.js animation sidecars written by an older build.
 
-        VIEWER_REV gates the cached HTML, but the per-animation sidecars beside it were
-        never invalidated by anything - so a sidecar written by an older build kept being
-        served forever. That bit hard when body animations gained their facial "mw" layer:
-        a smoking05 sidecar cached before that change has no face and would never get one,
-        because the file already existed. A one-line rev stamp in the folder means a format
-        change clears the cache exactly once, and normal use keeps every built animation."""
+        VIEWER_REV gates the cached HTML, but nothing else invalidates the sidecars beside it
+        (e.g. a body animation cached before facial "mw" tracks existed would never gain a
+        face). A one-line .rev stamp in the folder makes a format change clear the cache once."""
         d=self._anim_outdir
         if not d: return
         try:
@@ -1690,11 +1586,8 @@ class App(tk.Tk):
                 and not o.get("force") and o.get("theme") not in ("light","dark"))
 
     def _html_current(self,hp):
-        """A cached viewer HTML is only served when it is at least as new as all three
-        source scripts AND its baked mohaa-viewer-rev is new enough; anything older (a
-        stale build, or a pre-marker page) is rebuilt so script fixes and viewer features
-        actually take effect. The source-mtime gate also clears untextured HTMLs left over
-        from a pre-fix build the moment any script is updated."""
+        """Reuse a cached viewer HTML only if it is newer than all three source scripts and
+        its baked mohaa-viewer-rev is at least VIEWER_REV_REQUIRED; otherwise rebuild."""
         try:
             srcs=[os.path.abspath(__file__), VIEWER, os.path.join(HERE,"mohaa_textures.py")]
             newest_src=max((os.path.getmtime(s) for s in srcs if os.path.exists(s)), default=0)
@@ -1717,11 +1610,8 @@ class App(tk.Tk):
         self._set_status("Loaded existing HTML")
         if opts.get("external"): self._open_standalone(hp)
         elif self._auto_open.get() and not opts.get("no_open"): self._open_file(hp)
-        # Refresh the model-details panel. A fresh build fills it via the builder's
-        # 'parse' stdout; a cache hit never runs the builder, so the panel used to keep
-        # the PREVIOUS model's details. Read the tags/surfs/anims straight from the HTML
-        # we just opened (empty stdout -> stats reconstructed from DATA). This only reads
-        # the already-built file, so it doesn't add a build step or slow the open.
+        # Refresh the model-details panel from the opened HTML; a cache hit never runs the
+        # builder, whose stdout normally fills it.
         if model_path is not None:
             try: self._update_info(model_path,"",html_path=hp)
             except Exception: pass
@@ -1739,24 +1629,16 @@ class App(tk.Tk):
             self._log_line(f"{menu_label}: {p}","dim")
 
     def _default_program_path(self, key):
-        """Absolute path to the platform's own built-in program for `key`, or "".
+        """Absolute path to the platform's built-in program for `key`, or "".
 
-        Only ever returns something under a SYSTEM location that actually exists - it is
-        never a PATH lookup on Windows, where CreateProcess would search the current
-        directory first and a stray notepad.exe next to the release could be picked up.
-        That is what makes the result safe to launch without the user having chosen it in
-        Options --> Change Text Editor...
+        Only returns existing files in system locations, never a PATH lookup (on Windows that
+        searches the current directory first), so the result is safe to launch unconfigured.
 
-        Windows  notepad.exe has moved across releases: the %SystemRoot% copy covers
-                 9x/NT..10 and most Win11 builds, System32 covers releases where the root
-                 copy was removed, SysWOW64 covers 64-bit, and recent Win11 builds that
-                 dropped the legacy copies leave only the WindowsApps execution alias -
-                 an AppExecLink reparse point that os.path.isfile can refuse to stat, so
-                 it is accepted on lexists.
-        macOS    /usr/bin/open (TextEdit.app is a bundle DIRECTORY, so it cannot be handed
-                 to Popen the way _launch_with does; `open <file>` is the equivalent).
-        Linux    xdg-open, then the usual graphical editors, then a terminal one.
-        Only text_editor has a built-in default; legacy_viewer stays user-chosen."""
+        Windows  notepad.exe in %SystemRoot%, System32 or SysWOW64, else the WindowsApps
+                 execution alias (an AppExecLink that isfile can refuse to stat, hence lexists).
+        macOS    /usr/bin/open (`open <file>`; TextEdit.app is a bundle directory).
+        Linux    xdg-open, then common graphical editors, then a terminal one.
+        Only text_editor has a default; legacy_viewer is always user-chosen."""
         if key!="text_editor": return ""
         if sys.platform.startswith("win"):
             win=os.environ.get("SystemRoot") or os.environ.get("WINDIR") or "C:\\Windows"
@@ -1785,22 +1667,17 @@ class App(tk.Tk):
         return ""
 
     def _program_folder_default(self, key):
-        """Fallback (folder, item-to-highlight) for "Open ... folder" when the program
-        has never been configured, or is a bare command name ("notepad.exe", "open",
-        "xdg-open") that has no folder of its own.
+        """Fallback (folder, item-to-highlight) for "Open ... folder" when the program isn't
+        configured, or is a bare command name with no folder of its own.
 
         Text Editor
-          Windows  %SystemRoot% (C:\\Windows) scrolled to notepad.exe. The notepad that
-                   actually resolves on PATH sits in System32 (noise) or WindowsApps
-                   (ACL-locked), so C:\\Windows is the useful landing spot.
-          macOS    TextEdit.app - /System/Applications on 10.15+, /Applications before.
-          Linux    whichever of nano / vim / vi is installed, shown in its bin folder.
-        Legacy Model Viewer - LightRay3D and Milkshape 3D are Windows programs, so the
-        "it could be installed anywhere under here" root is:
-          Windows  the system-drive root (C:\\), covering both Program Files trees.
-          mac/Lin  a Wine prefix's drive_c when one exists (the literal C:\\ equivalent
-                   for running either tool), else the usual third-party install root.
-        Anything that doesn't resolve returns "" and the caller keeps its Options message."""
+          Windows  the folder holding notepad.exe (C:\\Windows where present).
+          macOS    TextEdit.app in /System/Applications (10.15+) or /Applications.
+          Linux    the bin folder of nano / vim / vi.
+        Legacy Model Viewer (LightRay3D and Milkshape 3D are Windows programs)
+          Windows  the system-drive root, covering both Program Files trees.
+          mac/Lin  a Wine prefix's drive_c if present, else a common install root.
+        Returns ("", None) when nothing resolves."""
         home=os.path.expanduser("~")
         def _pick(cands):
             for c in cands:
@@ -1809,13 +1686,8 @@ class App(tk.Tk):
         if sys.platform.startswith("win"):
             win=os.environ.get("SystemRoot") or os.environ.get("WINDIR") or "C:\\Windows"
             if key=="text_editor":
-                # notepad.exe has moved across Windows releases, so probe rather than
-                # assume: the Windows-root copy covers 9x/NT/2000/XP/Vista/7/8/10 and
-                # most Win11 builds, System32 covers every NT release (incl. XP/7 where
-                # the root copy has been removed by hand), SysWOW64 covers 64-bit, and
-                # recent Win11 builds that dropped the legacy copies leave only the
-                # WindowsApps execution alias. First hit wins, so C:\Windows stays the
-                # landing folder wherever it still has one.
+                # notepad.exe has moved between Windows releases, so probe the root, System32, SysWOW64
+                # and the WindowsApps alias; the first verified hit wins.
                 cands=[os.path.join(win,"notepad.exe"),
                        os.path.join(win,"System32","notepad.exe"),
                        os.path.join(win,"SysWOW64","notepad.exe")]
@@ -1830,11 +1702,8 @@ class App(tk.Tk):
                         if os.path.isfile(c) and os.path.isdir(os.path.dirname(c)):
                             return (os.path.dirname(c),c)
                     except OSError:
-                        soft=soft or os.path.dirname(c)   # AppExecLink stat can raise:
-                                                          # can't verify it, but it's a lead
-                # No verified copy. Land on evidence first, then the alias folder, and only
-                # then the Windows root - by this point we know the root has no notepad, so
-                # opening it would just be the old dead end with extra steps.
+                        soft=soft or os.path.dirname(c)   # AppExecLink stat can raise; still a lead
+                # No verified copy: use the unverified lead, then the alias folder, then the Windows root.
                 return (_pick([soft,wapps,win]),None)
             if key=="legacy_viewer":
                 return (_pick([(os.path.splitdrive(win)[0] or "C:")+os.sep]),None)
@@ -1876,24 +1745,19 @@ class App(tk.Tk):
         try:
             if sys.platform.startswith("win"):
                 if sel:
-                    # explorer /select, opens the folder scrolled to the item with it
-                    # highlighted. Handed over as ONE raw command string: Popen's Windows
-                    # list-quoting wraps the whole "/select,<path>" argument in quotes when
-                    # the path has spaces, which explorer then fails to parse.
-                    # Absolute path, never the bare name: CreateProcess resolves a bare
-                    # "explorer" through the CURRENT DIRECTORY before PATH, so an
-                    # explorer.exe sitting in the extracted release folder would run.
+                    # explorer /select opens the folder with the item highlighted. Passed as one raw command
+                    # string because Popen's list quoting wraps "/select,<path>" in quotes, which explorer
+                    # can't parse. The absolute explorer.exe path keeps a copy in the current directory
+                    # from running instead.
                     _expl=os.path.join(os.environ.get("SystemRoot",r"C:\Windows"),"explorer.exe")
                     subprocess.Popen('"%s" /select,"%s"'%(_expl,os.path.normpath(sel)))
                 else: os.startfile(d)
             elif sys.platform=="darwin":
                 subprocess.Popen(["open","-R",sel] if sel else ["open",d])
             else:
-                # freedesktop.org's FileManager1.ShowItems is the only portable "open the
-                # folder with this item selected" on Linux - Nautilus / Dolphin / Nemo /
-                # Thunar / PCManFM all implement it, while xdg-open can only open a
-                # directory. Bounded reply timeout so a cold file manager can't hang the
-                # UI for long, then fall back to plain xdg-open on any failure.
+                # freedesktop FileManager1.ShowItems is the portable way to open a folder with an item
+                # selected (Nautilus, Dolphin, Nemo, Thunar, PCManFM). Short reply timeout, then fall
+                # back to xdg-open.
                 shown=False
                 if sel and shutil.which("dbus-send"):
                     from urllib.parse import quote as _urlq
@@ -1912,28 +1776,20 @@ class App(tk.Tk):
             self._log_line(f"Could not open folder: {e}","err")
 
     def _launch_with(self, key, label, menu_label, filepath):
-        """Launch the configured external program on filepath, with the exact error
-        messages requested: missing program -> point at Options; broken program ->
-        ask for a valid one. Thread-safe (logs via the queue)."""
+        """Run the configured external program on filepath, logging a pointer to Options if it
+        is missing or invalid. Thread-safe (logs via the queue)."""
         prog=(self._cfg.get(key) or "").strip()
         if not prog:
             self._log_q.put(("err",f"Error. No {label} program was found. "
                                    f"Please go to Options --> Change {menu_label}..."))
             return
-        # The config is data, not a command line: only ever launch an existing FILE at an
-        # absolute path. Without this a mohaa_viewer_config.json shipped inside a
-        # downloaded bundle could name any program (or a bare "powershell") and this
-        # menu item would run it. shutil.which is deliberately NOT used - resolving a
-        # bare name through PATH (and, on Windows, the current directory) is the exact
-        # behaviour being closed off.
+        # The config is data, not a command line: only launch an existing file at an absolute
+        # path, never a name resolved through PATH or the current directory, so a config shipped
+        # in a downloaded bundle can't run an arbitrary program.
         if not (os.path.isabs(prog) and os.path.isfile(prog)):
-            # SELF-HEAL A BARE COMMAND NAME. A config written by an older build - or carried
-            # over between machines - can hold "notepad.exe" / "open" / "xdg-open", which are
-            # exactly the values this launcher used to seed itself. Sending the user to
-            # Options for a program they never picked is the wrong answer, so resolve those
-            # against the platform's own system folders (still never PATH/CWD on Windows) and
-            # write the absolute path back. A path the USER chose that has since moved or been
-            # renamed has a directory in it, fails this test, and still gets the error below.
+            # A bare command name ("notepad.exe", "open", "xdg-open") from an older config is
+            # resolved against the system folders and saved back. A user-chosen path that has since
+            # moved still gets the error below.
             fixed=self._default_program_path(key) if os.path.basename(prog)==prog else ""
             if not fixed:
                 self._log_q.put(("err",f"Error. The saved {label} program is not a valid file "
@@ -1981,11 +1837,9 @@ class App(tk.Tk):
                     break
             SWP=0x0001|0x0002|0x0004|0x0020   # NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED
             ctypes.windll.user32.SetWindowPos(hwnd,None,0,0,0,0,SWP)
-            # the white frame around drop-down / right-click menus is NATIVE popup-menu
-            # chrome (Windows draws it, Tk can't recolour it). Flip Windows' own menu
-            # theme per-process: uxtheme ordinal 135 = SetPreferredAppMode
-            # (2=ForceDark, 3=ForceLight), ordinal 136 = FlushMenuThemes. Undocumented
-            # but the standard dark-mode approach; needs Win10 1903+, harmless otherwise.
+            # Native popup-menu chrome (the white frame Tk can't recolour) follows Windows' own
+            # per-process menu theme: uxtheme ordinal 135 SetPreferredAppMode (2=dark, 3=light),
+            # 136 FlushMenuThemes. Undocumented; Win10 1903+, harmless elsewhere.
             try:
                 ux=ctypes.WinDLL("uxtheme.dll")
                 ux[135](2 if self._theme=="dark" else 3)
@@ -2017,9 +1871,7 @@ class App(tk.Tk):
                 try: mm.configure(bg=PANEL,fg=TXT,activebackground=SEL_BG,
                                   activeforeground=ACCENT,disabledforeground=DIM)
                 except Exception: pass
-            # the info panel's title/tag/bone labels + dots hold theme colours from
-            # render time; re-render from the last build so light mode gets the HTML
-            # light palette (dark tag text, blue accent) instead of stale dark colours
+            # Info-panel colours are baked at render time, so re-render it from the last build.
             if self._last_info:
                 self._update_info(*self._last_info)
         except Exception: pass
@@ -2048,7 +1900,7 @@ class App(tk.Tk):
                 self._tree.item(ch,open=open_); rec(ch)
         for r in self._tree.get_children(""): self._tree.item(r,open=open_); rec(r)
 
-    # tree: Enter = open file / descend into folder
+    # Tree: Enter opens a file or descends into a folder.
     def _on_tree_enter(self,_e=None):
         self._hide_treetip()
         sel=self._tree.selection()
@@ -2064,7 +1916,7 @@ class App(tk.Tk):
             self._tree.selection_set(kids[0]); self._tree.focus(kids[0]); self._tree.see(kids[0])
         return "break"
 
-    # tree: Backspace = go up one folder (collapse the folder being left)
+    # Tree: Backspace goes up one folder (closing an open folder first).
     def _on_tree_backspace(self,_e=None):
         sel=self._tree.selection()
         if not sel: return "break"
@@ -2077,11 +1929,9 @@ class App(tk.Tk):
         return "break"
 
     # ----------------------------------------- drag-out: standalone viewer ---
-    # Dragging a .skd/.tik row OUT of the launcher window and releasing opens it
-    # in its own self-contained browser viewer (always external, never the
-    # embedded pane), so multiple models can be open at once. Builds triggered
-    # this way skip the open-in-viewer latch: they never touch the embedded pane,
-    # so they can't race it.
+    # Dragging a .skd/.tik row out of the window opens it in its own browser window (never
+    # the embedded pane), so several models can be open at once. These builds skip the
+    # open-in-viewer latch because they never touch the embedded pane.
     def _outside_win(self,xr,yr):
         try:
             x,y=self.winfo_rootx(),self.winfo_rooty()
@@ -2116,16 +1966,15 @@ class App(tk.Tk):
         self._open_external(entry)
 
     def _open_external(self,entry):
-        """Build (or reuse) a tree entry's HTML and open it in a new browser tab
-        window - the browser-version page (with its own Theme / Shortcuts buttons),
-        never the embedded in-launcher pane. Also used by the drag-off-window gesture."""
+        """Build (or reuse) a tree entry's HTML and open it in a browser window instead of the
+        embedded pane. Also used by drag-out."""
         self._log_line(f"Opening {os.path.basename(entry)} in a browser tab...","dim")
         self._run_opts={"external":True}
         self._open_pk3_model(entry)
 
     # ----------------------------------------------------- context menus ---
     def _show_pak_menu(self,e):
-        # what was right-clicked? a file row, a folder row, or the pak header / empty space
+        # Decide what was right-clicked: a file row, a folder row, or the header / empty space.
         iid=""
         try:
             if e.widget is self._tree: iid=self._tree.identify_row(e.y)
@@ -2172,7 +2021,7 @@ class App(tk.Tk):
         self._post_menu(items,e.x_root,e.y_root,event=e)
 
     def _expand_subtree(self, iid, open_):
-        """Expand/collapse ONLY the right-clicked folder and everything under it."""
+        """Expand/collapse only the given folder and everything under it."""
         def rec(item):
             for ch in self._tree.get_children(item):
                 self._tree.item(ch,open=open_); rec(ch)
@@ -2205,16 +2054,13 @@ class App(tk.Tk):
         self._start_batch(self._collect_entries(iids),"selection")
 
     def _open_selected(self, iids):
-        """Multi-selection right-click: build every selected FILE sequentially and
-        open each finished viewer HTML in its own standalone browser window (the
-        embedded pane can only show one page at a time, so own-window is the only
-        way to genuinely open several at once)."""
+        """Build each selected file in turn and open each page in its own browser window (the
+        embedded pane can show only one at a time)."""
         self._start_batch(self._collect_entries(iids),"selection",open_mode="external")
 
     def _open_entries_with(self, entries, key, label, menu_label):
-        """Multi-selection right-click: extract every selected pak file to the temp
-        workspace and hand each one to the configured external program (e.g. the
-        Text Editor). Same per-file behaviour as _open_entry_with, batched."""
+        """Extract each selected pak file to the temp workspace and open it with the configured
+        external program (e.g. the Text Editor). Batched version of _open_entry_with."""
         if not self._pk3_paths or not self._tmp:
             self._log_line("Load a .pk3 first.","err"); return
         if not (self._cfg.get(key) or "").strip():   # one error, not one per file
@@ -2239,12 +2085,10 @@ class App(tk.Tk):
         threading.Thread(target=work,daemon=True).start()
 
     def _start_batch(self, entries, what, open_mode=None):
-        """Sequential background builds of many entries. open_mode=None (default):
-        never open the browser (classic batch build). open_mode='external': open
-        each finished HTML in its own standalone window. Each step goes through
-        the normal open pipeline (so the HTML cache, output subfolders and texture
-        resolve all apply); the next step starts when the previous one finishes
-        or fails."""
+        """Build many entries one after another in the background. open_mode=None never opens
+        anything; 'external' opens each finished page in its own browser window. Each step uses
+        the normal open pipeline (HTML cache, output subfolders, textures); the next one starts
+        when the previous one finishes or fails."""
         if self._batch:
             self._log_line("A batch build is already running - wait for it to finish.","err"); return
         if not entries:
@@ -2269,33 +2113,26 @@ class App(tk.Tk):
         self._open_pk3_model(entry)
 
     def _batch_signal(self):
-        """A build step ended (built, served from cache, or failed): advance the
-        batch exactly once (latched - duplicate signals are harmless)."""
+        """A build step ended (built, served from cache, or failed): advance the batch once.
+        Latched, so duplicate signals are harmless."""
         if not self._batch_waiting: return
         self._batch_waiting=False
         self.after(80,self._batch_step)
 
     def _ctx_open(self, entry, theme=None, no_open=False, force=False):
-        """Open a tree file with one-shot viewer options: a baked initial theme
-        (light/dark), build-only (write + log, don't open the browser), and/or
-        force (rebuild even when a saved HTML exists in the output folder).
-        Applies to exactly this build; the global settings are untouched."""
+        """Open a tree file with one-shot options: a baked initial theme, build-only (no_open),
+        and/or force (rebuild even if a saved HTML exists). Global settings are untouched."""
         self._run_opts={"theme":theme,"no_open":bool(no_open),"force":bool(force)}
-        # A forced rebuild has to LOOK like one. _open_file navigates the existing
-        # WebView2 to the same file:// URL it is already showing, and a same-URL
-        # navigation differing only past the '#' is an in-page hash change, not a
-        # reload - so the freshly written HTML is never fetched and the pane appears
-        # to ignore the rebuild. Dropping the control here means the build runs into
-        # the placeholder pane and _open_file's _ensure_webview() builds a new one:
-        # a real close and reopen. Build-only deliberately opens nothing, so it is
-        # left alone, and _close_viewer is already a no-op when nothing is open.
+        # A forced rebuild must actually reload. Navigating the existing WebView2 to the same
+        # file:// URL with only the #hash changed is an in-page hash change, not a reload, so
+        # close the pane and let _open_file create a new one. Build-only opens nothing and is
+        # left alone.
         if force and not no_open: self._close_viewer()
         self._open_pk3_model(entry)
 
     def _open_entry_with(self, entry, key, label, menu_label):
-        """Extract the clicked pak file to the temp workspace and hand it to the
-        configured external program: .tik -> Text Editor, .skd -> Legacy Model Viewer
-        (e.g. LightRay3D). Missing/broken programs report the Options path to fix."""
+        """Extract the clicked pak file to the temp workspace and open it with the configured
+        external program (.tik -> Text Editor, .skd -> Legacy Model Viewer)."""
         if not self._pk3_paths or not self._tmp:
             self._log_line("Load a .pk3 first.","err"); return
         def work():
@@ -2340,10 +2177,9 @@ class App(tk.Tk):
 
     # ------------------------------------------------ cancel loading / build ---
     def _cancel_build(self,_e=None):
-        """Escape with the Output window focused: abort the in-flight open. The
-        build generation counter is bumped (extraction/build threads capture it
-        and bail out when it changes), a running viewer subprocess is killed, and
-        a pending batch is abandoned. Logged in red."""
+        """Escape in the Output pane: abort the in-flight open. Bumps the build generation
+        (worker threads check it and stop), kills the viewer subprocess, and abandons any
+        pending batch."""
         name=self._building_name
         if not name:
             self._log_line("(nothing is loading / building right now)","dim"); return "break"
@@ -2362,19 +2198,13 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------ dialogs ---
     def _confirm_dialog(self, title, lines, ok_text="Delete", cancel_text="Cancel"):
-        """A themed yes/no dialog matching Help > About: same Panel.TFrame body and the
-        same three-colour text scheme (ACCENT title, TXT body, DIM detail), so it follows
-        Dark/Light like every other launcher window instead of the OS-white messagebox.
+        """Themed OK/Cancel dialog in the same style as Help > About, following Dark/Light.
 
-        `lines` is a list of (text, kind) where kind is 'title' (ACCENT), 'body' (TXT) or
-        'dim' (DIM). Returns True only if the user presses the OK button / Enter.
-
-        When "Use old popup windows" is on, this defers to the OS-default messagebox
-        (white, system font) instead of the themed window - same rule the menus/tooltips
-        follow via OLD_POPUPS."""
+        `lines` is a list of (text, kind) with kind 'title' (ACCENT), 'body' (TXT) or 'dim'
+        (DIM). Returns True only on OK / Enter. Uses the OS messagebox when "Use old popup
+        windows" is on."""
         if OLD_POPUPS:
-            # drop the ACCENT title row (kind=='title'): the native box shows the title
-            # in its own title bar. Everything else keeps its order and blank-line spacing.
+            # The native box shows the title in its own title bar, so drop the 'title' rows.
             body="\n".join(t for t,k in lines if k!="title")
             return bool(messagebox.askokcancel(title, body, parent=self))
         w=tk.Toplevel(self); w.title(title); w.configure(bg=BG)
@@ -2413,15 +2243,11 @@ class App(tk.Tk):
 
     @staticmethod
     def _fill_hotkeys(frm,rows,col,old):
-        """Grid one column-group of the shortcut list into `frm` at grid columns col / col+1.
+        """Grid one column group of the shortcut list into `frm` at columns col / col+1.
 
-        Two groups are placed side by side (launcher keys at 0/1, viewer keys at 2/3). The
-        single-column list this replaced would now be ~47 rows tall and run off the bottom of
-        a 768px-high screen; side by side it is the same height it always was, at the cost of
-        width - so the description column is capped with a font-relative wraplength. Measuring
-        the font (rather than counting characters) keeps the cap honest whatever mono family
-        _mono_family() picked and whatever the OS-default font is under 'old popup windows',
-        and it bounds the window width no matter how long a future description gets."""
+        Launcher keys go at 0/1 and viewer keys at 2/3, side by side, so the window fits on a
+        768px-high screen. Descriptions wrap at a font-measured width so the window width stays
+        bounded whichever font is in use."""
         try:
             import tkinter.font as _tkfont
             _f=_tkfont.nametofont("TkDefaultFont") if old else _tkfont.Font(font=FONT_SMALL)
@@ -2450,10 +2276,9 @@ class App(tk.Tk):
             r+=1
 
     def _show_hotkeys(self):
-        # OS-default (white, system font) window when "Use old popup windows" is on,
-        # matching the menus/tooltips/confirm dialogs; themed window otherwise.
-        # Titled "All Keyboard shortcuts" because it covers BOTH programs; the viewer's own
-        # H overlay is the viewer-only subset and is titled "Viewer Keyboard shortcuts".
+        # OS-default window when "Use old popup windows" is on, themed otherwise. Titled "All
+        # Keyboard shortcuts" because it covers both programs; the viewer's H overlay shows only
+        # the viewer subset.
         if OLD_POPUPS:
             w=tk.Toplevel(self); w.title("All Keyboard shortcuts")
             w.transient(self); w.resizable(False,False)
@@ -2598,11 +2423,10 @@ class App(tk.Tk):
         except Exception: pass
 
     def _check_for_updates(self):
-        """Help --> Check for updates. A small Firefox-style window: the current
-        version, a link to the repo, and a background check of version.txt on the
-        main branch. Then either 'up to date' or an offer to download + install the
-        newer files. Nothing here runs on its own - the network is touched only when
-        the user opens this window (see the PRIVACY notice, section 3)."""
+        """Help --> Check for updates: shows the current version and repo link, checks
+        docs/version.txt on the main branch in the background, then reports "up to date" or
+        offers to install the newer files. The network is only used when this window is opened
+        (see PRIVACY_TEXT, section 3)."""
         old=OLD_POPUPS
         self._upd_state=None
         w=tk.Toplevel(self); w.title("Check for updates")
@@ -2689,7 +2513,7 @@ class App(tk.Tk):
         status_lbl.configure(text="Downloading "+latest+" \u2026")
         self._upd_state=None
         def worker():
-            res=self._update_download_and_apply()
+            res=self._update_download_and_apply(latest)
             self._upd_state=("installed",res)
         threading.Thread(target=worker,daemon=True).start()
         self.after(200,lambda:self._update_poll_install(w,status_lbl,btnrow))
@@ -2717,19 +2541,30 @@ class App(tk.Tk):
                                       "Restart the program for the changes to take effect.")
             self._upd_add_button(btnrow,"Restart now",lambda:self._restart_program())
 
-    def _update_download_and_apply(self):
-        """Background worker: download the branch zip, extract it, and copy every file
-        over the install root (bin/, docs/, the RUN .bat). Files that are locked and
-        can't be overwritten live are written as <file>.new and returned in 'staged'
-        for the restart helper to swap in. Returns a result dict - no Tk calls here."""
-        import urllib.request
+    def _update_download_and_apply(self, version=None):
+        """Background worker: download the zip for `version` (its release tag, or the branch
+        head if that tag doesn't exist), extract it and copy every file over the install root
+        (bin/, docs/, the RUN .bat). Locked files are written as <file>.new and returned in
+        'staged' for the restart helper to swap in. Returns a result dict; no Tk calls here."""
+        import urllib.request, urllib.error
         root=_install_root()
         tmp=tempfile.mkdtemp(prefix="mohaaupd_")
         try:
             zpath=os.path.join(tmp,"repo.zip")
-            req=urllib.request.Request(UPDATE_ZIP_URL,headers={"User-Agent":UPDATE_UA})
-            with urllib.request.urlopen(req,timeout=90) as r, open(zpath,"wb") as f:
-                shutil.copyfileobj(r,f)
+            urls=[]
+            # The version string comes from the network, so only a plain token goes into a URL.
+            if version and re.fullmatch(r"[0-9A-Za-z._-]{1,32}",version):
+                urls.append(UPDATE_TAG_ZIP_URL.format(tag=UPDATE_TAG_FMT.format(version=version)))
+            urls.append(UPDATE_ZIP_URL)
+            for i,url in enumerate(urls):
+                req=urllib.request.Request(url,headers={"User-Agent":UPDATE_UA})
+                try:
+                    with urllib.request.urlopen(req,timeout=90) as r, open(zpath,"wb") as f:
+                        shutil.copyfileobj(r,f)
+                    break
+                except urllib.error.HTTPError as e:
+                    if e.code==404 and i<len(urls)-1: continue      # untagged: use the branch
+                    raise
             exdir=os.path.join(tmp,"x")
             with zipfile.ZipFile(zpath) as z: z.extractall(exdir)
             tops=[d for d in os.listdir(exdir)
@@ -2761,10 +2596,9 @@ class App(tk.Tk):
             shutil.rmtree(tmp,ignore_errors=True)
 
     def _restart_program(self,staged=None):
-        """Relaunch a fresh launcher and close this one. When files were staged as
-        *.new (locked, couldn't be replaced live), a one-shot helper .bat waits for
-        THIS process to exit, swaps them in, then starts the new build - the
-        'auto-close and auto-reopen' path."""
+        """Start a fresh launcher and close this one. If files were staged as *.new (locked
+        during the update), a one-shot helper .bat waits for this process to exit, swaps them
+        in, then starts the new launcher."""
         launcher=os.path.abspath(__file__)
         exe=sys.executable or "pythonw"
         try:
@@ -2840,7 +2674,7 @@ class App(tk.Tk):
         threading.Thread(target=self._prepare_indexes,args=(self._tex_gen,list(self._pk3_paths)),daemon=True).start()
 
     def _prepare_indexes(self, gen, paks):
-        # extract shared human animations from all paks (for posing characters)
+        # Extract the shared human animations from all paks (used to pose characters).
         try:
             roots=("models/human/animation/idle/","models/human/animation/walks_runs/",
                    "models/human/animation/misc/")
@@ -2854,7 +2688,7 @@ class App(tk.Tk):
                     zf.close()
                 except Exception: pass
         except Exception: pass
-        # build texture resolution indexes (shaders + tik skins) across all paks
+        # Build the texture resolution indexes (shaders + tik skins) across all paks.
         if MTX is None:
             self._log_q.put(("dim","(mohaa_textures.py not found - models will load untextured)")); return
         try:
@@ -2872,26 +2706,20 @@ class App(tk.Tk):
         except Exception as e:
             self._log_q.put(("err",f"Texture index failed: {e}"))
 
-    # Everything the viewer actually consumes out of the workspace folder. A .pk3 is just
-    # a zip and may contain anything at all; nothing outside this set is ever written to
-    # disk, so a hostile pak cannot drop a .bat / .exe / .ps1 / .desktop payload even if
-    # the user goes on to build the model that sits beside it.
+    # File types the viewer reads from the workspace. Nothing else in a pak is ever written
+    # to disk, so a hostile pak can't drop an executable payload.
     _EXTRACT_OK={".skd",".skb",".skc",".tik",".map",".txt",".shader",
                  ".tga",".jpg",".jpeg",".png",".dds",".tif",".tiff"}
-    # Windows resolves these as DEVICES no matter what directory or extension they carry.
+    # Names Windows treats as devices regardless of folder or extension.
     _WIN_RESERVED={"con","prn","aux","nul","clock$"} | {p+str(i) for p in ("com","lpt") for i in range(1,10)}
 
     def _safe_target(self, name):
-        """Resolve a pak entry name to a path INSIDE the workspace, or None to refuse it.
+        """Resolve a pak entry name to a path inside the workspace, or None to refuse it.
 
-        Pak entry names are attacker-controlled - the zip central directory can say
-        anything, including "models/x/../../../../../../Startup/pwn.bat". The old
-        os.path.join(self._tmp,*name.split("/")) let those '..' segments escape %TEMP%
-        and land the write anywhere the user could write (and on Windows a bare "C:"
-        component silently re-rooted the join as well). Every component is reduced to a
-        plain name here, the extension is checked against the allow-list, and the result
-        is re-verified against the workspace root with realpath so a symlink or NTFS
-        junction in the middle cannot slip past either."""
+        Entry names are untrusted (e.g. "models/../../Startup/x.bat"), so every component is
+        reduced to a plain name (no '..', drive tokens, alternate data streams or reserved
+        device names), the extension must be in _EXTRACT_OK, and the result is re-checked
+        against the workspace root with realpath so symlinks and junctions can't escape it."""
         root=self._tmp
         if not root: return None
         if os.path.splitext(name)[1].lower() not in self._EXTRACT_OK: return None
@@ -2916,18 +2744,21 @@ class App(tk.Tk):
         if target is None:
             self._log_q.put(("dim","(skipped unsafe pak entry: %s)"%name[:120])); return None
         if not force and os.path.exists(target) and os.path.getsize(target)>0: return target  # cached
+        # zipfile stops reading at the entry's declared size, so checking that size bounds
+        # what gets written.
+        try: size=zf.getinfo(name).file_size
+        except KeyError: return None
+        if size>PAK_ENTRY_MAX:
+            self._log_q.put(("dim","(skipped oversized pak entry: %s)"%name[:120])); return None
         os.makedirs(os.path.dirname(target),exist_ok=True)
         with zf.open(name) as src, open(target,"wb") as dst: shutil.copyfileobj(src,dst)
         return target
 
     def _extract_model_map(self, stem, dest_dir):
-        """Extract <stem>.map (the model's world-space clip/box brushes) into dest_dir so the viewer
-        can derive `setsize` from it. MOHAA keeps these under models/ but NOT always beside the .skd
-        (e.g. models/static/indycrate.skd while the .map may sit elsewhere in the models/ tree), so
-        the prefix/sibling passes can miss it - we match by basename across every loaded pak, prefer a
-        path under models/ (over a same-named level .map), and let later paks override earlier. The
-        viewer looks for <stem>.map next to the model (mohaa_view.parse_map_bounds). Returns the
-        written path or None."""
+        """Extract <stem>.map (the model's clip/box brushes) into dest_dir so the viewer can
+        derive `setsize` from it (mohaa_view.parse_map_bounds). The .map isn't always beside the
+        .skd, so match by basename across all paks, preferring a path under models/ over a
+        same-named level .map; later paks win. Returns the written path or None."""
         if not self._pk3_paths: return None
         want=stem.lower()+".map"; best=None   # (score, data); lower score wins
         for p in self._pk3_paths:
@@ -2938,7 +2769,9 @@ class App(tk.Tk):
                     if n.endswith("/") or os.path.basename(n).lower()!=want: continue
                     score=0 if "models/" in n.lower() else 1
                     if best is None or score<=best[0]:
-                        try: best=(score,zf.read(n))
+                        try:
+                            if zf.getinfo(n).file_size>PAK_ENTRY_MAX: continue
+                            best=(score,zf.read(n))
                         except Exception: continue
             finally: zf.close()
         if not best: return None
@@ -3008,9 +2841,8 @@ class App(tk.Tk):
         if sel and sel[0] in self._tree_entry: self._open_pk3_model(self._tree_entry[sel[0]])
 
     def _viewer_open_busy(self):
-        """A previous open-in-viewer request is still building: reject this one.
-        Build-only requests (_run_opts['no_open'], set by right-click Build only
-        and by every batch step) are exempt and never blocked here."""
+        """True (and logs) if an open-in-viewer build is already running. Build-only and
+        external opens are never blocked."""
         if self._run_opts.get("no_open") or self._run_opts.get("external"): return False
         if self._opening_view:
             self._log_line("Please wait until the current file(s) finish building.","err")
@@ -3018,12 +2850,10 @@ class App(tk.Tk):
         return False
 
     def _queue_open_until_indexed(self, entry):
-        """A pk3 open arrived before the texture/VFS index finished. Latch it and let
-        _poll_log fire it automatically the instant the index is ready (or drop it on an
-        Escape-cancel). Building an untextured HTML now would cache it and serve it
-        forever, so we wait instead. While queued, any further open request hits
-        _viewer_open_busy -> "Please wait until the current file(s) finish building.".
-        Shared by the .skd (_open_pk3_model) and .tik (_open_pk3_tik) open paths."""
+        """A pak open arrived before the texture/VFS index finished. Interactive opens are
+        latched and fired by _poll_log once the index is ready (an Escape-cancel drops them),
+        since building now would cache an untextured page. Non-interactive opens (build-only,
+        drag-out) are skipped so a batch never stalls. Used by the .skd and .tik open paths."""
         interactive=(self._auto_open.get() and not self._run_opts.get("no_open")
                      and not self._run_opts.get("external"))
         self._log_line("Textures/VFS still indexing - viewer will open shortly...","err")
@@ -3039,19 +2869,16 @@ class App(tk.Tk):
         if self._viewer_open_busy(): return
         if entry.lower().endswith(".tik"): return self._open_pk3_tik(entry, loose_path)
         subdir=STANDALONE_SUBDIR if loose_path else self._entry_subdir(entry)
-        # already built? open the saved HTML straight from the output folder - no
-        # extraction, no texture resolve, no build (right-click > Rebuild to force).
-        # A loose open resolves its own cache in _load, so skip this pak-cache probe.
+        # Already built? Open the saved HTML directly (right-click > Rebuild forces a build).
+        # Loose files check their own cache in _load.
         if loose_path is None and self._reuse_ok():
             hp=os.path.join(self._outdir, subdir or "", self._viewer_html_name(entry))
             if os.path.exists(hp) and self._html_current(hp):
                 self._last_subdir=subdir; self._open_cached(hp,entry,subdir); return
         if not self._pk3_paths or not self._tmp:
             self._log_line("Load a .pk3 first.","err"); return
-        # textures not indexed yet? queue this open and fire it once the index is ready,
-        # instead of building an untextured HTML that then gets cached and served forever
-        # (the .skd counterpart of the .tik defer). With no texture module at all (MTX is
-        # None) there is no index to wait for, so fall through and build untextured.
+        # Wait for the texture index rather than caching an untextured page. Without
+        # mohaa_textures (MTX is None) there's no index to wait for.
         if MTX is not None and (self._vfs is None or not self._tex_ready):
             self._queue_open_until_indexed(entry); return
         self._log_line(f"Extracting {entry} ...","dim"); self._set_status(f"Extracting {os.path.basename(entry)}...")
@@ -3078,10 +2905,8 @@ class App(tk.Tk):
                         zf.close()
                     if not skd_target:
                         self._log_q.put(("err","Could not find that .skd inside the loaded paks")); return
-                # A loose .skd carries only a basename. Resolve its VFS twin so the texture
-                # index (surface->shader maps keyed by full pak path) still applies, and pull
-                # its sibling .skc/.tik/.map next to it so animations and skins load - the same
-                # dependencies a tree open gets for free from its folder-prefix extraction.
+                # A loose .skd has only a basename: find its pak twin so the texture index (keyed by
+                # full pak path) applies, and extract its sibling .skc/.tik/.map as a tree open would.
                 tex_key=entry
                 if loose_path and self._vfs is not None:
                     bn="/"+os.path.basename(entry).lower()
@@ -3122,14 +2947,11 @@ class App(tk.Tk):
         threading.Thread(target=work,daemon=True).start()
 
     def _resolve_skel_vfs(self, skel, pathhead, entry=None):
-        """Resolve a .tik `skelmodel` reference to a VFS key, trying the .skb<->.skd twin.
-        Many retail .tik files still reference a stale <n>.skb while the pak only ships
-        <n>.skd (flaregun, papers_o, wirecutters, ...). The engine dispatches skeletal
-        loading by extension - TIKI_RegisterSkel .skb->TIKI_LoadSKB / .skd->TIKI_LoadSKD
-        (openmoh/openmohaa code/tiki/tiki_skel.cpp:1116,1142-1150) - and its bare-skelmodel
-        fallback normalises to .skd (tiki_files.cpp:243-251), so a missing .skb resolves to
-        the shipped .skd. The referenced extension is tried in full first (no regression for
-        correctly-referenced models); the twin is only a fallback. Returns the key or None."""
+        """Resolve a .tik `skelmodel` reference to a VFS key, falling back to the .skb<->.skd
+        twin. Some retail .tiks reference a <n>.skb the pak doesn't ship (flaregun, papers_o,
+        wirecutters); the engine picks the loader by extension (tiki_skel.cpp:1116,1142-1150)
+        and normalises bare skelmodels to .skd (tiki_files.cpp:243-251). The referenced
+        extension is always tried first. Returns the key or None."""
         if self._vfs is None: return None
         skel=(skel or "").replace("\\","/").strip().strip('"')
         if not skel: return None
@@ -3159,9 +2981,8 @@ class App(tk.Tk):
         loose_path, when set, is an on-disk .tik opened from Browse/drag-drop: its own
         edited content drives the build while its dependencies resolve from the paks."""
         subdir=STANDALONE_SUBDIR if loose_path else self._entry_subdir(entry)
-        # noted for on-demand animation builds: a cache hit returns below without
-        # extracting anything, so the catalogue is rebuilt lazily from this entry the
-        # first time the viewer asks for an animation (_ensure_anim_ctx)
+        # Remember the entry for on-demand animation builds: a cache hit returns below without
+        # extracting anything, so _ensure_anim_ctx rebuilds the catalogue lazily from it.
         self._anim_entry=(loose_path or entry)
         if loose_path is None and self._reuse_ok():
             hp=os.path.join(self._outdir, subdir or "", self._viewer_html_name(entry))
@@ -3200,19 +3021,12 @@ class App(tk.Tk):
                         zf.close()
                     if not tik_target:
                         self._log_q.put(("err","Could not find that .tik inside the loaded paks")); return
-                # latin-1, explicitly: every OTHER path decodes pak bytes as latin-1
-                # (expand_tik_includes, build_shader_index), while a bare open() uses the
-                # LOCALE codec - cp1252 here, cp932 on a Japanese Windows, UTF-8 on Linux.
-                # The same .tik then parsed differently per machine. latin-1 is also
-                # byte-transparent, so it can never raise on a stray high byte.
+                # Decode as latin-1 like every other pak read; a bare open() would use the locale codec
+                # and parse the same .tik differently per machine. latin-1 also never raises.
                 txt=open(tik_target,"r",encoding="latin-1",errors="replace").read()
-                # ANIMATION CATALOGUE, built from the RAW tik text - before the $include
-                # splice below. It has to be: mohaa_textures.build_anim_catalog walks the
-                # includes itself so it can keep each file's own $path scope, which is what
-                # the engine does (TikiScript::path is per-script, tiki_script.cpp:50/414-421)
-                # and what a flat splice destroys. This is what turns allied_pilot.tik from
-                # "8 balcony animations" into its full reach across new_generic_human.tik,
-                # every `includes <map>{}` group and the dialogue tik.
+                # Build the animation catalogue from the raw text, before the $include splice below:
+                # build_anim_catalog walks includes itself to keep each file's own $path scope, as the
+                # engine does (tiki_script.cpp:50, 414-421), which a flat splice would lose.
                 self._animcat=None; self._animcat_file=None; self._animcat_for=None
                 if MTX is not None and hasattr(MTX,"build_anim_catalog"):
                     try:
@@ -3233,25 +3047,20 @@ class App(tk.Tk):
                 if MTX is not None: txt=MTX.expand_tik_includes(txt, self._vfs)   # splice $include'd _base.txt (grenades)
                 open(tik_target,"w",encoding="utf-8",errors="replace").write(txt)  # write back so mohaa_view.py sees expanded content
                 emitters=MV.parse_tik_emitters(txt)
-                # anim-level client spawn blocks (tagspawn/originspawn bursts) also
-                # reference sprite / sub-model targets; collect their param dicts so
-                # the sprite resolver below covers them too.
+                # Anim-level client spawn blocks (tagspawn/originspawn) also reference sprites and
+                # sub-models; collect their params so the sprite resolver covers them.
                 anim_prms=[]; tikanims=[]
                 try:
                     tikanims=MV.parse_tik_animations(txt)
                     for ta in tikanims:
                         for c in ta.get("client",[]):
-                            # any client frame command carrying a ( ... ) block is a spawn
-                            # block, including wrapped forms like `entry commanddelay 0.100
-                            # originspawn` (fx_bike_explosion) - collect them all so their
-                            # sprites resolve
+                            # Any client command with a ( ... ) block is a spawn block, including wrapped forms
+                            # like `entry commanddelay 0.100 originspawn` (fx_bike_explosion).
                             if c.get("prm"):
                                 anim_prms.append(c["prm"])
-                        # server `explosioneffect <type>` (tankshellexplosion.tik) redirects to a
-                        # base explosion .tik (bazooka -> models/fx/bazookaexp_base.tik, etc -
-                        # MV._EXPLOSIONEFFECT_TIK, mirroring cg_parsemsg CG_MakeExplosionEffect).
-                        # It has no ( ) block, so synthesise a prm with that .tik model so the
-                        # sub-tik resolver + expand_subfx below flatten its effects.
+                        # Server `explosioneffect <type>` (tankshellexplosion.tik) redirects to a base explosion
+                        # .tik (MV._EXPLOSIONEFFECT_TIK, after cg_parsemsg CG_MakeExplosionEffect). It has no
+                        # ( ) block, so add a prm with that model for the sub-tik resolver and expand_subfx.
                         for c in ta.get("server",[]):
                             av=c.get("argv") or []
                             _cmd,_rest,_dl=MV._strip_cmd_prefix(av)
@@ -3260,8 +3069,8 @@ class App(tk.Tk):
                                 _tik=MV._EXPLOSIONEFFECT_TIK.get(_et,MV._EXPLOSIONEFFECT_TIK["grenade"])
                                 anim_prms.append({"model":_tik})
                 except Exception: pass
-                # init{client{}} `sfx originspawn ( ... )` one-shots (grenexp_water)
-                # reference sprites too - include them so their billboards resolve
+                # init{client{}} `sfx originspawn ( ... )` one-shots (grenexp_water) reference sprites
+                # too.
                 try:
                     for _s in MV.parse_tik_init_sfx(txt):
                         if _s.get("prm"): anim_prms.append(_s["prm"])
@@ -3295,24 +3104,17 @@ class App(tk.Tk):
                             with open(os.path.join(tik_dir,os.path.basename(k)),"wb") as f: f.write(d); 
                             sib+=1
                 if sib: self._log_q.put(("dim",f"+{sib} animation/shader sibling(s)"))
-                # ensure the model's .map (setsize source) is present next to the skelmodel even if it
-                # doesn't sit in the skelmodel's folder (matched by basename across paks)
+                # Also fetch the model's .map (setsize source) when it isn't in the skelmodel's folder.
                 try: self._extract_model_map(os.path.splitext(os.path.basename(skel))[0], tik_dir)
                 except Exception: pass
-                # 3c) extract every .skc the tik's animations{} references (basename match
-                # across the VFS) so the viewer can play each named anim. Vehicles reference
-                # sibling files (already pulled above); effect/human tiks pull anims from
-                # other folders. Capped so a 600-anim player model doesn't stall the open.
+                # 4) Extract the .skc for the animations the .tik declares itself, so the page can bake
+                #    them with their per-anim fx. The rest of the catalogue builds on click.
                 try:
                     _pre=self._anim_preload_n()
                     _own=[e for e in (self._animcat or {}).get("anims",[]) if e.get("d")][:_pre]
                     if self._animcat and _own:
-                        # pull the .skc for the animations the .tik declares ITSELF (jeep,
-                        # effect tiks) so the page can bake them and their per-anim fx fire at
-                        # load, exactly as before. Extracted under the entry's
-                        # own id, not its basename - `salute idle/salute.skc` and
-                        # `american_salute misc/salute.skc` are two different animations
-                        # that a basename sweep silently collapsed into one.
+                        # Extracted under each entry's id, not its basename: `salute idle/salute.skc` and
+                        # `american_salute misc/salute.skc` are different animations.
                         _ad=os.path.join(tik_dir,"_anims"); os.makedirs(_ad,exist_ok=True)
                         got=0; miss=0
                         for _e in _own:
@@ -3329,8 +3131,8 @@ class App(tk.Tk):
                         self._log_q.put(("dim",f"{len(self._animcat['anims'])} animation(s), none declared "
                                               f"by the .tik itself - each builds on first click"))
                     else:
-                        # no catalogue (a .tik whose animations{} the resolver could not
-                        # reach): keep the original basename sweep as the fallback
+                        # No catalogue (the resolver couldn't reach the animations{} block): fall back to a
+                        # basename sweep of the parsed animation files.
                         refs={os.path.basename((ta.get("file") or "").replace("\\","/")).lower()
                               for ta in tikanims}
                         refs={r for r in refs if r.endswith(".skc")}
@@ -3349,8 +3151,8 @@ class App(tk.Tk):
                                 self._log_q.put(("dim","(animation extraction capped at 300 .skc)")); break
                         if got: self._log_q.put(("dim",f"+{got} referenced animation .skc extracted"))
                 except Exception as _e: self._log_q.put(("dim",f"(animation extraction: {_e})"))
-                # 3b) extract the OTHER skelmodels this .tik assembles (head, hands, helmet, ...)
-                #     next to the tik so the viewer merges them into one static model, as in-game.
+                # 5) Extract the other skelmodels this .tik assembles (head, hands, helmet, ...) next to
+                #    it so the viewer merges them into one model, as in-game.
                 part_disk=[skd_out]                          # body first
                 try: all_parts=MV.parse_tik_skelmodels(txt)
                 except Exception: all_parts=[]
@@ -3358,7 +3160,7 @@ class App(tk.Tk):
                     ps=(ps or "").replace("\\","/").strip().strip('"')
                     pp=(pp or "").replace("\\","/").strip().strip('"')
                     if not ps: continue
-                    pv=self._resolve_skel_vfs(ps, pp)   # twin-aware; attached parts can be stale-.skb too
+                    pv=self._resolve_skel_vfs(ps, pp)   # twin-aware; parts can reference a stale .skb too
                     if not pv:
                         self._log_q.put(("dim",f"(attached part not found: {ps})")); continue
                     pd=self._vfs.read(pv)
@@ -3374,46 +3176,40 @@ class App(tk.Tk):
                                 with open(os.path.join(tik_dir,os.path.basename(k)),"wb") as f: f.write(dd)
                 if len(part_disk)>1:
                     self._log_q.put(("dim",f"assembled {len(part_disk)} parts: "+", ".join(os.path.basename(p) for p in part_disk)))
-                # 4) resolve textures for the skelmodel's surfaces
+                # 6) Resolve textures for the skelmodel's surfaces.
                 if bgen!=self._build_gen: return                # Escape: cancelled
                 if MTX is not None and self._tex_ready and gen==self._tex_gen:
                     try:
-                        # combined surface list across all assembled parts (body + head + hands)
+                        # Combined surface list across all assembled parts (body + head + hands).
                         surfs=[]
                         for pdp in part_disk:
                             try: surfs+=[s["name"] for s in MV.parse_skd(pdp)["surfaces"]]
                             except Exception: pass
                         seen=set(); surfs=[s for s in surfs if not (s in seen or seen.add(s))]
                         manifest=os.path.join(self._tmp,"_tex_"+os.path.basename(entry)+".json")
-                        # The opened .tik's OWN setup maps this skd's surfaces to the right shader
-                        # (e.g. bangalore_pulsating vs ..._ghosting vs plain bangalore - all skin the
-                        # same bangalore.skd). The global tik index keeps only one mapping per skd, so
-                        # let the opened tik's mapping take precedence for correct per-variant skins.
+                        # The opened .tik's own setup decides the skin (bangalore_pulsating, _ghosting and plain
+                        # bangalore all use bangalore.skd); the global index keeps only one mapping per .skd.
                         local_TI=dict(self._TI)
                         allpairs=[]
                         try:
                             tik_map=MTX.parse_tik_setup(txt)
                             local_TI.update(tik_map)
-                            # the assembled model skins ALL parts' surfaces under one mesh, so make
-                            # every part's surface->shader visible under the body key the manifest uses
+                            # All parts are skinned as one mesh, so expose every part's surface->shader pairs under
+                            # the body key the manifest uses.
                             for v in tik_map.values(): allpairs+=v
                             local_TI[skel_vfs]=allpairs; local_TI[skel_vfs.lower()]=allpairs
                         except Exception: pass
                         nt,ns=MTX.write_textures_manifest(self._vfs,skel_vfs,surfs,self._SH,local_TI,manifest,global_surf=self._GS,shader_props=self._PROPS)
                         self._log_q.put(("dim",f"textures: {nt}/{ns} surfaces"))
-                        # SILENT MISS: the .skd path already reports unresolved surfaces, but this
-                        # .tik path never did - it printed "textures: 0/1 surfaces" and moved on,
-                        # so muzflash_bar.tik came out untextured with NO error line at all.
-                        # Pass the tik's own surface->shader pairs so the reason can name the
-                        # shader that failed to resolve rather than claiming there was no mapping.
+                        # Report unresolved surfaces, passing the tik's own surface->shader pairs so the message
+                        # can name the shader that failed.
                         if nt<ns: self._report_surface_misses(manifest,surfs,dict(allpairs))
                         if nt==0: manifest=None
                     except Exception as e:
                         self._log_q.put(("dim",f"(texture resolve skipped: {e})")); manifest=None
-                # 5) resolve each emitter's sprite/sub-model -> billboard texture data URL
-                # (setup emitters + anim-level spawn blocks in one pass; a second pass
-                # resolves sprites referenced from INSIDE flattened dummy sub-tiks,
-                # e.g. snipesmoke's vsssource.spr)
+                # 7) Resolve each emitter's sprite/sub-model to a billboard texture (setup emitters and
+                #    anim-level spawn blocks), then a second pass for sprites referenced inside flattened
+                #    sub-tiks (e.g. snipesmoke's vsssource.spr).
                 emittex=self._resolve_emitter_sprites(emitters+anim_prms)
                 inner=[]
                 for ent in emittex.values():
@@ -3421,9 +3217,8 @@ class App(tk.Tk):
                 if inner:
                     more=self._resolve_emitter_sprites(inner)
                     for k,v in more.items(): emittex.setdefault(k,v)
-                # MISSING-ASSET DIAGNOSTIC: any `model` ref still absent from emittex
-                # never produced a sprite. Say so in red rather than silently dropping
-                # to an untextured blob (adam-firefill -> senn_fire1.spr / senn_fire2.spr).
+                # Warn about `model` refs that produced no sprite instead of silently drawing an
+                # untextured blob.
                 self._warn_emitter_assets(emitters+anim_prms+inner, emittex)
                 emittex_file=None
                 if emittex:
@@ -3479,21 +3274,12 @@ class App(tk.Tk):
             return (0.0, 1.0)
 
     def _submodel_pose_channels(self, sub_text, pathhead):
-        """Frame-0 channel dict of the sub-tik's `idle` animation, used to POSE its skelmodel.
+        """Frame-0 channels of the sub-tik's `idle` animation, used to pose its skelmodel.
 
-        A tempmodel spawned from an RT_MODEL .tik is skinned in an ANIMATION pose, never the
-        raw skeleton: SpawnTempModel sets ent.frameInfo[0].index = Anim_NumForName(tiki,"idle")
-        - falling back to animation 0 on a miss - with weight 1.0 and wasframe 0
-        (cg_tempmodels.cpp:1337-1347); AnimateTempModel only advances wasframe from there
-        (:259-300). compute_world({}) gives every bone an IDENTITY rotation instead
-        (bone_local: channels.get(name+" rot",[0,0,0,1])), which is exactly why the MAIN model
-        path feeds it a real base .skc via pick_base_anim. Without this, models/fx/muzflash.tik
-        baked out lying along -Y - ACROSS the barrel instead of down it - and `randomroll` then
-        swept that sideways card around the barrel axis: the "muzzle flash points wherever it
-        likes" / "two sprites at different angles" report (the two crossed quads share the same
-        long axis, so both were wrong together).
-        Returns {} on any miss, which reproduces the previous behaviour exactly.
-        """
+        A tempmodel from an RT_MODEL .tik is posed by an animation, not the raw skeleton:
+        SpawnTempModel uses Anim_NumForName(tiki,"idle"), falling back to animation 0, at frame
+        0 (cg_tempmodels.cpp:1337-1347). With identity rotations instead, e.g. muzflash.tik
+        lies across the barrel rather than along it. Returns {} on any miss."""
         if self._vfs is None: return {}
         try:
             import mohaa_view as MV
@@ -3531,26 +3317,18 @@ class App(tk.Tk):
             return {}
 
     def _submodel_mesh(self, sub_text, max_aspect=3.0):
-        """For a .tik sub-model debris particle (metal_section / ibeam_piece), return compact
-        bind-pose geometry {v:[[x,y,z]...], t:[[a,b,c]...]} in MOHAA model space (Z-up), centred
-        on the mesh centroid and pre-multiplied by the sub-tik `scale`, so the viewer can draw it
-        as a real 3D chunk instead of a flat billboard. Returns None for thin slivers
-        (aspect >= max_aspect, e.g. spark splinters that read fine as oriented streaks - keeping
-        those on the signed-off billboard path) or on any miss."""
+        """Bind-pose geometry for a .tik sub-model debris particle (metal_section, ibeam_piece):
+        {v:[[x,y,z]...], t:[[a,b,c]...], ...} in model space (Z-up), scaled by the sub-tik
+        `scale`, so the viewer can draw it as a 3D chunk. Returns None for thin slivers
+        (aspect >= max_aspect, drawn as oriented billboards), sprite shaders, or on any miss."""
         if self._vfs is None: return None
         try:
             import mohaa_view as MV
             pathhead, skel = MV.parse_tik_setup_head(sub_text)
             if not skel: return None
-            # AUTOSPRITE / animmap sub-tik shaders are camera-facing SPRITES, not solid geometry.
-            # bh_wood_puff / bh_stone_puff are `surface all shader bh_wood_puff`, whose shader is
-            # `deformVertexes autoSprite2` + `animmap woodpuff1..7` - in-game the spritebeam.skd
-            # quad is REPLACED by a camera-facing animated sprite, never drawn as its raw mesh.
-            # Rendering that quad as a 3D chunk here produced the untextured BLACK SQUARE (its
-            # bind pose is a flat, near-1:1 quad, so the aspect gate below never caught it). Keep
-            # these on the sprite billboard path (the animmap texture the sprite resolver ships)
-            # by returning None. Real debris (bh_wood_piece: no autosprite, no animmap) still
-            # meshes as a tumbling chunk.
+            # Autosprite/animmap shaders (bh_wood_puff, bh_stone_puff) are camera-facing sprites
+            # in-game, not meshes; their flat quad would otherwise render as a black square. Real
+            # debris (bh_wood_piece) still gets a mesh.
             _shm=re.search(r'surface\s+\S+\s+shader\s+(\S+)', sub_text, re.I)
             if _shm and self._PROPS:
                 _sp=(self._PROPS or {}).get(_shm.group(1).strip().lower())
@@ -3579,8 +3357,8 @@ class App(tk.Tk):
             finally:
                 try: os.remove(tmp)
                 except OSError: pass
-            # Pose the skeleton the way the engine does - the sub-tik's `idle` animation,
-            # frame 0 (cg_tempmodels.cpp:1337-1347) - not an all-identity skeleton.
+            # Pose the skeleton like the engine: the sub-tik's `idle` animation at frame 0
+            # (cg_tempmodels.cpp:1337-1347).
             _ch=self._submodel_pose_channels(sub_text, pathhead)
             dims=MV.skd_bind_dims(skd, _ch)
             longest=dims[0]; mid=dims[1] if len(dims)>1 and dims[1]>0.01 else longest
@@ -3596,8 +3374,7 @@ class App(tk.Tk):
                         wp=MV.v_add(MV.mat_vec(wR[bi],offv),wT[bi])
                         P=[P[k]+wv*wp[k] for k in range(3)]
                     sv.append(P); cen=[cen[k]+P[k] for k in range(3)]; nv+=1
-                # per-vertex UVs so the viewer can paint the chunk with its real skin
-                # texture instead of a flat average colour ("debris missing textures").
+                # Per-vertex UVs so the viewer can texture the chunk with its real skin.
                 _suv=s.get("uvs") or []
                 for k in range(len(s["verts"])):
                     if k<len(_suv): uvs.extend([round(_suv[k][0],4),round(_suv[k][1],4)])
@@ -3607,55 +3384,34 @@ class App(tk.Tk):
                 verts.extend(sv); base+=len(sv)
             if nv==0 or not tris: return None
             cen=[cen[k]/nv for k in range(3)]
-            # NATIVE MODEL SPACE - do NOT re-centre on the centroid. A tempmodel is a plain
-            # refEntity: SpawnTempModel puts the spawn point in p->cgd.origin and the particle's
-            # randomized Euler angles in p->ent.axis (cg_tempmodels.cpp:1492-1494), and the
-            # model's own vertices are then rotated about the ENTITY origin. So a card authored
-            # away from its model origin - bh_foliage_leaf's leaf.skd - is swung onto a shell of
-            # radius |centroid|*scale by each particle's random `angles`. For fx_leaves_blowing
-            # that is the ONLY source of per-leaf separation the engine has: the block sets no
-            # shape flag, no radius and no offset, and `radialvelocity 0 10 110` then REPLACES
-            # the forward velocity with (origin-start)*fVel, which is zero-length and leaves the
-            # leaf at rest (cg_tempmodels.cpp:1511-1521, SetRadialVelocity cg_commands.cpp:
-            # 2739-2754). Centring collapsed all five leaves onto one point - the falling clump.
+            # Keep native model space (don't re-centre). A tempmodel's vertices rotate about the
+            # entity origin with the particle's random angles (cg_tempmodels.cpp:1492-1494), so a
+            # card authored away from its origin (bh_foliage_leaf's leaf.skd) is swung onto a shell
+            # of radius |centroid|*scale. For fx_leaves_blowing that is the only per-leaf spread the
+            # engine has; radialvelocity leaves the leaves at rest (cg_tempmodels.cpp:1511-1521).
             V=[[round(p[k]*tscale,3) for k in range(3)] for p in verts]
             out={"v":V,"t":tris}
             if any(uvs): out["uv"]=uvs
-            # texture: the sub-tik's first `surface <n> shader <s>` resolved through the
-            # shader index (same lookup the sprite path uses). tempmodels render the model
-            # with its own skin in-game (SpawnTempModel -> RT_MODEL refEntity), so the chunk
-            # carries its texture as a data-url; flat colour remains the fallback.
+            # Texture from the sub-tik's first `surface <n> shader <s>` (tempmodels render with their
+            # own skin in-game); the flat colour remains the fallback.
             try:
                 m2=re.search(r'surface\s+\S+\s+shader\s+(\S+)', sub_text, re.I)
                 if m2:
                     sh=m2.group(1).strip()
-                    # BLEND MODE of the sub-model's surface, resolved FIRST because it also
-                    # decides how the texture must be encoded (below). muzflash.tik is
-                    # `surface material1 shader muzmodel`, and muzmodel (effects.shader) is
-                    # `blendFunc GL_SRC_ALPHA GL_ONE` - the card is ADDED to the scene, so
-                    # flashnode1.tga's black surround contributes nothing in-game. The flag
-                    # makes the viewer's mesh path composite additively and skip the flat
-                    # shade (such a stage has no rgbGen, so it is CGEN_IDENTITY_LIGHTING,
-                    # tr_shader.c:1755-1765).
+                    # Blend mode first, since it also decides the texture encoding. e.g. muzflash.tik's
+                    # muzmodel shader is `blendFunc GL_SRC_ALPHA GL_ONE`: the card is added to the scene, so
+                    # its black surround contributes nothing. `add` makes the viewer composite it additively
+                    # without flat shading (no rgbGen -> CGEN_IDENTITY_LIGHTING, tr_shader.c:1755-1765).
                     _sp2=(self._PROPS or {}).get(sh.lower())
                     _add=bool(_sp2 and _sp2.get("additive"))
                     if _add: out["add"]=True
                     mp=self._SH.get(sh.lower()) if self._SH else None
                     t=self._vfs.find_texture(mp) if mp else self._vfs.find_texture(sh)
                     if t:
-                        # ADDITIVE SURFACES NEED A REAL ALPHA CHANNEL. flashnode1.tga is a
-                        # 24-bit TGA: in GL that is fine, because `blendFunc GL_SRC_ALPHA
-                        # GL_ONE` takes its alpha from `alphagen vertex` (the entity colour)
-                        # and adds rgb*a, so the black surround adds ZERO. Canvas 2-D
-                        # 'lighter' is dst+src over a TRANSPARENT canvas, so an opaque black
-                        # texel still adds alpha 1 and paints an opaque BLACK RECTANGLE
-                        # around the muzzle flash (mg42_gun / jeep_30cal `fire`) even though
-                        # its rgb contributes nothing. keep_alpha only preserves an alpha
-                        # channel that already exists, and this texture has none, so the
-                        # export fell through to RGB JPEG. emitter_clean is the same encoder
-                        # the additive SPRITE path already uses: lossless PNG, near-black
-                        # floored to fully transparent, brighter texels fully opaque - which
-                        # is exactly "adds nothing where the texture is black".
+                        # Additive surfaces need a real alpha channel. In GL the black surround of a 24-bit
+                        # texture adds nothing, but Canvas 'lighter' over a transparent canvas still adds alpha
+                        # for every opaque texel, painting a black rectangle around e.g. the mg42 muzzle flash.
+                        # emitter_clean (as used for additive sprites) keys near-black to transparent.
                         d=MTX.texture_to_dataurl(self._vfs,t,max_dim=512,keep_alpha=True,
                                                  emitter_clean=_add)
                         if d: out["tex"]=d
@@ -3684,12 +3440,12 @@ class App(tk.Tk):
 
     def _resolve_emitter_sprites(self, emitters):
         """Resolve each emitter's `model` reference to a billboard sprite.
-        Returns {model_ref_lower: entry} where entry is a data-url string, or, when
-        the sprite's shader animates (animMap), an object
-            {"tex":url,"frames":[url,...],"fps":N,"additive":bool}
-        so the viewer can cycle frames (e.g. the electric arc's 3-frame wiggle).
-        .spr -> textures/sprites/<n>.tga (or a same-named shader);
-        .tik -> the sub-model's first `surface ... shader ...` texture."""
+
+        Returns {model_ref_lower: entry}. An entry is {"tex": data URL, ...} plus render hints
+        (additive, frames/fps, bundle, sprite_type, spritescale, texw/texh, basesize, mesh, ...),
+        or {"subfx": [...]} for a dummy sub-tik whose effects the viewer flattens.
+          .spr / volumetric -> the sprite's shader or image
+          .tik              -> the sub-model's first `surface ... shader ...` texture"""
         out={}
         if self._vfs is None or MTX is None: return out
         for e in emitters:
@@ -3698,12 +3454,9 @@ class App(tk.Tk):
             rl=ref.lower()
             if rl in out: continue
             du=None; shname=None; basesize=0.0; baseaspect=1.0; tp=None; _mesh=None; _banim=None; _edu=None
-            # MOHAA volumetric smoke (the `volumetric` keyword + `model <type>`): ALL 12
-            # cg_vsstypes (default/gun/bulletimpact/bulletdirtimpact/heavy/steam/mist/
-            # smokegrenade/grenade/fire/greasefire/debris) render with VSSSource.spr /
-            # VSSSource2.spr (openmohaa cg_volumetricsmoke.cpp). They are NOT .spr/.tik refs,
-            # so without this they resolve to nothing and the viewer draws a synthetic radial
-            # blob (the "bland sphere"). Map them to the vsssource sprite (alpha smoke).
+            # Volumetric smoke (`volumetric` flag, or `model <type>` naming one of the 12
+            # cg_vsstypes) always renders with VSSSource.spr / VSSSource2.spr
+            # (cg_volumetricsmoke.cpp), so map it to the vsssource sprite.
             _VSS_TYPES={"default","gun","bulletimpact","bulletdirtimpact","heavy","steam",
                         "mist","smokegrenade","grenade","fire","greasefire","debris"}
             is_vol=("volumetric" in (e.get("flags") or [])) or (rl in _VSS_TYPES)
@@ -3716,16 +3469,10 @@ class App(tk.Tk):
                     for c in cands:
                         t=self._vfs.find_texture(c)
                         if t: tp=t; du=MTX.texture_to_dataurl(self._vfs,tp,max_dim=512,emitter_clean=True); shname=base; break
-                    # ENGINE: every VSS puff renders as VSSSource.spr / VSSSource2.spr
-                    # (AddVSSSources, cg_volumetricsmoke.cpp:1167-1168; model choice by
-                    # T_RANDOMROLL, :1331-1340) - i.e. through the vsssource shader, the SAME
-                    # dual counter-rotating GL_MODULATE bundle as flat vsssource sprites.
-                    # Without it the viewer drew each puff as a solid blob of the raw bright
-                    # base texture at full base alpha: far too white and too dense vs the
-                    # in-game grey wisps. Ship the animated bundle exactly like the .spr
-                    # path; the generic export below then carries tex (keep_alpha), rotate,
-                    # brot and halpha, and the viewer's _bundleFrame halpha product (RGB AND
-                    # alpha modulate, A = A0*A1) applies to volumetric smoke too.
+                    # Each VSS puff draws through the vsssource shader (AddVSSSources,
+                    # cg_volumetricsmoke.cpp:1167-1168; model chosen by T_RANDOMROLL, :1331-1340) with its
+                    # counter-rotating GL_MODULATE bundle. Ship the animated bundle like the .spr path so the
+                    # puffs render as grey wisps rather than dense white blobs.
                     if tp is not None and self._PROPS:
                         _pp=(self._PROPS or {}).get(base)
                         if _pp and _pp.get("bundle"):
@@ -3734,12 +3481,9 @@ class App(tk.Tk):
                             if _bt and (_bd.get("scroll") or _bd.get("rotate")):
                                 _banim=(_bt,_bd)
                 elif rl.endswith(".spr"):
-                    # SPR_RegisterSprite (openmohaa code/renderergl1/tr_sprite.c:31-56): the
-                    # sprite's shader NAME is the .spr path minus extension - so
-                    # `model textures/effects/bang.spr` (explosion_tank) resolves the shader
-                    # "textures/effects/bang", falling back to an implicit shader from the
-                    # same-path image. The old basename-only candidates missed every
-                    # full-path .spr ref outside textures/sprites/.
+                    # SPR_RegisterSprite (renderergl1/tr_sprite.c:31-56): the shader name is the .spr path
+                    # minus its extension (`textures/effects/bang.spr` -> "textures/effects/bang"), falling
+                    # back to an implicit shader from the same-path image. Basename candidates follow.
                     base=os.path.splitext(os.path.basename(rl))[0]
                     full=os.path.splitext(rl)[0]                       # path-noext shader name
                     cands=[]
@@ -3751,9 +3495,8 @@ class App(tk.Tk):
                               "textures/sprites/"+base+".tga", base, "sprites/"+base):
                         if c not in cands: cands.append(c)
                     shname=full if (self._PROPS or {}).get(full) else base
-                    # detail bundle (nextbundle GL_MODULATE): bake the tiled noise into the
-                    # sprite pixels at build time (mortar_dirthit's mortar_noise 8x16 grain,
-                    # mortar_dirthit2's sandplume 2x2) - the in-game "HD" speckle detail.
+                    # A static detail bundle (nextbundle GL_MODULATE) is baked into the sprite pixels, e.g.
+                    # mortar_dirthit's 8x16 mortar_noise grain.
                     _pp=(self._PROPS or {}).get(shname)
                     _bpath=None; _bscale=(1.0,1.0)
                     if _pp and _pp.get("bundle"):
@@ -3761,9 +3504,8 @@ class App(tk.Tk):
                         _bt=self._vfs.find_texture(_bd.get("map") or "")
                         if _bt:
                             if _bd.get("scroll") or _bd.get("rotate"):
-                                # animated tcmods: DON'T bake - export for runtime
-                                # compositing so the grain actually drifts/spins in the
-                                # viewer like in-game (mortar_noise scroll, dirtnoise rotate)
+                                # Animated tcmods aren't baked; they're exported for runtime compositing so the
+                                # grain drifts/spins like in-game.
                                 _banim=(_bt,_bd)
                             else:
                                 _bpath=_bt; _bscale=tuple(_bd.get("scale") or (1.0,1.0))
@@ -3771,24 +3513,16 @@ class App(tk.Tk):
                     for c in cands:
                         t=self._vfs.find_texture(c)
                         if t: tp=t; du=MTX.texture_to_dataurl(self._vfs,tp,max_dim=512,emitter_clean=True,bundle_path=_bpath,bundle_scale=_bscale); break
-                    # EROSION SOURCE for animated bundles: the viewer's alpha-test pattern
-                    # is thresholded from the OLD-STYLE static PIL bake (base x noise at
-                    # phase 0, the exact texture_to_dataurl bundle path that produced the
-                    # in-game-verified granular dissipation) - the granular speckle in that
-                    # dissolve IS the noise texture's alpha, which the base alone lacks.
-                    # The unbaked `du` above stays the RGB source so the grain still
-                    # drifts/spins at runtime.
+                    # Erosion source for animated bundles: the viewer thresholds its alpha-test pattern
+                    # from a static base x noise bake at phase 0 (the noise alpha carries the granular
+                    # dissolve). The unbaked `du` stays the RGB source so the grain still moves.
                     if tp is not None and _banim is not None:
                         _abt,_abd=_banim
                         _edu=MTX.texture_to_dataurl(self._vfs,tp,max_dim=512,emitter_clean=True,
                                                     bundle_path=_abt,
                                                     bundle_scale=tuple(_abd.get("scale") or (1.0,1.0)))
-                    # animmap-only shaders (e.g. air_explosion: only animMap frames, no `map`
-                    # directive) have no single base texture so all cands miss -> du stays None.
-                    # The animmap frame list is only applied AFTER du is set, so without this
-                    # fallback the emitter is silently skipped. Use the first animmap frame as
-                    # the base: it loads correctly and multi-frame animation still applies below
-                    # via props["frames"]. (catches parallel_oriented animmap sprites)
+                    # animmap-only shaders (e.g. air_explosion) have no base `map`, so every candidate
+                    # misses. Use the first animmap frame as the base; the frame list is applied below.
                     if not du:
                         for _nm in (full, base):
                             _p=(self._PROPS or {}).get(_nm)
@@ -3812,84 +3546,62 @@ class App(tk.Tk):
                             shname=sh
                             mp=self._SH.get(sh.lower()) if self._SH else None
                             tp=self._vfs.find_texture(mp) if mp else self._vfs.find_texture(sh)
-                            # animmap-only shader (no `map`/`clampmap` base directive) - the
-                            # bullet-hit puff sub-tiks (bh_wood_puff/bh_stone_puff -> surface
-                            # all shader bh_wood_puff, which is `animmap 20 woodpuff1..7.tga`)
-                            # have no single base texture, so _SH.get() and find_texture(sh)
-                            # both miss and the sub-model resolved to nothing (reported as
-                            # "no resolvable surface shader texture"). Fall back to the FIRST
-                            # animmap frame as the base - it loads, and the frame list below
-                            # carries the 7-frame cycle - mirroring the top-level .spr animmap
-                            # fallback so wood/stone/carpet bullet holes show their puff.
+                            # animmap-only shader (bh_wood_puff / bh_stone_puff: `animmap 20 woodpuff1..7.tga`) has
+                            # no base texture; use the first frame, as the .spr path does.
                             if not tp and self._PROPS:
                                 _pp=(self._PROPS or {}).get(sh.lower())
                                 if _pp and _pp.get("frames"):
                                     tp=self._vfs.find_texture(_pp["frames"][0])
                         if tp: du=MTX.texture_to_dataurl(self._vfs,tp,max_dim=512,emitter_clean=True)
-                        # DUMMY fx sub-tik (snipesmoke, gas_mushroom_cloud): no drawable surface
-                        # of its own - the spawned tempmodel's look is its OWN idle-anim `enter
-                        # originspawn` one-shots + init-client emitters. Export those inner
-                        # blocks for one-level flattening in the viewer (expand_subfx).
+                        # Dummy fx sub-tik (snipesmoke, gas_mushroom_cloud): nothing drawable itself; its look
+                        # comes from its idle-anim originspawn one-shots and init-client emitters, exported for
+                        # the viewer to flatten (expand_subfx).
                         if not du:
                             _sf=self._collect_subfx(sub)
                             if _sf:
                                 out[rl]={"subfx":_sf}
                                 continue
-                        # a .tik particle is a real mesh - record true size + aspect so the
-                        # viewer draws it at geometry scale as a thin sliver, not a sprite blob.
+                        # A .tik particle is a real mesh: record its true size and aspect so the viewer draws it
+                        # at geometry scale.
                         basesize,baseaspect=self._submodel_basesize(sub)
-                        # chunky debris (metal_section, ibeam_piece) render as actual tumbling
-                        # 3D geometry, not flat billboards. Thin slivers (spark splinters) stay
-                        # on the billboard path. mesh=None for slivers / on miss.
+                        # Chunky debris (metal_section, ibeam_piece) renders as tumbling 3D geometry; thin
+                        # slivers stay billboards (mesh is None for those).
                         _mesh=self._submodel_mesh(sub)
                         if _mesh is not None:
                             _mesh["color"]=self._avg_tex_color(tp)
             except Exception:
                 du=None
             if not du: continue
-            # original (pre-downscale) texture pixels, so the viewer can size .spr sprites
-            # by true texture dimensions (a 256px arc stays wide; a 32px puff unchanged).
+            # Original (pre-downscale) texture size, used by the viewer to size .spr sprites.
             texw,texh=self._orig_tex_dims(tp)
             props=(self._PROPS or {}).get((shname or "").lower())
-            # GL_ONE SOURCE BLEND IGNORES ALPHA (tr_shader.c NameToSrcBlendMode):
-            # `blendFunc GL_ONE GL_ONE` / `blendfunc add` add the stage's RGB whole,
-            # so the texture's alpha channel must NOT gate the sprite. Canvas 'lighter'
-            # is premultiplied and would mask it down (bh_metal_fastpiece sparks were
-            # 2.18x under-lit -> the ~0.5x scale; corona_util 1.92x -> lost soft
-            # falloff). Debris CHUNKS keep their native alpha: they draw source-over
-            # through the mesh path, where an opaque skin would fill the whole facet.
+            # A GL_ONE source blend ignores alpha (tr_shader.c NameToSrcBlendMode), so re-encode the
+            # sprite for Canvas 'lighter' (see dataurl_gl_one_additive). Debris chunks keep their
+            # native alpha since they draw source-over through the mesh path.
             _glone=bool(props and props.get("additive")
                         and props.get("srcalpha") is False and _mesh is None)
             if _glone: du=MTX.dataurl_gl_one_additive(du)
             entry={"tex":du}
-            # carry the sprite's true blend mode (from its shader's first blendfunc) so the
-            # viewer alpha-blends water/smoke instead of additively stacking them to white.
+            # The sprite's real blend mode, so water/smoke alpha-blend instead of stacking to white.
             if props is not None:
                 entry["additive"]=bool(props.get("additive"))
-                # rgbGen vertex/entity present? Without it the emitter `color` never reaches the
-                # framebuffer (corona_util's plain `blendfunc add` stage stays WHITE regardless
-                # of the tik's red tint). srcalpha: does the src blend factor read alpha at all?
-                # `blendfunc add` == GL_ONE GL_ONE ignores shaderRGBA[3], so alpha/fade/
-                # flickeralpha are no-ops in-game for those sprites.
+                # rgbvertex: whether the emitter `color` reaches the framebuffer (a plain `blendfunc add`
+                # stage like corona_util stays white). srcalpha: whether the source factor reads alpha
+                # at all; with `add`, alpha/fade/flickeralpha have no effect.
                 if "rgbvertex" in props: entry["rgbvertex"]=bool(props.get("rgbvertex"))
                 if "srcalpha"  in props: entry["srcalpha"]=bool(props.get("srcalpha"))
-                # alphafunc on a blendfunc-less base stage: the sprite is ALPHA-TESTED -
-                # each pixel either draws fully opaque or is a hole (tr_shader.c NameToAFunc).
-                # The viewer erodes these with threshold variants instead of alpha-fading.
+                # alphafunc on a blendfunc-less base stage: pixels are either fully opaque or holes
+                # (tr_shader.c NameToAFunc); the viewer erodes these instead of alpha-fading.
                 if props.get("atest"): entry["alphatest"]=props["atest"]
-            # animated nextbundle: ship the noise texture + tcmod params; the viewer
-            # multiplies it over the sprite per frame (GL_MODULATE, tr_shader.c:1841-1853).
-            # halpha flags a real alpha channel in the noise - then the erosion pattern
-            # itself scrolls and the viewer takes the per-pixel compositing path.
+            # Animated nextbundle: ship the noise texture and tcmod params for the viewer to multiply
+            # over the sprite each frame (GL_MODULATE, tr_shader.c:1841-1853). halpha marks noise
+            # with real alpha, which makes the erosion pattern move as well.
             if _banim is not None:
                 _abt,_abd=_banim
-                # nextbundle is GL_MODULATE (tr_shader.c:1841-1853), and texture-env MODULATE
-                # multiplies ALPHA as well as RGB (A = A0*A1). Ship the noise WITH its real
-                # alpha channel (keep_alpha) so the viewer can modulate sprite alpha per
-                # pixel - vsssource x vsssource2's counter-rotating soft smoke lives in that
-                # alpha product. Alpha-TESTED emitters keep the opaque encode: their
-                # in-game-verified erosion pattern is the BASE alpha only (mortar_dirthit
-                # sign-off), so their shipped pixels stay byte-identical to before.
+                # MODULATE multiplies alpha as well as RGB (A = A0*A1), so ship the noise with its alpha
+                # (keep_alpha): vsssource x vsssource2's counter-rotating smoke lives in that product.
+                # Alpha-tested emitters keep the opaque encode, since their erosion pattern comes from
+                # the base alpha only.
                 _hal=bool(MTX.texture_has_varied_alpha(self._vfs,_abt))
                 _ka=bool(_hal and not (props and props.get("atest")))
                 _ndu=MTX.texture_to_dataurl(self._vfs,_abt,max_dim=256,keep_alpha=_ka)
@@ -3904,30 +3616,22 @@ class App(tk.Tk):
                 if _edu: entry["erode_sprite"]=_edu
             if is_vol:
                 entry["volumetric"]=True
-                entry["additive"]=False   # VSS smoke composites alpha (translucent), never additive
-                # engine sizing: quad world width = texW * (radius/5) * spritescale (tr_sprite.c).
-                # Carry the vsssource shader's spritescale (default 1.0) so the viewer matches it.
+                entry["additive"]=False   # VSS smoke is alpha-blended, never additive
+                # Quad width = texW * (radius/5) * spritescale (tr_sprite.c); carry the vsssource
+                # shader's spritescale.
                 entry["spritescale"]=float((props or {}).get("spritescale",1.0) or 1.0)
-            # sprite_type is only set when the shader carried an explicit `spritegen` line;
-            # export it verbatim, INCLUDING "parallel" - the viewer must know an explicit
-            # parallel to suppress roll (SPRITE_PARALLEL ignores angles/avelocity,
-            # tr_sprite.c:84-91), whereas an absent keyword keeps the legacy default.
+            # sprite_type is set only for an explicit `spritegen` and exported as-is, including
+            # "parallel": the viewer needs an explicit parallel to suppress roll (tr_sprite.c:84-91),
+            # while no keyword keeps its default.
             if props and props.get("sprite_type"):
                 entry["sprite_type"]=props["sprite_type"]
-            # deformVertexes lightglow (DEFORM_LIGHTGLOW, tr_shade_calc.c LightGlowDeform)
-            # REBUILDS the sprite quad from the CAMERA's right/up axes every frame - a
-            # camera-facing glow that grows toward the eye - regardless of the shader's
-            # spritegen. fire_ring is `spritegen oriented` + `deformVertexes lightglow`: the
-            # oriented (world-fixed) quad is overridden into a camera-facing billboard. Ship
-            # the flag so the viewer renders it camera-facing instead of edge-on (it was drawing
-            # the ring as a flat world quad that vanished at grazing angles).
+            # deformVertexes lightglow rebuilds the quad from the camera axes every frame
+            # (tr_shade_calc.c LightGlowDeform) regardless of spritegen, so e.g. fire_ring
+            # (`spritegen oriented` + lightglow) must render camera-facing, not as a world quad.
             if props and props.get("lightglow"):
                 entry["lightglow"]=True
-            # shader spriteScale applies to EVERY spritegen quad, not just VSS smoke
-            # (RB_DrawSprite: scale = spr->scale * ent scale, where spr->scale is the
-            # shader's sprite.scale from SPR_RegisterSprite). muzsprite / *_spriteflash
-            # declare spriteScale .3/.7 in effects.shader and rendered oversized when it
-            # was dropped here for non-volumetric sprites.
+            # Shader spriteScale applies to every spritegen quad (RB_DrawSprite: spr->scale * entity
+            # scale), e.g. muzsprite / *_spriteflash at .3/.7 in effects.shader.
             if "spritescale" not in entry:
                 _ss=float((props or {}).get("spritescale",1.0) or 1.0)
                 if _ss!=1.0: entry["spritescale"]=_ss
@@ -3952,13 +3656,10 @@ class App(tk.Tk):
         return out
 
     def _collect_subfx(self, sub_text):
-        """Inner client fx of a dummy sub-.tik (a spawned tempmodel with no drawable
-        surface): its animations{} `enter originspawn` one-shot blocks, its init-client
-        `sfx originspawn` / `delayedsfx` one-shots, plus its init-client *emitter blocks
-        exported with stream=True so the viewer runs them for the parent tempmodel's life
-        (the engine runs the tempmodel's own anim entry commands + init sfx + emitters
-        while it lives - cg_commands/cg_tempmodels). Returns a JSON-safe list of param
-        dicts (possibly empty)."""
+        """Inner client fx of a dummy sub-.tik (a spawned tempmodel with no drawable surface):
+        its animations' `enter originspawn` blocks, init-client `sfx originspawn` /
+        `delayedsfx` one-shots, and init-client emitters (stream=True, so the viewer runs them
+        for the tempmodel's lifetime). Returns a JSON-safe list of param dicts."""
         out=[]
         try:
             import mohaa_view as MV
@@ -3967,11 +3668,8 @@ class App(tk.Tk):
                     if c.get("prm") and (c.get("argv") or [""])[0].lower()=="originspawn":
                         out.append(dict(c["prm"]))
             # init{client{}} `sfx <spawncmd> ( ... )` / `delayedsfx <sec> ...` one-shots.
-            # bazookaexp_base.tik (played by tankshellexplosion via explosioneffect) has NO
-            # animation fx and NO *emitter blocks - its entire look is these sfx-wrapped
-            # originspawns (gren_boom.spr, vsssource.spr). Without this they were collected
-            # by nothing, so the whole sub-tik resolved to zero drawable sprites and the
-            # launcher reported it as an unresolved white blob.
+            # bazookaexp_base.tik's entire look is these (gren_boom.spr, vsssource.spr); it has no
+            # animation fx or emitter blocks.
             for s in MV.parse_tik_init_sfx(sub_text):
                 if s.get("prm"):
                     q=dict(s["prm"])
@@ -3985,14 +3683,10 @@ class App(tk.Tk):
         return out
 
     def _orig_tex_dims(self, texpath):
-        """Original (w,h) of a VFS texture before any downscale. Tries a direct binary
-        header read first (TGA/DDS/PNG/JPEG) so it works even when PIL is unavailable or
-        chokes on an old TGA variant, then falls back to PIL. Returns (0,0) on failure.
-
-        This mattered for the mortar/mine sprites: their .spr resolves to a big shader
-        texture (mortarhit2.tga is 512x512), but a (0,0) return here dropped texw/texh, so
-        the viewer fell back to the 32px default and sized every sprite ~16x too small
-        (scale .0625 * 32 = 2u instead of * 512 = 32u)."""
+        """Original (w,h) of a VFS texture before downscaling, read from the file header
+        (TGA/DDS/PNG/JPEG) so it works without PIL or with odd TGA variants, then via PIL.
+        Returns (0,0) on failure. The viewer sizes .spr sprites from this (e.g. mortarhit2.tga
+        is 512x512; the 32px default would make those sprites 16x too small)."""
         if not texpath or self._vfs is None: return (0,0)
         try:
             data=self._vfs.read(texpath)
@@ -4034,8 +3728,8 @@ class App(tk.Tk):
                         h,w=struct.unpack(">HH", data[i+5:i+9]); return (w,h)
                     if mk in (0xD8,0xD9) or 0xD0<=mk<=0xD7: i+=2; continue
                     seg=struct.unpack(">H", data[i+2:i+4])[0]; i+=2+seg
-                # TGA: width @ offset 12, height @ 14 (little-endian, uint16). TGA has no
-            # magic, so only trust it for a .tga path or a plausible header.
+            # TGA: width @ 12, height @ 14 (little-endian uint16). TGA has no magic, so only
+            # trust it for a .tga path or a plausible header.
             if len(data)>=18 and (ext=="tga" or data[1] in (0,1)):
                 import struct
                 w,h=struct.unpack("<HH", data[12:16]); return (w,h)
@@ -4058,8 +3752,8 @@ class App(tk.Tk):
     def _run(self):
         path=self._path_var.get().strip().strip('"')
         if path.startswith("pk3://"): self._open_pk3_model(path[len("pk3://"):]); return
-        # after a pk3 build the entry shows a friendly "pk3 model: <n>" display
-        # string, not a real path - re-run the last build instead of failing on it
+        # After a pk3 build the path bar shows "pk3 model: <n>", not a real path; re-run the
+        # last build.
         if path.startswith("pk3 model:") and self._last_build:
             self._load(*self._last_build); return
         if not path: self._log_line("No file selected.","err"); return
@@ -4071,15 +3765,12 @@ class App(tk.Tk):
         self._load(path)
 
     def _load(self, path, animroot=None, manifest=None, emittex=None, subdir=None, _cont=False):
-        # direct entry points (drag-drop, Recent menu, path-bar Run) respect the
-        # open-in-viewer latch; _cont=True marks the internal continuation of a
-        # pk3 open already holding the latch, which must not reject itself
+        # Direct entry points (drag-drop, Recent, path bar) respect the open-in-viewer latch;
+        # _cont=True marks the continuation of a pk3 open that already holds it.
         if not _cont and self._viewer_open_busy(): return
-        # An individual file opened from disk (Browse / drag-drop / Recent / cmdline /
-        # path-bar) is a "standalone" build: its HTML belongs in the standalone/ folder,
-        # not the pak-mirroring models tree. Routed loose opens get this marker from
-        # _open_pk3_tik/_open_pk3_model; this covers the direct (e.g. no-paks) build path
-        # and makes the reuse probe below look in the right place.
+        # A file opened from disk is a standalone build: its HTML goes in standalone/, not the
+        # pak-mirroring models tree. The routed loose-open paths set this themselves; this covers
+        # direct builds (e.g. no paks loaded) and the reuse check below.
         if (not _cont and subdir is None and os.path.isfile(path)
                 and not (self._tmp and path.startswith(self._tmp))):
             subdir=STANDALONE_SUBDIR
@@ -4088,17 +3779,15 @@ class App(tk.Tk):
         disp=("pk3 model: "+os.path.basename(path)) if (self._tmp and path.startswith(self._tmp)) else path
         self._path_var.set(disp)
         self._push_recent(path)
-        # loose files (Browse / drag-drop / Recent) can reuse a saved HTML too
+        # Loose files (Browse / drag-drop / Recent) can reuse a saved HTML too.
         if self._reuse_ok():
             hp=self._html_out_path(path,subdir)
             if os.path.exists(hp) and self._html_current(hp):
                 self._opening_view=False       # no build will run: release the open latch
                 self._open_cached(hp,path,subdir); return
-        # A loose .tik/.skd opened from disk while paks are loaded: its skelmodel, sibling
-        # animations and textures usually live INSIDE the paks, not next to the file. Run the
-        # same pak-resolution pipeline the tree uses (skelmodel + .skc + textures pulled from
-        # the VFS by name), driven by the loose file's OWN edited content, so it opens exactly
-        # like a tree entry. Without this, mohaa_view.py exits 1 ("skelmodel not found").
+        # A loose .tik/.skd with paks loaded: its skelmodel, animations and textures usually live
+        # inside the paks, so run the same pak pipeline as a tree open, driven by the loose
+        # file's own content.
         if (not _cont and manifest is None and self._vfs is not None and self._tex_ready
                 and self._tmp and not path.startswith(self._tmp) and os.path.isfile(path)):
             low=path.lower()
@@ -4116,8 +3805,8 @@ class App(tk.Tk):
             if bgen is not None and bgen!=self._build_gen: return   # Escape: cancelled before start
             cmd=[self._pyexe,VIEWER,path]
             if animroot: cmd.append("--animroot="+animroot)
-            # the resolved animation catalogue for THIS model (names only - pose data is
-            # solved per animation, on click) plus the bake budget
+            # This model's animation catalogue (names only; poses are solved per animation on click)
+            # and the bake budget.
             if self._animcat_file and self._animcat_for==path:
                 cmd.append("--animcat="+self._animcat_file)
                 cmd.append("--animpreload="+str(self._anim_preload_n()))
@@ -4132,9 +3821,7 @@ class App(tk.Tk):
             if opts.get("theme") in ("light","dark"): cmd.append("--theme="+opts["theme"])
             ext=bool(opts.get("external"))          # drag-out: always open, own window
             will_open=ext or (self._auto_open.get() and not opts.get("no_open"))
-            # ALWAYS --no-open: the viewer script must never launch the browser
-            # itself, or every fresh build (drag-drop, tree open) bypasses the
-            # embedded pane. The launcher opens the HTML below via _open_file.
+            # Always --no-open: the launcher opens the HTML itself (embedded pane or browser).
             cmd.append("--no-open")
             # Popen (not run) so Escape-to-cancel can kill the build mid-flight
             p=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,**NOWIN)
@@ -4180,11 +3867,8 @@ class App(tk.Tk):
                     elif kind=="load": self._load(*msg,_cont=True)   # pipeline continuation: latch already held
                     elif kind=="status": self._set_status(msg)
                     elif kind=="stdout":
-                        # The child marks its own failures with a leading "!" - all four
-                        # sites in mohaa_view.py are real failures (.skc not found, .skc
-                        # unparseable, "drives none of this skeleton's N bones"). They were
-                        # printing in the default colour, so a skipped animation read like
-                        # ordinary progress instead of something that went wrong.
+                        # The child prefixes real failures with "!" (.skc missing or unparseable, drives none of
+                        # the skeleton's bones); show those in red.
                         for line in msg.splitlines():
                             self._log_line(line,"err" if line.lstrip().startswith("!") else "")
                     elif kind=="ok": self._log_line(msg,"ok")
@@ -4197,19 +3881,18 @@ class App(tk.Tk):
                     elif kind=="dim": self._log_line(msg,"dim")
                     elif kind=="closeview": self._close_viewer()   # viewer Esc (main thread)
                     elif kind=="setang": self._set_view_angles(msg)  # viewer angle dial
-                    # MISSING-ASSET diagnostics: red like "err", but NOT a pipeline abort.
-                    # The "err" branch above clears _building_name/_opening_view and fires
-                    # _batch_signal(); a missing .tga must not kill the open or the batch.
+                    elif kind=="setrenderer": self._set_renderer(msg,from_page=True)   # Display > WebGL
+                    # Missing-asset warnings: shown in red but, unlike "err", they don't abort the open or
+                    # stall a batch.
                     elif kind=="warn": self._log_line(msg,"err")
                     elif kind=="js": self._embed_js(msg)
                 except Exception as e:
-                    # a bad handler must never kill the poll loop
+                    # A bad handler must never kill the poll loop.
                     try: self._log_line(f"(ui error: {e})","err")
                     except Exception: pass
-            # a pk3 open queued while the texture/VFS index was still building
-            # (see _open_pk3_tik): fire it the moment the index is ready, or drop it
-            # if the wait was cancelled (Escape bumps _build_gen) or the index run
-            # ended without success (the "err" handler above releases _opening_view).
+            # Fire a pk3 open queued while the index was building (see _queue_open_until_indexed)
+            # once the index is ready; drop it if Escape bumped _build_gen or indexing failed (the
+            # "err" handler releases _opening_view).
             if self._pending_open is not None:
                 entry,bgen=self._pending_open
                 if self._tex_ready and self._vfs is not None and bgen==self._build_gen:
@@ -4223,8 +3906,7 @@ class App(tk.Tk):
     def _log_line(self,text,tag=""):
         self._log.configure(state="normal"); self._log.insert("end",text+"\n",tag)
         self._log.see("end"); self._log.configure(state="disabled")
-        # mirror to output_console.log (see __init__). The tag (ok/err/warn/dim/"") is
-        # prefixed so the file stays useful without the console's colour coding.
+        # Mirror to output_console.log, prefixing the tag since the file has no colours.
         lf=getattr(self,"_logfile",None)
         if lf is not None:
             try:
@@ -4240,30 +3922,19 @@ class App(tk.Tk):
         except Exception: pass
 
     def _asset_miss_reason(self, ref):
-        """Why did this emitter `model` reference fail to produce a sprite?
+        """Explain why an emitter `model` reference produced no sprite.
 
-        ENGINE: SPR_RegisterSprite (openmohaa code/renderergl1/tr_sprite.c:31-56)
-        strips the extension off the .spr name and looks the REST up as a shader name
-        via R_FindShader, then takes shader->unfoggedStages[0]->bundle[0].image[0] as
-        the sprite image. There are three distinct ways that fails, and telling them
-        apart is the whole point of this message:
-
-          1. The .shader block exists but its `map` file is absent from the paks.
-             ParseStage prints "WARNING: R_FindImageFile could not find '%s' in
-             shader '%s'" and returns qfalse, dropping the stage (tr_shader.c:727-732);
-             SPR_RegisterSprite then finds no image and returns 0 (tr_sprite.c:43-46).
-             This is the adam-firefill case: sprites.shader:1536-1571 defines
-             senn_fire1/senn_fire2 -> textures/sprites/senn_fire[12].tga, which the
-             retail game never shipped. In-game it draws NOTHING.
-          2. No .shader block of that name at all - R_FindShader falls through to the
-             implicit-image path, prints "Couldn't find image for shader %s" and
-             returns tr.defaultShader (tr_shader.c:3044-3047).
-          3. The image is present but our decoder choked on it (Pillow absent, odd TGA).
+        SPR_RegisterSprite (renderergl1/tr_sprite.c:31-56) looks up the .spr name minus its
+        extension as a shader and uses its first stage image. It fails in three ways:
+          1. The shader exists but its `map` file isn't in the paks: ParseStage drops the stage
+             (tr_shader.c:727-732) and nothing is drawn (tr_sprite.c:43-46). e.g. adam-firefill:
+             sprites.shader senn_fire1/2 point at .tga files retail never shipped.
+          2. No shader of that name: R_FindShader falls back to tr.defaultShader
+             (tr_shader.c:3044-3047).
+          3. The image exists but couldn't be decoded (Pillow missing, unusual TGA).
         """
         rl=(ref or "").replace("\\","/").strip().strip('"').lower()
-        # `model ""` (empty) is the same "no such model" case as `model none`: fall through to
-        # the standard shader-lookup message so it reads `no shader block named '' (or '') ...`,
-        # matching the `none` diagnostic rather than a terse special-case string.
+        # An empty `model ""` falls through to the shader-lookup message, like `model none`.
         if self._vfs is None: return "no game-file index loaded"
         if rl.endswith(".tik"):
             if not self._vfs.exists(rl):
@@ -4285,21 +3956,17 @@ class App(tk.Tk):
                 "image under textures/sprites/" % (full, base))
 
     def _warn_emitter_assets(self, ems, resolved):
-        """One red Output line per emitter whose sprite could not be built. Before this,
-        _resolve_emitter_sprites' `if not du: continue` dropped them silently and the
-        viewer fell back to a synthetic white blob with no indication why."""
+        """Log one red line per emitter whose sprite couldn't be built, instead of silently
+        drawing the viewer's fallback blob."""
         seen=[]
         for e in (ems or []):
             try: raw=(e.get("model") or "")
             except Exception: continue
             ref=raw.replace("\\","/").strip().strip('"')
-            # `model ""` (fx_smokeexample) is an empty/placeholder model, the same "no model"
-            # case as `model none` (fx/steamworks) - the engine resolves neither to a sprite, so
-            # the emitter draws nothing. Report it the same way instead of skipping silently: an
-            # empty ref keys/prints as "" so the Output line reads `model ""  ->  no shader block
-            # named "" ...`, matching the `none` diagnostic. (A missing `model` key entirely -
-            # raw is None/"" with no emitter model line - is a different thing and still skipped.)
-            has_model_line="model" in e  # the tik wrote a `model <x>` line (even if x is "")
+            # `model ""` (fx_smokeexample) and `model none` (fx/steamworks) both draw nothing
+            # in-game; report them like any other miss. An emitter with no `model` line at all is
+            # skipped.
+            has_model_line="model" in e  # the tik has a `model <x>` line, even if x is ""
             if not ref and not has_model_line: continue
             key=ref if ref else '""'
             rl=ref.lower()
@@ -4313,27 +3980,14 @@ class App(tk.Tk):
                            "untextured white blob." % len(seen))
 
     def _report_surface_misses(self, manifest, surfs, surf_shader=None):
-        """Red Output line naming every .skd surface that got no texture. The manifest
-        only carries surfaces that RESOLVED (mohaa_textures.write_textures_manifest
-        `if not tp: continue` / `if not du: continue`), so surfs minus manifest keys is
-        exactly the miss list.
+        """Log a red line for each .skd surface that got no texture. The manifest only holds
+        resolved surfaces, so surfs minus its keys is the miss list.
 
-        surf_shader is the OPENED .tik's own `surface <n> shader <s>` map (surface -> shader
-        name). Two distinct cases, and conflating them is what produced false alarms:
-
-          * surf_shader is None  - no .tik at all (a bare .skd open, e.g. mg42_sideflash.skd).
-            Every unresolved surface is worth naming, because nothing could have mapped it.
-          * surf_shader is a dict - a .tik WAS opened. Only surfaces the .tik actually declares
-            (exact name, a `surface <glob>* shader ...` pattern, or a blanket `surface all`) can
-            be "missing". A surface the .tik never mentions is not an error: emitter carrier
-            .tiks are invisible `rendereffects +dontdraw` dummies whose skelmodel surfaces are
-            never meant to be skinned (electric_arc.tik -> dummy3.skd's material1..material4 -
-            its whole look is two originemitter blocks), and reporting those as MISSING ASSET
-            was pure noise.
-
-        When the .tik does declare a surface that failed, naming the dead shader is what makes
-        it diagnosable: muzflash_bar.tik maps `surface material1 shader muzmodel_bar`, but no
-        shader block of that name is shipped in any scripts/*.shader."""
+        surf_shader is the opened .tik's own surface -> shader map, or None for a bare .skd.
+        With a .tik, only surfaces it declares (exact name, glob, or `surface all`) count as
+        missing: emitter carrier .tiks (e.g. electric_arc.tik on dummy3.skd) never skin their
+        surfaces. Naming the declared shader makes a miss diagnosable (e.g. muzflash_bar.tik's
+        muzmodel_bar shader isn't shipped in any .pk3)."""
         if not manifest or not surfs: return
         try: man=json.load(open(manifest,encoding="utf-8"))
         except Exception: return
@@ -4342,9 +3996,8 @@ class App(tk.Tk):
         miss=[s for s in surfs if s not in man and s.lower() not in low]
         sm={str(k).lower():v for k,v in (surf_shader or {}).items()}
         def _declared(sl):
-            """Shader the opened .tik maps this surface to - exact, longest matching glob, or a
-            blanket `all` (TIKI_ParseSurface / SurfaceCommand wildcard semantics). None when the
-            .tik says nothing about this surface."""
+            """Shader the opened .tik maps this surface to: exact name, longest matching glob, or
+            `all`. None if the .tik doesn't mention it."""
             if sl in sm: return sm[sl]
             best=None
             for pat,sh2 in sm.items():
@@ -4355,7 +4008,7 @@ class App(tk.Tk):
         shown=0
         for s in miss:
             sh=_declared(s.lower())
-            # .tik opened but silent about this surface -> undeclared, not missing.
+            # .tik opened but silent about this surface: undeclared, not missing.
             if surf_shader is not None and sh is None: continue
             mp=(self._SH or {}).get((sh or s).lower())
             if mp:
@@ -4373,11 +4026,8 @@ class App(tk.Tk):
             self._log_warn("  %d of %d surface(s) untextured." % (shown, len(surfs)))
 
     def _clear_info(self):
-        """Revert the bottom-right model-details panel to its fresh-launch state:
-        'No model loaded' title, empty stats + tag/bone/surface list, and no Re-open/
-        Browser buttons. Called when the viewer is closed (Esc or Clear built models) so
-        the panel doesn't keep showing the last model's surfaces/anims/tags after the 3D
-        pane has reverted to the start page."""
+        """Reset the model-details panel to its empty state. Called when the viewer is closed
+        (Esc or Clear built models) so it doesn't keep showing the previous model."""
         self._last_info=None
         try: self._info_title.configure(text="No model loaded",foreground=DIM)
         except Exception: pass
@@ -4394,7 +4044,7 @@ class App(tk.Tk):
     def _update_info(self, path, stdout, html_path=None):
         stem=os.path.splitext(os.path.basename(path))[0]
         if html_path is None: html_path=self._html_out_path(path)
-        self._last_info=(path,stdout,html_path)            # re-rendered (from this HTML) on theme toggle
+        self._last_info=(path,stdout,html_path)            # re-rendered from this HTML on theme toggle
         bones_n=""; anim_names=[]
         for line in stdout.splitlines():
             line=line.strip()
@@ -4403,7 +4053,7 @@ class App(tk.Tk):
         tags_parsed=[]; surf_names=[]
         try:
             html=open(html_path,encoding="utf-8").read()
-            # brace-balanced extraction of the DATA object (regex breaks on nested [] in "pos")
+            # Brace-balanced extraction of the DATA object (a regex breaks on nested [] in "pos").
             i=html.find("const DATA=")
             if i>=0:
                 j=html.find("{",i); depth=0; k=j
@@ -4420,16 +4070,15 @@ class App(tk.Tk):
                 if not (anim_names and anim_names[0]):
                     anim_names=[a.get("name","") for a in _data.get("anims",[])]
         except Exception: pass
-        # cache-hit opens have no build stdout, so the "- N bones, M surfaces" summary
-        # line is absent - reconstruct it from the parsed DATA so a reopened model shows
-        # the same stats header a freshly-built one does.
+        # Cache-hit opens have no build stdout, so rebuild the "- N bones, M surfaces" line from
+        # the parsed DATA.
         if not bones_n and (tags_parsed or surf_names):
             nb=sum(1 for tg in tags_parsed if tg.get("kind")=="bone")
             bones_n=f"- {nb} bones, {len(surf_names)} surfaces"
         for w in self._reopen_bar.winfo_children(): w.destroy()
         self._info_title.configure(text=stem,foreground=ACCENT)
         self._info_stats.configure(text=bones_n+("  .  "+str(len(anim_names))+" anims" if anim_names and anim_names[0] else ""))
-        # selectable/copyable tag & bone list, coloured like the viewer's legend
+        # Selectable tag/bone list, coloured like the viewer's legend.
         t=self._tag_text; self._retheme_tag_text()
         t.configure(state="normal"); t.delete("1.0","end")
         if surf_names:
@@ -4459,10 +4108,9 @@ class App(tk.Tk):
 
     # ---- embedded 3D viewer pane -----------------------------------------------
     def _ensure_webview(self):
-        """Create the embedded WebView2 in the middle pane on first use. Returns
-        True when an embedded view is ready. Any failure (package missing, no
-        WebView2 runtime, .NET init error) logs once and returns False so the
-        caller falls back to the external browser - never fatal."""
+        """Create the embedded WebView2 in the middle pane on first use. Returns True when it
+        is ready; any failure (package missing, no runtime, .NET init error) is logged and
+        returns False so the caller falls back to the browser."""
         if self._webview is not None: return True
         if WEBVIEW2 is None or not self._embed_on.get(): return False
         try:
@@ -4476,7 +4124,7 @@ class App(tk.Tk):
             self._view_placeholder.pack_forget()
             wv.pack(fill="both",expand=True)
             self._webview=wv
-            self._hook_embed_drop()      # stop the pane hijacking file drags (see below)
+            self._hook_embed_drop()      # stop the pane hijacking file drops (see below)
             return True
         except Exception as e:
             self._log_line(f"(embedded viewer unavailable: {e}; using browser)","dim")
@@ -4484,20 +4132,14 @@ class App(tk.Tk):
             return False
 
     # --- embedded-pane drag & drop --------------------------------------
-    # WebView2's default for an external file drop is "navigate to it", which
-    # for a .skd/.tik means the pane downloads the file. Three independent,
-    # best-effort guards (each harmless on its own):
-    #   1) AllowExternalDrop=False  - Chromium refuses the drop outright, so
-    #      it can never navigate/download.
-    #   2) WinForms DragEnter/DragDrop on the two host controls - if the
-    #      refused drop falls through to them, the file loads exactly like a
-    #      drop on the rest of the window (path -> _drop_paths -> _poll_log).
-    #   3) a JS guard injected into every page - if 1) is unavailable (very
-    #      old WebView2 runtime) the page preventDefault()s the drop itself,
-    #      so nothing downloads, and posts a message so we log a hint.
-    # Runs once per webview instance, retrying until the async core init
-    # finishes (wv.core appears); everything here is wrapped so a missing
-    # API on some runtime can never break the viewer.
+    # WebView2 navigates to an externally dropped file by default, which downloads a
+    # .skd/.tik. Three independent guards:
+    #   1) AllowExternalDrop=False: Chromium refuses the drop.
+    #   2) WinForms DragEnter/DragDrop on the host controls: a drop that falls through loads
+    #      like a drop anywhere else in the window (_drop_paths -> _poll_log).
+    #   3) A JS guard in every page for old runtimes without (1): it preventDefault()s the
+    #      drop and posts a message so a hint is logged.
+    # Runs once per webview, retrying until the async core init finishes.
     def _hook_embed_drop(self,_tries=0):
         wv=self._webview
         if wv is None or getattr(self,"_embed_drop_hooked",False): return
@@ -4544,30 +4186,27 @@ class App(tk.Tk):
                     if m=="mohaa-drop-blocked":
                         self._log_q.put(("dim","(the 3D pane can't take drops here - drop onto the file tree or console instead)"))
                     elif m=="mohaa-close":
-                        # viewer Esc: revert the pane to the start page. MUST NOT touch the
-                        # WebView2 from inside its own WebMessage callback (this runs on the
-                        # WebView2/COM thread; destroying the control here crashes the process
-                        # even if deferred). Route it through the same thread-safe queue every
-                        # other worker uses; _poll_log runs _close_viewer on the Tk main thread,
-                        # exactly like the (working) Clear-built-models path does.
+                        # Viewer Esc: revert the pane to the start page. This callback runs on the WebView2/COM
+                        # thread, where touching the control crashes the process, so hand it to the Tk main
+                        # thread via the queue.
                         self._log_q.put(("closeview",None))
                     elif m and m.startswith("mohaa-ang "):
-                        # viewer placement dial moved: persist the pitch/yaw/roll triple.
-                        # Same thread rule as "mohaa-close" - this runs on the WebView2/COM
-                        # thread, so the config write is handed to the Tk main thread via the
-                        # queue rather than done inline.
+                        # Placement dial moved: persist pitch/yaw/roll on the Tk main thread (same thread rule
+                        # as "mohaa-close").
                         self._log_q.put(("setang",m.split(" ",1)[1]))
+                    elif m and m.startswith("mohaa-renderer "):
+                        # The page's Display > WebGL toggle: save it on the Tk main thread.
+                        self._log_q.put(("setrenderer",m.split(" ",1)[1]))
                     elif m and m.startswith("mohaa-anim "):
-                        # the viewer asked for an animation the page was not built with
+                        # The viewer wants an animation the page wasn't built with.
                         p=m.split(" ",2)
                         self._build_anim(p[1], p[2] if len(p)>2 else p[1])
                     elif m and m.startswith("mohaa-attach "):
-                        # attachmodel panel: the viewer wants a model's rigid geometry
+                        # Attach panel: the viewer wants a model's geometry.
                         self._build_attach(m.split(" ",1)[1].strip())
                     elif m=="mohaa-attach-models":
-                        # The PAGE asks for the model list on boot rather than the launcher
-                        # pushing it: no navigation-timing race, and a page opened straight
-                        # in a browser simply never asks, so the panel stays hidden there.
+                        # The page requests the model list on boot (no navigation-timing race); a page opened
+                        # in a plain browser never asks, so the panel stays hidden there.
                         self._send_attach_models()
                 except Exception as e:
                     self._log_q.put(("dim",f"(viewer message: {e})"))
@@ -4576,14 +4215,12 @@ class App(tk.Tk):
         except Exception: pass
 
     # --- on-demand animation builds -------------------------------------------
-    # A character model reaches well over a thousand animations through its
-    # $include chain, so the page ships the MENU and nothing else. Clicking an
-    # animation it does not hold posts `mohaa-anim <id> <name>` up here; we pull
-    # that one .skc out of the paks, run mohaa_view.py --animbuild against the same
-    # model, and drop the solved frames into the cache folder beside the HTML as
-    # a<id>.js. The page then loads it with a plain <script> tag - which a file://
-    # page may do, unlike fetch/XHR - and plays it. It stays on disk, so the same
-    # animation is never built twice.
+    # A character can reach over a thousand animations through its $include chain, so the
+    # page ships only the menu. Clicking an animation it doesn't hold posts
+    # `mohaa-anim <id> <name>`; the launcher extracts that .skc, runs mohaa_view.py
+    # --animbuild, and writes the solved frames beside the HTML as a<id>.js. The page loads
+    # it with a <script> tag (allowed on file://, unlike fetch/XHR). Built files persist, so
+    # each animation is built only once.
     def _build_anim(self, aid, name):
         if not aid: return
         if aid in self._anim_busy:
@@ -4602,11 +4239,10 @@ class App(tk.Tk):
         threading.Thread(target=self._build_anim_work,args=(aid,ent),daemon=True).start()
 
     # --- attachmodel geometry --------------------------------------------------
-    # The panel in the viewer lets the user hang any model off any bone. Geometry comes
-    # from the same paks the tree is built from, is resolved ONCE per model and cached as
-    # at<key>.js beside the page, so picking the same weapon for a second bone is free.
-    # This is launcher-only: a page opened straight in a browser has no bridge, so it
-    # never receives MOHAA_ATTACH_MODELS and the panel stays hidden.
+    # The viewer's attach panel hangs any model off any bone. Each model's geometry is built
+    # once from the loaded paks and cached beside the page as at<key>.js. Launcher-only: a
+    # page opened in a plain browser never receives MOHAA_ATTACH_MODELS, so the panel stays
+    # hidden.
     def _attach_key(self, vpath):
         return MTX._cache_id("attach|"+(vpath or "").lower()) if MTX is not None \
                else hashlib.blake2s(("attach|"+(vpath or "").lower()).encode("utf-8","replace"),
@@ -4627,7 +4263,7 @@ class App(tk.Tk):
         key=self._attach_key(vpath)
         jp=os.path.join(self._anim_outdir,"at"+key+".js")
         if os.path.exists(jp) and os.path.getsize(jp)>0:
-            # already resolved this session or a previous one - hand it straight back
+            # Already built (this session or earlier): hand it straight back.
             self._log_q.put(("js",f"try{{MOHAA_ATTACH_LOAD({json.dumps(key)},{json.dumps(vpath)})}}catch(e){{}}"))
             return
         if key in self._attach_busy:
@@ -4653,21 +4289,16 @@ class App(tk.Tk):
             if MTX is not None and self._tex_ready and self._vfs is not None:
                 try:
                     import mohaa_view as MV
-                    # every assembled part's surfaces, de-duplicated in order - the head and
-                    # hands carry their own (`head`, `hand`) and would otherwise go untextured
+                    # Every assembled part's surfaces, de-duplicated in order (head/hands have their own).
                     surfs=[]
                     for _sp in [skd_path]+self._attach_parts:
                         try: surfs+=[s["name"] for s in MV.parse_skd(_sp)["surfaces"]]
                         except Exception: pass
                     _seen=set(); surfs=[x for x in surfs if not (x in _seen or _seen.add(x))]
                     manifest=os.path.join(tdir,"_tex_"+key+".json")
-                    # Resolve against the .skd's VFS PATH, not the .tik's, and let the
-                    # attachment's own setup{} win - the same local_TI pattern the main
-                    # model build uses. Passing vpath here was the muzzle-flash bug: a
-                    # .tik path is never a key in the index, so resolve_surface_texmap fell
-                    # back to merging every sibling .tik in the folder and `material1` (the
-                    # 3ds Max default surface name, shared by half of models/fx) resolved to
-                    # whichever sibling happened to land last in the dict.
+                    # Resolve against the .skd's VFS path (the tik index is keyed by .skd path) and let the
+                    # attachment's own setup{} win, as the main model build does. A .tik path would fall back
+                    # to the sibling-folder guess and pick up an unrelated `material1` shader.
                     tex_key=self._attach_skelvfs or vpath
                     local_TI=dict(self._TI); allpairs=[]
                     if self._attach_tikmap:
@@ -4701,9 +4332,8 @@ class App(tk.Tk):
                     if line.strip(): self._log_q.put(("err",line))
                 self._log_q.put(("js",f"try{{MOHAA_ATTACH_FAIL({json.dumps(key)},"
                                       f"{json.dumps('build failed - see Output')})}}catch(e){{}}")); return
-            # NOTE: the tik's `setup { scale N }` is deliberately NOT sent. It is an
-            # authoring/import factor (static_airtank.tik carries 0.65 to convert cm to
-            # world units), not the scale an attached model gets in-game, which is 1.
+            # The tik's `setup { scale N }` is deliberately not sent: it's an import factor
+            # (static_airtank.tik: 0.65), not an attached model's in-game scale, which is 1.
             self._log_q.put(("js",f"try{{MOHAA_ATTACH_LOAD({json.dumps(key)},{json.dumps(vpath)})}}catch(e){{}}"))
         except subprocess.TimeoutExpired:
             self._log_q.put(("err",f"{vpath}: attachment build timed out"))
@@ -4717,18 +4347,15 @@ class App(tk.Tk):
             self._attach_busy.discard(key)
 
     def _extract_attach_files(self, vpath, tdir):
-        """Pull one model out of the paks into tdir and return its .skd.
+        """Extract one model from the paks into tdir and return its .skd path.
 
-        A .tik entry names its geometry through `path`/`skelmodel`, so the tik is read
-        first and the .skd it points at is fetched by name; a .skd entry is taken as-is.
-        Only these two extensions are ever written, and _extract_one confines every path
-        to the workspace, so a hostile pak cannot use this route either."""
+        A .tik names its geometry via `path`/`skelmodel`; a .skd is taken as-is. Files are
+        written into tdir by basename, so an entry name can't escape it."""
         low=(vpath or "").lower()
         want=None
         parts=[]; txt=""
-        # One part -> its VFS path. The `path` line may already be baked into the
-        # skelmodel token, or be stale, so fall back to a basename sweep as the .skd
-        # branch below always did.
+        # One part -> its VFS path. The `path` may already be in the skelmodel token, or be
+        # stale, so fall back to a basename sweep.
         def _part_vfs(_base,_skel):
             if not _skel: return None
             w=("/".join(x for x in [(_base or "").strip("/"),_skel.strip("/")] if x)).lower()
@@ -4748,25 +4375,21 @@ class App(tk.Tk):
                 return None
             if not skel: return None
             want=_part_vfs(base,skel)
-            # rev 63: this .tik's OWN `surface <n> shader <s>` map, for the texture pass.
-            # The global tik index is keyed by .skd path (build_tik_index), so handing it a
-            # .tik path missed every time and fell through to the sibling-folder guess -
-            # which for models/fx/muzflash.tik meant some OTHER fx model's `material1`.
+            # This .tik's own surface -> shader map for the texture pass (the global tik index is
+            # keyed by .skd path, so a .tik path would never match).
             try: self._attach_tikmap=MTX.parse_tik_setup(txt)
             except Exception: self._attach_tikmap=None
         elif low.endswith(".skd"):
             want=vpath
         if not want: return None
-        self._attach_skelvfs=want          # the key build_tik_index actually uses
+        self._attach_skelvfs=want          # the key build_tik_index uses
         data=self._vfs.read(want)
         if data is None: return None
         target=os.path.join(tdir,os.path.basename(want))
         with open(target,"wb") as f: f.write(data)
-        # EVERY OTHER skelmodel the .tik lists. A player/human model is not one mesh: the
-        # officer is german_officer.skd + head2.skd + hand.skd + officer_hat.skd, four
-        # `path`/`skelmodel` pairs whose bones union into one skeleton (MV.merge_skds, the
-        # same assembly the main model build does). Taking parts[0] alone attached a
-        # headless, handless body.
+        # Every other skelmodel the .tik lists. A player/human model is several meshes (e.g.
+        # german_officer.skd + head2.skd + hand.skd + officer_hat.skd) whose bones merge into one
+        # skeleton (MV.merge_skds), as in the main build.
         for (_pb,_ps) in parts[1:]:
             _pv=_part_vfs(_pb,_ps)
             if not _pv: 
@@ -4779,22 +4402,16 @@ class App(tk.Tk):
         if self._attach_parts:
             self._log_q.put(("dim","- attach parts: "+", ".join(
                 [os.path.basename(target)]+[os.path.basename(p) for p in self._attach_parts])))
-        # Idle .skc: the model's authored rest pose. Named by the tik's own
-        # `animations { idle X.skc }` where there is one, else the .skd's own stem.
+        # Idle .skc: the model's rest pose, from the tik's `idle` animation if it has one, else
+        # the .skd's own stem.
         self._attach_idle=None
         cands=[]
         if low.endswith(".tik"):
-            # THE POSE. A TIKI model's rest pose is frame 0 of an animation, not an identity
-            # skeleton, so without one every bone gets an identity rotation and the mesh folds
-            # in on itself - which is exactly what an attached player model did.
-            #
-            # The old lookup was a regex for `idle <file>.skc` plus a guess at the folder. That
-            # cannot work for a player model: the alias lives in an $include'd file
-            # (models/player/base/anims_shared.txt) under a `$path models/human/animation`
-            # scope, so the token on the line is the RELATIVE `scripted/flak88/offic_idle.skc`
-            # and the real file is models/human/animation/scripted/flak88/offic_idle.skc.
-            # build_anim_catalog is the resolver that already applies those $path scopes across
-            # the whole $include chain (it is what the main model build uses), so ask it.
+            # A TIKI model's rest pose is frame 0 of an animation; without one every bone gets an
+            # identity rotation and the mesh folds in on itself. Player models define `idle` in an
+            # $include'd file under a `$path` scope (anims_shared.txt: scripted/flak88/offic_idle.skc
+            # relative to models/human/animation), so use build_anim_catalog, which applies those
+            # scopes. A plain `idle X.skc` regex is kept as a fallback.
             try:
                 _cat=MTX.build_anim_catalog(txt,self._vfs,vpath)
                 _an=_cat.get("anims") or []
@@ -4830,11 +4447,9 @@ class App(tk.Tk):
         return target
 
     def _ensure_anim_ctx(self):
-        """Rebuild just enough to solve an animation: the .tik, its catalogue, and every
-        skelmodel it assembles. Needed after a CACHED open, which serves the saved HTML
-        without extracting anything - but an animation solved later has to land on the
-        exact same merged bone list the page was built from, so the head/hands/helmet
-        parts must be on disk too (mohaa_view.py re-runs the same assembly)."""
+        """Recreate what's needed to solve an animation after a cached open (which extracts
+        nothing): the .tik, its catalogue and every skelmodel it assembles, so the solved
+        animation targets the same merged bone list the page was built with."""
         entry=getattr(self,"_anim_entry",None)
         if not entry or MTX is None or self._vfs is None or not self._tmp: return False
         try:
@@ -4872,20 +4487,17 @@ class App(tk.Tk):
             self._log_q.put(("dim",f"(animation catalogue rebuild failed: {e})")); return False
 
     def _movement_donor(self, ent, srcdir):
-        """Extract the MOVEMENT-slot .skc for an action animation; return its path or None.
+        """Extract a movement-slot .skc to supply the legs for an action animation; return its
+        path or None.
 
-        MOHAA torso animations carry no leg channels and no "Bip01 pos" (weapon_bar/
-        bar_reload.skc, weapon_rifle/prone/rifle_prone_shoot.skc) because in-engine they are
-        ACTION animations blended over a MOVEMENT animation: skelAnimStoreFrameList_c keeps
-        both frame lists and GetSlerpValue/GetLerpValue3 fill whatever the action lacks from
-        the movement slot. Played alone the legs fall back to the A-pose template, whose foot
-        target sits at full IK reach, so they render dead straight.
+        Torso animations (e.g. weapon_bar/bar_reload.skc) have no leg channels or "Bip01 pos":
+        in-engine they are action animations blended over a movement animation, which fills the
+        missing channels (skelAnimStoreFrameList_c, GetSlerpValue/GetLerpValue3). Played alone,
+        the legs fall back to the rest template and render dead straight.
 
-        The <weapon>_<stance>_hit_* pain animations ARE full-body - Bip01 pos, Bip01 Footsteps,
-        ORIGIN and the whole L/R Thigh/Calf/Foot/Toe0 set - and their legs hold that weapon's
-        real idle stance for that stance. Donor = the first <weapon>_<stance>_hit* alias in
-        this model's catalogue, falling back to any weapon's <stance>_hit* when this weapon
-        ships none. Only frame 0 is used."""
+        The <weapon>_<stance>_hit* pain animations are full-body and hold that weapon's idle
+        stance, so the donor is the first such alias in the catalogue, falling back to any
+        weapon's <stance>_hit*. Only frame 0 is used."""
         try:
             nm=(ent.get("n") or "").lower()
             src=(ent.get("s") or "").replace("\\","/").lower()
@@ -4928,18 +4540,14 @@ class App(tk.Tk):
                     return
                 with open(sp,"wb") as f: f.write(d)
             os.makedirs(self._anim_outdir,exist_ok=True)
-            # Facial sibling: models/human/animation/scripted/smoking pairs lightup.skc with
-            # lightupMORPH.skc, declared in the .tik as two separate animations (smoking01 /
-            # smoking_lightup_face). The body build already absorbs the face as a layer, but
-            # the face entry is its own catalogue row - so extract and build it in the SAME
-            # child run. It then has a real cached sidecar, which is what the drop-down's
-            # "already built" dot actually reflects.
+            # Facial sibling: e.g. scripted/smoking pairs lightup.skc with lightupMORPH.skc, listed in
+            # the .tik as separate animations (smoking01 / smoking_lightup_face). Build the face entry
+            # in the same child run so it gets its own cached sidecar and "built" marker.
             also=[]; face_stem=None
             _s=(ent.get("s") or "")
             if _s.lower().endswith(".skc") and not _s[:-4].upper().endswith("MORPH"):
                 _sib=_s[:-4]+"MORPH.skc"
-                # Prefer a catalogue row: it has an id, so the facial entry can also be
-                # BUILT and get its own "already built" dot in the drop-down.
+                # Prefer a catalogue row: it has an id, so the face entry gets built too.
                 for _e2 in self._animcat["anims"]:
                     if (_e2.get("s") or "").lower()==_sib.lower() and _e2.get("id")!=aid:
                         _d2=self._vfs_read_skc(_e2.get("s"))
@@ -4948,19 +4556,15 @@ class App(tk.Tk):
                             also.append(_e2["id"]); face_stem=_e2["id"]
                         break
                 if face_stem is None:
-                    # No catalogue row - new_generic_human.tik declares
-                    # smoking_lightup/firstinhale/inhale/buttout_face but simply forgot
-                    # smoking_throwaway_face, even though throwawayMORPH.skc ships. Pull it
-                    # straight out of the paks so smoking05 still gets its face layer; it
-                    # just has no drop-down entry of its own to light up.
+                    # No catalogue row (new_generic_human.tik omits smoking_throwaway_face although
+                    # throwawayMORPH.skc ships): read it straight from the paks so the body still gets its
+                    # face layer.
                     _d3=self._vfs_read_skc(_sib)
                     if _d3:
                         face_stem=aid+"_face"
                         with open(os.path.join(src,face_stem+".skc"),"wb") as f3: f3.write(_d3)
             legs=self._movement_donor(ent,src)
-            # ONE --animbuild carrying every id, comma-separated: the child's parser takes
-            # a list on that flag, and passing the flag twice used to make the second
-            # occurrence replace the first.
+            # One --animbuild carrying every id, comma-separated (the flag takes a list).
             cmd=[self._pyexe,VIEWER,self._animcat_for,
                  "--animcat="+self._animcat_file,
                  "--animbuild="+",".join([aid]+also),
@@ -4968,12 +4572,9 @@ class App(tk.Tk):
             if face_stem: cmd.append("--animpair="+aid+":"+face_stem)
             if legs: cmd.append("--animlegs="+legs)
             p=subprocess.run(cmd,capture_output=True,text=True,timeout=180,**NOWIN)
-            # The child flags its own failures with a leading "!". Carrying that exact text
-            # back to the viewer beats a generic "build failed - see Output": "drives none of
-            # this skeleton's 72 bones" tells the user it can NEVER work (it is a facial
-            # morph track, not a bone track), whereas a generic message invites them to keep
-            # clicking. The animation name prefix is stripped because the viewer already
-            # shows the .skc path beside the message.
+            # Relay the child's own "!" failure text to the viewer instead of a generic message
+            # (e.g. "drives none of this skeleton's 72 bones" means it can never work). The
+            # animation-name prefix is stripped; the viewer shows the .skc path beside it.
             reason=None
             for line in (p.stdout or "").splitlines():
                 if not line.strip(): continue
@@ -4997,12 +4598,11 @@ class App(tk.Tk):
                 self._log_q.put(("err",f"{name}: build wrote no animation file")); return
             self._log_q.put(("ok",f"{name} ready ({os.path.getsize(jp)//1024} KB cached)"))
             self._log_q.put(("status","Done"))
-            # queued, not called directly: this runs on a worker thread and
-            # ExecuteScriptAsync must be issued from the Tk/UI thread or it is lost
+            # Queued, not called directly: ExecuteScriptAsync must run on the Tk/UI thread.
             self._log_q.put(("js",f"try{{MOHAA_ANIM_LOAD({json.dumps(aid)})}}catch(e){{}}"))
             for _a2 in also:
                 if os.path.exists(os.path.join(self._anim_outdir,"a"+_a2+".js")):
-                    # marks the facial entry as built in the drop-down without selecting it
+                    # Mark the facial entry as built in the drop-down without selecting it.
                     self._log_q.put(("js",f"try{{MOHAA_ANIM_HAVE({json.dumps(_a2)})}}catch(e){{}}"))
         except subprocess.TimeoutExpired:
             self._log_q.put(("err",f"{name}: build timed out"))
@@ -5014,9 +4614,8 @@ class App(tk.Tk):
             self._anim_busy.discard(aid)
 
     def _embed_js(self,js):
-        """Fire-and-forget JS into the embedded viewer page. Safe no-op when no
-        webview / core not initialised yet (core appears once WebView2 finishes
-        its async init)."""
+        """Fire-and-forget JS into the embedded viewer page. No-op until the WebView2 core has
+        finished its async init."""
         wv=self._webview
         if wv is None: return
         try:
@@ -5025,11 +4624,8 @@ class App(tk.Tk):
         except Exception: pass
 
     def _embed_merge_ui(self):
-        """Merge the duplicated controls: the launcher's top-right Theme /
-        Shortcuts buttons drive BOTH the launcher and the embedded viewer, so the
-        viewer's own 'Model' row (bTheme / bHelp) is hidden and its theme is
-        synced to the launcher's. Double-shot after load because the page may
-        still be parsing on the first call."""
+        """Hide the embedded viewer's own Theme/Shortcuts row (the launcher's buttons drive both)
+        and sync its theme. Called twice after load since the page may still be parsing."""
         light="true" if self._theme=="light" else "false"
         self._embed_js(
             "try{var b=document.getElementById('bTheme');"
@@ -5037,14 +4633,11 @@ class App(tk.Tk):
             f"if(typeof setTheme==='function')setTheme({light});}}catch(e){{}}")
 
     def _close_viewer(self):
-        """Revert the viewer pane to the initial 'select a .skd / .tik' placeholder - the
-        same state as a fresh launch, and the same thing Clear-built-models does.
+        """Revert the viewer pane to the start placeholder, as on a fresh launch.
 
-        MUST run on the Tk main thread. It is safe to destroy the WebView2 here because both
-        callers reach this on the main thread: Clear-built-models is a menu command, and the
-        viewer's Esc arrives via the _log_q -> _poll_log path (NOT directly from the WebView2
-        message callback, which would crash). Leaves the _embed_on preference alone so
-        re-embedding still works on the next open. No-op when nothing is open."""
+        Must run on the Tk main thread: the viewer's Esc arrives via _log_q -> _poll_log, never
+        directly from the WebView2 message callback (which would crash). Leaves the _embed_on
+        preference alone. No-op when nothing is open."""
         if self._webview is not None:
             wv=self._webview; self._webview=None
             self._embed_drop_hooked=False              # re-hook drops on a future webview
@@ -5053,16 +4646,12 @@ class App(tk.Tk):
             try: wv.destroy()
             except Exception: pass
         self._embed_url=None
-        # Keep _last_build so the top "Open Viewer" button can REOPEN the model the user just
-        # Esc-closed (the path bar still shows its "pk3 model: <n>" name; _run re-runs this
-        # build, which finds the cached HTML and reopens instantly). Only the details panel
-        # and per-open anim dir are transient and get cleared. (Clear-built-models, whose
-        # builds are deleted, clears _last_build + the path bar itself after this returns.)
+        # Keep _last_build so "Open Viewer" can reopen the model instantly from its cached HTML;
+        # only the details panel and per-open state are cleared. (Clear built models clears
+        # _last_build itself.)
         self._last_info=None; self._anim_outdir=None; self._attach_busy=set()
-        self._clear_info()          # revert the bottom-right details panel to "No model loaded"
-        # ...and the status bar, which would otherwise still read "Viewing <name>" over an
-        # empty pane. Safe for the force-rebuild caller too: _open_pk3_model sets its own
-        # status immediately afterwards.
+        self._clear_info()          # details panel back to "No model loaded"
+        # Reset the status bar too, which would otherwise still read "Viewing <name>".
         try: self._set_status("Ready")
         except Exception: pass
         try:
@@ -5086,35 +4675,22 @@ class App(tk.Tk):
 
     def _open_in_browser(self,path):
         import webbrowser, pathlib
-        # as_uri() percent-encodes; hand-built file:// URLs truncate at the first '#' in
-        # the path and mangle '%' and non-ASCII (a Cyrillic/CJK username is enough).
+        # as_uri() percent-encodes; a hand-built file:// URL breaks on '#', '%' and non-ASCII.
         webbrowser.open(pathlib.Path(os.path.abspath(path)).as_uri())
 
     def _open_standalone(self,path):
-        """Open a built viewer HTML in a new browser tab window, using the
-        browser-version of the page: opened WITHOUT the #embed hash, so it keeps
-        its own Theme / Shortcuts buttons (unlike the embedded in-launcher pane).
-        The old self-contained --app= 'standalone window' feature was removed - this
-        now always goes through the default browser."""
+        """Open a built viewer HTML in the default browser, without the #embed hash, so the
+        page keeps its own Theme/Shortcuts buttons."""
         self._open_in_browser(path)
 
     def _reclaim_focus(self,e):
-        """Clicking anywhere on the launcher (search bar, tree, log, buttons...)
-        while the embedded WebView2 pane holds the keyboard takes typing back.
-        Why plain clicks stop working: the WebView2 is a WinForms child HWND
-        inside this Tk toplevel. When the viewer page loads, Chromium takes Win32
-        keyboard focus; Tk gets WM_KILLFOCUS and marks the app unfocused. A later
-        click on a Tk widget runs the widget's normal focus_set() binding, but an
-        unfocused Tk only RECORDS the pending focus target - no Win32 SetFocus is
-        issued (a click inside an already-active toplevel produces no WM_ACTIVATE
-        to hand the keyboard back), so every keystroke keeps hitting the viewer
-        page's hotkeys. focus_force() is the Tk call that forces the Win32-level
-        focus change. Clicking the viewer pane itself never reaches Tk (it's a
-        native child window), so Chromium re-takes the keyboard on its own and
-        viewer hotkeys resume - the vice-versa, no code needed.
-        Guarded so ordinary in-launcher clicks (Tk already owns the keyboard) are
-        untouched: then focus_displayof() returns a widget, not None, and we do
-        nothing - no focus stealing on every click."""
+        """Take keyboard focus back from the embedded WebView2 when a launcher widget is clicked.
+
+        When the page loads, Chromium takes Win32 keyboard focus and Tk marks itself unfocused.
+        A later click on a Tk widget only records a pending focus target (there is no
+        WM_ACTIVATE inside an already-active window), so keys keep going to the viewer.
+        focus_force() makes the Win32 focus change. Clicks on the pane itself never reach Tk.
+        Does nothing when Tk already has focus."""
         if self._webview is None: return
         w=e.widget
         try:
@@ -5128,13 +4704,11 @@ class App(tk.Tk):
         except Exception: pass
 
     def _open_file(self,path):
-        """Show a built viewer HTML: in the embedded middle pane when available,
-        otherwise in the external browser (the old behaviour). For the embedded
-        pane the URL carries an #embed&theme=... hash so the page boots straight
-        into the in-launcher layout + current theme (before first paint) instead
-        of flashing the standalone 'webpage' layout and then swapping via JS."""
-        # the on-demand animation cache lives in a folder next to the page and named
-        # after it: <out>/allied_pilot_tik_view.html -> <out>/allied_pilot_tik_view/
+        """Show a built viewer HTML in the embedded pane when available, else in the browser.
+        The embedded URL carries #embed&theme=...&renderer=...(&ang=...) so the page boots
+        straight into the in-launcher layout, theme and renderer before first paint."""
+        # The on-demand animation cache is a folder beside the page, named after it:
+        # <out>/allied_pilot_tik_view.html -> <out>/allied_pilot_tik_view/
         self._anim_outdir=os.path.splitext(os.path.abspath(path))[0]
         self._stamp_anim_cache()
         import pathlib
@@ -5142,6 +4716,7 @@ class App(tk.Tk):
         if self._ensure_webview():
             try:
                 url=base+"#embed&theme="+("light" if self._theme=="light" else "dark")
+                url+="&renderer="+self._renderer()
                 _ang=self.view_angles()
                 if _ang: url+="&ang="+",".join(str(x) for x in _ang)
                 self._webview.load_url(url); self._embed_url=url
@@ -5153,11 +4728,10 @@ class App(tk.Tk):
         self._open_in_browser(path)
 
     def _on_close(self):
-        # persist the current pane layout before anything is torn down
+        # Save the pane layout before anything is torn down.
         self._save_panes()
-        # Dispose the WebView2 control BEFORE tearing down Tk: letting it die in
-        # the <Destroy> cascade mid-teardown is what produced the "Python has
-        # stopped working" crash box on exit.
+        # Dispose the WebView2 before tearing down Tk; letting it die in the <Destroy> cascade
+        # crashes Python on exit.
         if self._webview is not None:
             wv=self._webview; self._webview=None
             try: wv.pack_forget()
@@ -5228,19 +4802,16 @@ if __name__=="__main__":
     def _run_app():
         App(initial_file=init).mainloop()
     if WEBVIEW2 is not None:
-        # WebView2's WinForms control needs an STA COM apartment - run the whole
-        # Tk app on a .NET STA thread (tkwebview2's documented pattern). Any
-        # failure falls straight back to the plain main-thread run.
+        # WebView2's WinForms control needs an STA COM apartment, so run the Tk app on a .NET
+        # STA thread (tkwebview2's documented pattern); fall back to the main thread on failure.
         try:
             from System.Threading import Thread as _NetThread, ApartmentState as _ApState, ThreadStart as _TStart
             _t=_NetThread(_TStart(_run_app)); _t.ApartmentState=_ApState.STA
             _t.Start(); _t.Join()
         except Exception:
             _run_app()
-        # pythonnet's CLR + WebView2 do not survive normal interpreter shutdown:
-        # their atexit/finalizer teardown is what raised the "Python has stopped
-        # working" box AFTER the window closed. All real cleanup (temp dir,
-        # config, WebView2 Dispose) already ran in _on_close - skip straight out.
+        # pythonnet's CLR + WebView2 crash during normal interpreter shutdown, and all cleanup
+        # already ran in _on_close, so exit immediately.
         os._exit(0)
     else:
         _run_app()

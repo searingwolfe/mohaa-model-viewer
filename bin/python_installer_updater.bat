@@ -4,51 +4,43 @@ setlocal EnableDelayedExpansion
 REM ============================================================================
 REM  python_installer_updater.bat  --  MOHAA Model Viewer prerequisite setup
 REM
-REM  Run this ONCE before RUN -- mohaa_view.bat.
-REM  It finds (or installs) a suitable Python and installs the viewer's packages.
+REM  Finds the newest usable Python, or downloads one that supports this Windows
+REM  version and CPU, then installs the viewer's packages. "RUN -- Medal of Honor
+REM  Model Viewer.bat" offers to run this when it can't find a suitable Python,
+REM  passing /fromrun so it returns without the closing pause; it can also be run
+REM  on its own to update Python's packages.
 REM
-REM  What changed from the previous version, and why:
-REM   * The user's PATH is NEVER hand-edited any more. The old script read the
-REM     user PATH with [Environment]::GetEnvironmentVariable, which EXPANDS
-REM     %VAR% references, then wrote the expanded text back - permanently
-REM     flattening REG_EXPAND_SZ entries like %USERPROFILE%\... to literals, with
-REM     no backup. It also stripped any entry ending in \PythonNN, including
-REM     unrelated toolchains. Python's own installer sets PATH correctly, so that
-REM     job is handed back to it.
-REM   * Every "if <cond> cmd1 & cmd2" is parenthesised. In cmd, & is a COMMAND
-REM     SEPARATOR applied by the parser, so "if X endlocal & exit /b 1" ran the
-REM     exit unconditionally - which made the old :compare_versions always report
-REM     "older" and re-download Python on every single run.
-REM   * Paths are passed to PowerShell as ARGUMENTS, not pasted into single-quoted
-REM     strings. A path containing an apostrophe (C:\Users\O'Brien\...) used to
-REM     terminate the string early and have its remainder parsed as code.
+REM  Notes for maintainers:
+REM   * PATH is never edited here; Python's installer handles it via PrependPath=1.
+REM   * Paths are passed to PowerShell as arguments, never pasted into quoted
+REM     strings, so an apostrophe in a user path cannot break the command.
+REM   * Every multi-command "if" body is parenthesised. In cmd, & separates
+REM     commands, so "if X cmd1 & cmd2" would run cmd2 unconditionally.
 REM   * The download is pinned to TLS 1.2 and the installer's Authenticode
-REM     signature is verified before it is executed.
-REM   * The Python version is chosen for THIS Windows release. Python 3.9+
-REM     refuses to install on Windows 7 and 3.12+ requires Windows 10, so the
-REM     old "always fetch latest" simply failed there. The viewer itself needs
-REM     only Python 3.7, so older Windows is fully supported on an older Python.
-REM   * The CPU architecture is detected (x64 / ARM64 / x86) instead of assuming
-REM     amd64, and Pillow is version-checked rather than merely imported.
-REM   * The Microsoft Store execution aliases are no longer deleted. That was a
-REM     system-wide change outside this program's remit, and the search below
-REM     already skips them.
+REM     signature is verified before it runs.
+REM   * Microsoft Store execution aliases are skipped, never deleted.
 REM ============================================================================
+
+set "FROMRUN="
+if /i "%~1"=="/fromrun" set "FROMRUN=1"
 
 echo =====================================
 echo  MOHAA Model Viewer - Python setup
 echo =====================================
 
-REM Oldest interpreter the viewer's code actually runs on.
+REM Oldest Python the viewer supports (Pillow 10.3 requires 3.8).
 set MIN_MAJOR=3
-set MIN_MINOR=7
+set MIN_MINOR=8
 
 REM ---------------------------------------------------------------------------
 REM  DETECT WINDOWS VERSION  ->  highest Python that will install on it
 REM ---------------------------------------------------------------------------
 set WINMAJOR=
 set WINMINOR=
-for /f "tokens=1,2 delims=." %%a in ('powershell -NoProfile -Command "$v=[Environment]::OSVersion.Version; \"$($v.Major).$($v.Minor)\"" 2^>nul') do (
+REM Keep every parenthesis in a FOR /F command inside double quotes. cmd has no escape
+REM for a quote inside quotes, and an unquoted closing parenthesis ends the command
+REM list, which aborts the whole script with a syntax error.
+for /f "tokens=1,2 delims=." %%a in ('powershell -NoProfile -Command "[Environment]::OSVersion.Version.ToString()" 2^>nul') do (
     set WINMAJOR=%%a
     set WINMINOR=%%b
 )
@@ -99,7 +91,7 @@ if /i "!ARCH!"=="x86"   set ARCHSUFFIX=
 echo Detected CPU: !ARCH!
 
 REM ---------------------------------------------------------------------------
-REM  FIND AN EXISTING, USABLE PYTHON  (Store aliases skipped, never deleted)
+REM  FIND AN EXISTING, USABLE PYTHON
 REM ---------------------------------------------------------------------------
 echo.
 echo Searching for an existing Python...
@@ -163,9 +155,7 @@ if not exist "!INSTALLER!" (
     exit /b 1
 )
 
-REM --- Verify the installer is genuinely signed by the Python Software Foundation.
-REM     HTTPS protects the transport; this protects against a tampered or
-REM     substituted file being executed silently with the user's privileges.
+REM Only run the installer if it carries a valid Python Software Foundation signature.
 echo Verifying the installer's digital signature...
 powershell -NoProfile -Command "$s=Get-AuthenticodeSignature -FilePath $args[0]; if($s.Status -ne 'Valid'){Write-Host ('   signature status: ' + $s.Status); exit 1}; $subj=$s.SignerCertificate.Subject; Write-Host ('   signed by: ' + $subj); if($subj -notmatch 'Python Software Foundation'){exit 1}; exit 0" "!INSTALLER!"
 if errorlevel 1 (
@@ -182,8 +172,8 @@ echo Running the installer ^(PrependPath is handled by Python's own installer^).
 "!INSTALLER!" /quiet InstallAllUsers=0 PrependPath=1 Include_pip=1 Include_tcltk=1
 del /f /q "!INSTALLER!" >nul 2>&1
 
-REM Locate what was just installed. Do not guess the folder from the version
-REM string alone - ask the py launcher first, then fall back to the standard path.
+REM Locate the new interpreter: ask the py launcher first, then try the default
+REM per-user install folder for this version.
 set PYTHON_EXE=
 for /f "delims=" %%P in ('py -3 -c "import sys;print(sys.executable)" 2^>nul') do set PYTHON_EXE=%%P
 if not defined PYTHON_EXE (
@@ -215,9 +205,8 @@ echo Updating pip...
 
 echo.
 echo Installing Pillow ^(required: MOHAA textures are .tga, only Pillow decodes them^)...
-REM A version FLOOR, not a bare "import PIL" check. Old Pillow releases have known
-REM decoder vulnerabilities, and this program feeds Pillow .tga/.dds data straight
-REM out of .pk3 archives the user downloaded - i.e. untrusted input.
+REM Enforce a minimum version, not just "import PIL": older Pillow releases have
+REM known decoder vulnerabilities, and the viewer decodes images from untrusted .pk3s.
 "!PYTHON_EXE!" -m pip install --upgrade "Pillow>=10.3.0"
 if errorlevel 1 (
     echo    retrying as a per-user install...
@@ -233,9 +222,8 @@ if errorlevel 1 (
     echo    Pillow OK.
 )
 
-REM Embedded 3D pane. WebView2 is Windows 8.1+ only (the runtime dropped Windows 7
-REM support at version 109), so skip it entirely on older Windows - the launcher
-REM falls back to opening models in the default browser, which works everywhere.
+REM Optional embedded 3D pane. WebView2 requires Windows 8.1+ (runtime 109 dropped
+REM Windows 7), so older systems skip it and use the browser fallback.
 if !WINMAJOR! GEQ 10 goto DO_WEBVIEW
 if !WINMAJOR! EQU 6 if !WINMINOR! GEQ 3 goto DO_WEBVIEW
 echo.
@@ -261,20 +249,21 @@ echo =====================================
 echo  Setup complete
 echo  Interpreter: !PYTHON_EXE!
 echo =====================================
+if defined FROMRUN exit /b 0
 echo.
 echo Your PATH was not modified by this script. If "python" is not recognised in
 echo a new Command Prompt, either re-run Python's installer and tick
-echo "Add python.exe to PATH", or just use "RUN -- mohaa_view.bat", which finds
-echo the interpreter on its own.
+echo "Add python.exe to PATH", or just use "RUN -- Medal of Honor Model Viewer.bat",
+echo which finds the interpreter on its own.
 echo.
 pause
 exit /b 0
 
 REM ===========================================================================
 REM  :consider "<path to python.exe>"
-REM  Keeps the NEWEST interpreter that is >= MIN_MAJOR.MIN_MINOR and is not a
-REM  Microsoft Store execution alias (those are 0-byte stubs that just open the
-REM  Store). Every "if" body is parenthesised so nothing runs unconditionally.
+REM  Records the candidate in BEST_PY/BEST_VER if it is newer than the current
+REM  best, at least MIN_MAJOR.MIN_MINOR, has tkinter, and is not a Microsoft
+REM  Store alias.
 REM ===========================================================================
 :consider
 set "CAND=%~1"

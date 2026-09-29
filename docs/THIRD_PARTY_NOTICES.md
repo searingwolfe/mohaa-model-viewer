@@ -1,51 +1,32 @@
 # Third-Party Notices & Licensing
 
-## 1. The OpenMOHAA question — read this before choosing a licence
+## 1. Licence and OpenMOHAA
 
-This project's engine behaviour is verified against **OpenMoHAA**
-(<https://github.com/openmoh/openmohaa>), which is licensed under the
-**GNU General Public License, version 2**. Its `COPYING.txt` is GPLv2, inherited
-from the id Tech 3 / Quake III Arena source that id Software released under GPLv2.
+This project is released under the **GNU General Public License, version 2** (see
+[`LICENSE`](../LICENSE)).
+
+Its engine behaviour is verified against **OpenMoHAA**
+(<https://github.com/openmoh/openmohaa>), which is also GPLv2: its `COPYING.txt` is
+inherited from the id Tech 3 / Quake III Arena source that id Software released under
+GPLv2.
 
 The source files here cite OpenMOHAA extensively by file and line
-(`cg_tempmodels.cpp:531-557`, `tiki_shared.h:76-79`, `tr_shader.c`, and so on).
-Those citations are excellent engineering practice — they are why the renderer
-matches the game — but they also document, in writing, that the behaviour was
-derived by reading GPLv2 source.
+(`cg_tempmodels.cpp:531-538`, `tiki_shared.h:76-79`, `tr_shader.c`, and so on), and
+several routines follow OpenMOHAA functions closely, reimplemented in Python or
+JavaScript. Two things are worth separating:
 
-Two things are worth separating:
+* **File-format facts are not copyrightable.** That `numBone` sits at a given offset,
+  that a bone record has a given size, that `SKAN` is the SKC ident: these are facts
+  about a data format, and learning them from any source is fine.
+* **Translating an implementation can be a derivative work.** Where a routine follows
+  an OpenMOHAA function's logic closely, even in another language, it may be regarded
+  as derived from GPLv2 code.
 
-* **File-format facts are not copyrightable.** That `numBone` sits at offset
-  `0x4C`, that a bone record is 72 bytes in SKB, that `SKAN` is the SKC ident —
-  these are facts about a data format, and learning them from any source is fine.
-* **Translating an implementation is a derivative work.** Copyright law treats
-  translation between languages as derivation. Where a routine here follows an
-  OpenMOHAA function's logic closely — even reimplemented in Python or
-  JavaScript — a court could reasonably regard it as derived from GPLv2 code.
+Using GPLv2 for this project settles that question: it matches OpenMOHAA, it fits the
+MOHAA / OpenMOHAA modding community, and every runtime dependency is GPL-compatible
+(section 2). *This is a plain-language summary, not legal advice.*
 
-**Recommendation: release this project under GPLv2 (or GPLv2-or-later).**
-
-A `LICENSE` file containing the GPLv2 text is included in this repository for
-that purpose. Reasons it is the sensible choice here:
-
-* It removes the ambiguity entirely, at zero cost for a free tool.
-* It matches the norms of the OpenMOHAA / MOHAA modding community this tool
-  serves, and keeps you welcome in it.
-* Every runtime dependency is permissively licensed and therefore GPL-compatible
-  (see section 2), so nothing breaks.
-* It is the honest reflection of how the code was actually developed.
-
-If you are confident that no routine here is a transliteration — that everything
-was written from format documentation and observed behaviour rather than from
-the C++ — then a permissive licence such as MIT is defensible. In that case,
-consider softening the OpenMOHAA citations from "this is what the code does" to
-"this matches the behaviour documented at", and keep a written note of how each
-algorithm was derived.
-
-**This is not legal advice.** If the distinction matters to you commercially,
-ask a lawyer. If it does not, GPLv2 is the low-effort, low-risk answer.
-
-### What GPLv2 does and does not require of your users
+### What GPLv2 means for users
 
 * Users may run, copy, study and modify the program freely.
 * Anyone who **distributes** the program or a modified version must pass on the
@@ -55,9 +36,10 @@ ask a lawyer. If it does not, GPLv2 is the low-effort, low-risk answer.
 
 ## 2. Runtime dependencies
 
-None of these are bundled in this repository; each is installed separately by
-`python_installer_updater.bat` or by the user. Their licences are listed so that
-anyone redistributing a packaged build knows what to include.
+None of these are bundled in this repository; each is installed separately by the
+RUN `.bat` on first launch, by `python_installer_updater.bat`, or by the user. Their
+licences are listed so that anyone redistributing a packaged build knows what to
+include.
 
 | Component | Role | Licence | GPLv2-compatible |
 |---|---|---|---|
@@ -65,8 +47,9 @@ anyone redistributing a packaged build knows what to include.
 | **Pillow** | Decodes `.tga` / `.dds` / `.jpg` game textures | MIT-CMU (HPND) | Yes |
 | **pythonnet** | .NET bridge for the embedded pane (Windows only, optional) | MIT | Yes |
 | **pywebview** (pinned 4.4.1) | WebView host (Windows only, optional) | BSD 3-Clause | Yes |
-| **tkwebview2** | Embeds Edge WebView2 in Tk (Windows only, optional) | See the package's own metadata — verify before redistributing a bundled build | Verify |
+| **tkwebview2** | Embeds Edge WebView2 in Tk (Windows only, optional) | MIT | Yes |
 | **Microsoft Edge WebView2 Runtime** | Renders the 3D pane (Windows only, optional) | Microsoft proprietary redistributable, ships with Windows 10/11 | Not redistributed by this project |
+| pywebview / pythonnet dependencies | `bottle`, `proxy_tools`, `clr_loader`, `cffi`, `pycparser`, `typing_extensions` (installed automatically) | MIT, MIT, MIT, MIT, BSD 3-Clause, PSF | Yes |
 
 If you ever ship a frozen build (PyInstaller and similar) rather than source,
 you must include the licence texts of everything bundled into it, and GPLv2

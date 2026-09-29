@@ -1,4 +1,4 @@
-# MOHAA Model Viewer -- runtime dependencies
+# MOHAA Model Viewer -- runtime dependencies (Python 3.8 or newer)
 #
 # Required. MOHAA textures are .tga, which only Pillow decodes; without it every
 # model loads untextured. The floor is a SECURITY floor, not a feature floor:

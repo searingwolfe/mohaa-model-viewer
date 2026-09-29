@@ -13,10 +13,10 @@ The program is written on that assumption. Specifically:
 | Archive entry names (`ZipSlip`) | Every entry is confined to the temporary workspace by `_safe_target()`: components are reduced to plain names, `..`, drive tokens and NTFS alternate-data-stream syntax are rejected, Windows device names are rejected, an extension allow-list is enforced, and the final path is re-checked against the workspace root with `realpath` so symlinks and junctions cannot escape it. |
 | Malformed `.skd` / `.skb` / `.skc` headers | Every count read from a file header is bounded by what the file can physically hold, and structural advance offsets must be positive, so a hostile file cannot produce an unbounded loop or allocation. |
 | Hostile `.shader` scripts | The block scanner is linear-time and matched with an explicit position, so a crafted shader cannot cause a quadratic parse hang during pak loading. |
-| Decompression bombs | Archive entries are read through a size ceiling and skipped if they exceed it. |
+| Decompression bombs | Archive entries are capped at 192 MB, whether read into memory or extracted to the workspace, and skipped beyond that. |
 | `$include` expansion bombs | Cycle guard, depth cap, **and** a total-output budget, so sibling fan-out cannot exhaust memory. |
 | Game-file text reaching the generated HTML | Model payload and title are escaped for inline-`<script>` embedding, and the page carries a Content-Security-Policy that pins every source to `self`/`file`/`data`/`blob` with `connect-src 'none'`. |
-| Configured external programs | Only an existing file at an absolute path is ever launched; a planted config cannot name an arbitrary command. |
+| Configured external programs | Only an existing file at an absolute path is launched, without a shell and with the model file as its only argument, so a planted config can't trigger a `PATH` or current-directory lookup or smuggle in extra arguments. |
 
 **No mitigation is perfect.** If you find a way around any of the above, please
 report it.
@@ -26,8 +26,8 @@ report it.
 **Please do not open a public issue for a security problem.**
 
 Use GitHub's private reporting: **Security → Report a vulnerability** on this
-repository. If that is unavailable, contact the maintainer using the address in
-the README with `SECURITY` in the subject.
+repository. If that option isn't available, open an issue that only asks for a
+private contact, without any details of the problem.
 
 Please include:
 
@@ -63,7 +63,7 @@ branch and no back-porting.
 
 Regulation (EU) 2024/2847 ("CRA") applies to products with digital elements
 placed on the EU market. Its vulnerability- and incident-reporting obligations
-begin to apply on **11 September 2026**, with the remaining obligations from
+have applied since **11 September 2026**, and the remaining obligations apply from
 **11 December 2027**.
 
 Free and open-source software that is **not supplied in the course of a

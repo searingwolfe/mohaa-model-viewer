@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 # mohaa_textures.py - resolve and load MOHAA model textures.
 #
-# Pipeline (Quake3-style, as MOHAA uses it):
-#   model .tik   : "surface <name> shader <shadername>"   (one .tik may compose several .skd)
-#   .shader file : "<shadername> { ... map textures/....tga ... }"
-#   texture file : textures/....tga|.jpg|.dds   (lives in a textures pak)
-#   .skd vertex  : carries the (s,t) UV used to sample that texture
+# Resolution chain (Quake 3 style):
+#   .tik    : "surface <name> shader <shadername>"  (a .tik may combine several .skd)
+#   .shader : "<shadername> { ... map textures/....tga ... }"
+#   texture : textures/....tga|.jpg|.dds inside a pak
+#   .skd    : per-vertex (s,t) UVs used to sample the texture
 #
-# Everything is keyed case-insensitively because the assets are inconsistent
-# (e.g. skd surface "Ranger_pants" vs tik "ranger_pants", "HBTpants.tga" vs "hbtpants").
+# All lookups are case-insensitive because asset names are inconsistent
+# (skd "Ranger_pants" vs tik "ranger_pants", "HBTpants.tga" vs "hbtpants").
 
 import io, re, os, base64, hashlib, zipfile
 
 # ----------------------------------------------------------------------------- VFS
 class Vfs:
     """Several .pk3 archives merged into one case-insensitive namespace.
-    Paks are given in load order; a later pak overrides an earlier one for the
-    same path (this is how MOHAA's pak6/7/8 updates patch the base game)."""
+    Later paks override earlier ones for the same path (how pak6/7/8 patch the base game)."""
     def __init__(self, pak_paths):
         self.zips=[]; self.index={}     # lower/normalised path -> (zip_idx, real_name)
         for p in pak_paths:
@@ -26,10 +25,8 @@ class Vfs:
             for n in z.namelist():
                 if n.endswith("/"): continue
                 self.index[n.lower().replace("\\","/")]=(zi,n)
-    # No MOHAA asset comes close to this. A .pk3 is a zip, so its header can claim any
-    # uncompressed size it likes and a few KB of compressed zeros will happily inflate to
-    # gigabytes - zf.read() honours the declared size and the process dies on memory.
-    # Reading through the stream with a ceiling makes that a clean skip instead.
+    # Per-entry read limit. A zip header can declare any uncompressed size, so a tiny
+    # entry could inflate to gigabytes; reading with a ceiling turns that into a skip.
     MAX_ENTRY=192*1024*1024
     @staticmethod
     def _k(path): return path.lower().replace("\\","/").lstrip("/")
@@ -46,15 +43,14 @@ class Vfs:
         return data
     def names(self): return self.index.keys()
     def close(self):
-        """Release the pak file handles. A Vfs is rebuilt on every pak reload, so without
-        this each reload leaked one open descriptor per archive."""
+        """Release the pak file handles (a Vfs is rebuilt on every pak reload)."""
         for z in self.zips:
             try: z.close()
             except Exception: pass
         self.zips=[]; self.index={}
     def find_texture(self,path):
-        """Resolve a texture reference to an actual stored file, trying the given
-        extension first then the common image extensions."""
+        """Resolve a texture reference to a stored file, trying the given extension first,
+        then the common image extensions."""
         if not path: return None
         p=self._k(path)
         if p in self.index: return p
@@ -64,14 +60,11 @@ class Vfs:
         return None
 
 def _cache_id(s):
-    """Stable short id for the on-demand animation cache.
+    """Short stable id for the animation cache (not a security hash).
 
-    This is a cache key, not a security primitive - but hashlib.md5() RAISES ValueError
-    on a FIPS-mode kernel (RHEL/CentOS booted with fips=1), which would take the whole
-    animation catalogue down there. usedforsecurity=False fixes that but is Python 3.9+
-    and everything else here runs on 3.7, so: try it, fall back to plain md5, and only if
-    the platform refuses md5 outright fall back to blake2s. Normal machines therefore keep
-    their existing ids and nobody's built-animation cache is invalidated."""
+    md5() raises ValueError on FIPS-mode systems. usedforsecurity=False avoids that but
+    needs Python 3.9+, so try it, then plain md5, then blake2s. Using md5 wherever possible
+    keeps existing cache ids valid."""
     b = s.encode("utf-8", "replace")
     try: return hashlib.md5(b, usedforsecurity=False).hexdigest()[:12]
     except TypeError:
@@ -81,16 +74,10 @@ def _cache_id(s):
     return hashlib.blake2s(b, digest_size=6).hexdigest()[:12]
 
 # ------------------------------------------------------------------- shader parsing
-# Block-header pattern for a Quake3/MOHAA .shader script: leading whitespace, the shader
-# name, an optional trailing // comment, then the opening brace.
-#
-# Compiled once and matched with an explicit `pos` (re.match(txt, i)) instead of the old
-# re.match(pat, txt[i:]): slicing the remainder on every block made the scan O(n^2), so a
-# large .shader took ~4x longer for every doubling of its size (16 KB of pathological
-# input already cost ~5 s, and build_shader_index runs over every loaded pak BEFORE the
-# user clicks anything). The name atom is also split so it can no longer share a '/' run
-# with the comment branch - '[^\s{}/]*' cannot swallow the '//' the optional group wants,
-# which removes the backtracking ambiguity as well as the slicing.
+# Header of a .shader block: optional whitespace, the shader name, an optional trailing
+# // comment, then '{'. Matched with an explicit pos (no slicing) so the scan stays
+# linear on large files; the name atom excludes '/' so it cannot compete with the //
+# comment branch and backtrack.
 _SHADER_HDR=re.compile(r'[ \t\r\n]*([^\s{}/][^\s{}/]*(?:/[^\s{}/]+)*)[ \t]*(?://[^{\n]*)?[ \t\r\n]*\{')
 
 def _is_aux_map(p):
@@ -100,9 +87,9 @@ def _is_aux_map(p):
             or "reflection" in pl or "specular" in pl or "_spec." in pl or "cubemap" in pl)
 
 def parse_shader_file(txt):
-    """Return {shadername_lower: best_diffuse_texture_path} for one .shader script.
-    Picks, in order of preference: the first non-auxiliary stage map (skipping
-    environment/reflection/specular helpers), then qer_editorimage, then any map."""
+    """Return {shadername_lower: diffuse_texture_path} for one .shader script.
+    Prefers the first stage map that isn't an environment/reflection/specular helper,
+    then qer_editorimage, then any map."""
     out={}; i=0; n=len(txt)
     while i<n:
         m=_SHADER_HDR.match(txt,i)
@@ -145,8 +132,8 @@ def build_shader_index(vfs):
 
 # ----------------------------------------------------- shader render properties
 def _strip_line_comments(s):
-    """Drop // ... end-of-line comments so brace scanning ignores commented-out stages
-    (e.g. bangalore_pulsating_ghosting's commented base stage)."""
+    """Drop // end-of-line comments so brace scanning ignores commented-out stages
+    (e.g. bangalore_pulsating_ghosting's base stage)."""
     out=[]
     for line in s.splitlines():
         c=line.find("//")
@@ -154,9 +141,8 @@ def _strip_line_comments(s):
     return "\n".join(out)
 
 def _shader_stages(block):
-    """Split a shader's outer { ... } block into its inner stage sub-blocks (the
-    depth-1 { ... } passes). Returns a list of stage body strings. Comments are
-    stripped first so a fully commented-out stage is not counted as real."""
+    """Split a shader's outer { ... } block into its depth-1 stage bodies.
+    Comments are stripped first so a commented-out stage is not counted."""
     inner=block.strip()
     if inner.startswith("{"): inner=inner[1:]
     if inner.endswith("}"): inner=inner[:-1]
@@ -178,12 +164,13 @@ def _stage_is_additive(ll, toks):
             or ("gl_src_alpha" in toks and "gl_one" in toks))
 
 def _parse_pulse_and_base(block):
-    """Inspect a shader's stages for a pulsating overlay (items.shader bangalore_pulsating*):
-    a stage carrying `rgbGen wave <func> <base> <amp> <phase> <freq>` together with an
-    additive blendfunc. Returns (pulse, basevisible) where pulse is
+    """Find a pulsating overlay stage (e.g. items.shader bangalore_pulsating*): a stage with
+    `rgbGen wave <func> <base> <amp> <phase> <freq>` and an additive blendfunc.
+
+    Returns (pulse, basevisible). pulse is
         {"map":texpath, "wave":[func,base,amp,phase,freq], "distnear":N, "distrange":R}
-    or None, and basevisible is True when some OTHER (non-pulse) stage draws a solid/alpha
-    base (so the surface keeps its diffuse) vs. the ghosting case (pulse-only, no base)."""
+    or None. basevisible is True when another stage draws a solid/alpha base, as opposed
+    to the pulse-only "ghosting" variant."""
     pulse=None; basevisible=False
     for st in _shader_stages(block):
         smap=None; wave=None; additive=False; dnear=1024.0; drange=512.0; sawblend=False
@@ -194,12 +181,9 @@ def _parse_pulse_and_base(block):
             mm=re.match(r'(?i)(?:clampmap|map)\s+(\S+)', ls)
             if mm:
                 p=mm.group(1)
-                # $whiteimage is the engine's built-in solid-white texture (r_common: it is
-                # not a file on disk). The healthpack shaders (items.shader firstaid_dm,
-                # firstaid, healthcanteen, surgeonpack) pulse a WHITE glow with
-                # `map $whiteimage` + `blendFunc GL_SRC_ALPHA GL_ONE`. Treat it as a valid
-                # pulse map (sentinel) so the pulse stage is recognised; other $-tokens and
-                # *-lightmaps stay ignored.
+                # $whiteimage is the engine's built-in white texture, not a file. The healthpack
+                # shaders (items.shader firstaid*, healthcanteen, surgeonpack) pulse it with
+                # `blendFunc GL_SRC_ALPHA GL_ONE`, so accept it as a pulse map; other $/* maps are ignored.
                 if p.lower() in ("$whiteimage","$white"):
                     smap="$whiteimage"
                 elif not (p.startswith("$") or p.startswith("*")):
@@ -218,15 +202,16 @@ def _parse_pulse_and_base(block):
         if wave and additive and smap:
             pulse={"map":smap,"wave":wave,"distnear":dnear,"distrange":drange}
         elif smap and not additive:
-            basevisible=True            # an opaque / alpha-blended solid base stage
+            basevisible=True            # opaque or alpha-blended base stage
     return pulse, basevisible
 
 def parse_shader_props_file(txt):
-    """Return {shadername_lower: {additive, autosprite, frames:[texpaths], fps}}.
-    Captures the render hints the viewer needs to reproduce in-game emitter look:
-      - additive  : a stage blends add / GL_ONE GL_ONE / alphaadd / src_alpha ONE
-      - autosprite: deformVertexes autosprite[2] -> the surface is a camera-facing sprite
-      - frames+fps: animmap / animMapPhase <fps> [phase] f1 f2 ...  (flame/arc cycles)"""
+    """Return {shadername_lower: render-hint dict} for one .shader script.
+
+    Covers what the viewer needs to match the in-game look: blending, autosprite/lightglow
+    billboards, sprite type and scale, animmap frames+fps, cull mode, alpha test and
+    distance fade, pulse overlays, nextbundle detail layers, tcmod rotate and flap deforms.
+    Shaders that declare none of these are omitted."""
     out={}; i=0; n=len(txt)
     while i<n:
         m=_SHADER_HDR.match(txt,i)
@@ -243,9 +228,8 @@ def parse_shader_props_file(txt):
             j+=1
         block=txt[bstart:j+1]
         additive=False; autosprite=False; autosprite2=False; lightglow=False; frames=[]; fps=0; sawblend=False
-        # sprite_type stays None unless the shader carries an explicit `spritegen` line -
-        # the engine default (no keyword) is SPRITE_PARALLEL (tr_shader.c), and consumers
-        # use None to mean "shader did not declare an orientation".
+        # sprite_type stays None unless `spritegen` is present (engine default is
+        # SPRITE_PARALLEL, tr_shader.c); None means "no orientation declared".
         spritescale=1.0; sawsprite=False; sprite_type=None
         twosided=False; sawcull=False
         _rgbvert=False; _sawrgb=False; _srcalpha=None
@@ -255,43 +239,28 @@ def parse_shader_props_file(txt):
             ls=line.strip()
             if ls.startswith("//"): continue
             ll=ls.lower()
-            # deformVertexes autoSprite vs autoSprite2 are DISTINCT deforms (tr_shader.c
-            # ParseDeform :1837-1845, exact-token match -> DEFORM_AUTOSPRITE /
-            # DEFORM_AUTOSPRITE2). `autosprite` stays True for BOTH (it drives all the
-            # existing billboard routing / cull exemptions); `autosprite2` additionally
-            # marks the long-axis-pivot variant (tr_shade_calc.c Autosprite2Deform).
+            # autoSprite and autoSprite2 are separate deforms (tr_shader.c ParseDeform :1837-1845).
+            # `autosprite` is set for both (billboard routing, cull exemption); `autosprite2` also
+            # marks the long-axis pivot variant (tr_shade_calc.c Autosprite2Deform).
             if ll.startswith("deformvertexes"):
                 _dt=ll.split()
                 _dv=_dt[1] if len(_dt)>1 else ""
                 if _dv=="autosprite": autosprite=True
                 elif _dv=="autosprite2": autosprite=True; autosprite2=True
-                # deformVertexes lightglow -> DEFORM_LIGHTGLOW (tr_shader.c ParseDeform
-                # :1580-1583). LightGlowDeform (tr_shade_calc.c :809-897, dispatch :933-934)
-                # rebuilds each 4-vert quad as a camera-facing square at its midpoint
-                # (half-size=|corner-mid|*0.707, view left/up via RB_AddQuadStamp) and then
-                # PUSHES that midpoint toward the eye by radius (clamped to |eye-mid|-4 up
-                # close). It billboards like autosprite, so autosprite=True routes it into the
-                # existing camera-facing pass; the separate `lightglow` flag additionally marks
-                # the toward-eye push / placement-orbit that the viewer applies opt-in.
+                # lightglow -> DEFORM_LIGHTGLOW (tr_shader.c ParseDeform :1580-1583). LightGlowDeform
+                # (tr_shade_calc.c :809-897) rebuilds each quad as a camera-facing square at its
+                # midpoint, so it also sets autosprite; `lightglow` enables the viewer's corona handling.
                 elif _dv=="lightglow": autosprite=True; lightglow=True
-            # MOHAA sprite sizing: `spritegen <type>` marks a sprite shader and resets scale to
-            # 1.0; `spritescale <v>` sets it. Rendered quad world width = texW * entScale *
-            # spritescale (tr_sprite.c), which the viewer needs to size VSS smoke puffs correctly.
+            # `spritegen <type>` marks a sprite shader and resets scale to 1.0; `spritescale <v>`
+            # sets it. Quad width = texture width * entity scale * spritescale (tr_sprite.c).
             if ll.startswith("spritegen"):
                 sawsprite=True; spritescale=1.0
-                # capture the sprite orientation type - the engine has FOUR (tr_sprite.c
-                # RB_DrawSprite), and `parallel_oriented` must be tested BEFORE `oriented`
-                # (substring!) or the most common authored type (muzzle flashes, explosions,
-                # sparks) collapses into the world-fixed one:
-                #   parallel_upright  - up = world Z, only yaws to face the camera; never
-                #                       tilts (mortar_dirthit dirt/dust plumes) (:135-160)
-                #   parallel_oriented - camera-facing, view axes rotated by the sprite's
-                #                       ROLL (:64-83)
-                #   oriented          - FIXED IN WORLD SPACE on the entity axes, right =
-                #                       axis[1], up = axis[2]; never faces the camera
-                #                       (water rings/wakes lie flat, glass shards keep
-                #                       their thrown orientation) (:96-99)
-                #   parallel          - pure view axes, right negated, roll IGNORED (:84-91)
+                # Sprite orientation (tr_sprite.c RB_DrawSprite). Check `parallel_oriented` before
+                # `oriented`, which is a substring of it:
+                #   parallel_upright  - up = world Z, only yaws toward the camera (:135-160)
+                #   parallel_oriented - camera-facing, rotated by the sprite's roll (:64-83)
+                #   oriented          - fixed on the entity axes, never faces the camera (:96-99)
+                #   parallel          - pure view axes, roll ignored (:84-91)
                 _t=ll.split()
                 _st=_t[1] if len(_t)>1 else ""
                 if "upright" in _st: sprite_type="upright"
@@ -303,10 +272,8 @@ def parse_shader_props_file(txt):
                 if len(t)>1:
                     try: spritescale=float(t[1]); sawsprite=True
                     except Exception: pass
-            # cull mode: `cull none|disable|twosided` (or `nocull`) = render both faces. MOHAA's
-            # cull_* garment shaders (cull_brownpants/cull_browncoat) use this for the thin two-
-            # sided ankle/inner-leg panels; the viewer must NOT backface-cull them or they shatter
-            # into slivers (the "pinched ankle"). cull back/front stay single-sided (engine default).
+            # `cull none|disable|twosided` or `nocull` draws both faces. The cull_* garment shaders
+            # need this for thin two-sided panels, which break up if backface-culled.
             _ct=ll.split()
             if _ct and _ct[0]=="cull":
                 _cv=_ct[1] if len(_ct)>1 else ""
@@ -318,33 +285,27 @@ def parse_shader_props_file(txt):
                 is_add=("add" in ll or "alphaadd" in ll
                     or ("gl_one" in b and b.count("gl_one")>=2)
                     or ("gl_src_alpha" in b and "gl_one" in b))
-                # the FIRST blend stage defines how the sprite composites against the scene;
-                # a later detail stage (e.g. water_g's `alphaadd` highlight over a `blend` base)
-                # must NOT flip an alpha sprite to additive, or it stacks to opaque white.
+                # Only the first blendfunc decides how the stage composites; a later detail stage
+                # (e.g. water_g's alphaadd highlight) must not turn an alpha sprite additive.
                 if not sawblend: additive=is_add; sawblend=True
-                # srcalpha: does the FIRST blend's SOURCE factor read the vertex/shader alpha?
-                # GL_SRC_ALPHA (explicit or via `blend`/`alphaadd` shorthands) -> yes; plain
-                # `add` == GL_ONE GL_ONE (tr_shader.c NameToSrcBlendMode) -> alpha is IGNORED
-                # by the hardware, so the emitter's alpha/fade/flickeralpha are no-ops in-game
-                # (corona_util, gren_boom, air_explosion in scripts/sprites.shader).
+                # srcalpha: whether the first blend's source factor uses alpha. Plain `add` is
+                # GL_ONE GL_ONE (tr_shader.c NameToSrcBlendMode), so alpha/fade/flickeralpha have no
+                # visible effect with those shaders in-game (e.g. corona_util, gren_boom).
                 if _srcalpha is None:
                     _srcalpha=("alphaadd" in ll
                                or (len(b)>1 and b[1]=="blend")
                                or (len(b)>1 and b[1]=="gl_src_alpha")
                                or (len(b)>1 and b[1]=="gl_one_minus_src_alpha"))
-            # rgbGen vertex/exactvertex/entity: the stage colour is driven by the entity's
-            # shaderRGBA - i.e. the tik `color` tint actually applies. Without any such stage
-            # (`blendfunc add`-only coronas) the texture renders untinted at full strength.
+            # rgbGen vertex/exactvertex/entity lets the entity colour (tik `color`) tint the stage;
+            # without it the texture draws untinted.
             if ll.startswith("rgbgen"):
                 _t2=ll.split()
                 if len(_t2)>1 and _t2[1] in ("vertex","exactvertex","entity","oneminusvertex"):
                     _rgbvert=True
                 _sawrgb=True
             # deformVertexes flap <s|t> <div> <func> <base> <amp> <phase> <freq> [min] [max]
-            # (tr_shader.c ParseDeform :1638-1696; ParseWaveForm :359-380 fixes the wave field
-            # order as func/base/amp/phase/freq). This is MOHAA's foliage wind. `div` becomes
-            # deformationSpread, and `min`/`max` land in bulgeWidth/bulgeHeight - defaulting to
-            # 0 and 1 respectively when the shader omits them.
+            # (tr_shader.c ParseDeform :1638-1696): MOHAA's foliage wind. div sets the spread;
+            # min/max default to 0 and 1.
             _fl=re.match(r'(?i)deformvertexes\s+flap\s+([st])\s+([-\d.]+)\s+(\w+)'
                          r'\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)'
                          r'(?:\s+([-\d.]+))?(?:\s+([-\d.]+))?', ls)
@@ -363,9 +324,8 @@ def parse_shader_props_file(txt):
                 except Exception: pass
             if ll.startswith("alphagen"):
                 _sawrgb=True
-                # alphaGen distFade | oneMinusDistFade | tikiDistFade | oneMinusTikiDistFade
-                # (tr_shader.c ParseStage :1168-1194). fDistNear / fDistRange are SHADER-level
-                # fields, not per-stage, and BOTH default to 256 when the operands are omitted.
+                # alphaGen [oneMinus][tiki]distFade [near] [range] (tr_shader.c ParseStage :1168-1194).
+                # near/range are shader-level values and default to 256.
                 _fm=re.match(r'(?i)alphagen\s+(oneminus)?(tiki)?distfade(?:\s+([-\d.]+))?(?:\s+([-\d.]+))?', ls)
                 if _fm:
                     _fade_inv=bool(_fm.group(1))
@@ -382,34 +342,25 @@ def parse_shader_props_file(txt):
                 if kind=="animmapphase" and toks: toks=toks[1:]   # drop the phase arg
                 fr=[t.replace("\\","/") for t in toks if not (t.startswith("$") or t.startswith("*"))]
                 if fr: frames=fr
-        # pulsating overlay (rgbGen wave + additive blendfunc), e.g. bangalore_pulsating:
-        # a separate stage drawn additively whose brightness oscillates over time. basevisible
-        # distinguishes pulsating (solid base + pulse) from ..._ghosting (pulse-only, no base).
+        # Pulsating overlay (e.g. bangalore_pulsating); basevisible separates it from the
+        # pulse-only _ghosting variant.
         pulse, basevisible = _parse_pulse_and_base(block)
-        # OPACITY (tr_shader.c FinishShader): a surface is opaque unless its BASE (first) stage
-        # blends or alpha-tests. A diffuse map's alpha is scene coverage ONLY when the shader
-        # needs it (alphaFunc cutout, or a translucent base stage); otherwise it is a reflection/
-        # spec weight consumed by a later stage (tc_coat/facewrap/tc_hat: opaque reflection
-        # stage 0 + `blendFunc GL_ONE_MINUS_SRC_ALPHA GL_SRC_ALPHA` diffuse -> still SS_OPAQUE).
+        # Opacity (tr_shader.c FinishShader): opaque unless the first stage blends or a stage
+        # alpha-tests. Otherwise the diffuse alpha is a reflection/spec weight for a later stage
+        # (tc_coat, facewrap, tc_hat) and must not be treated as coverage.
         _stlist=_shader_stages(block)
         _has_atest=any(re.search(r'(?i)\balpha(func|test)\b', st) for st in _stlist)
         _fb=None
         for _line in (_stlist[0].splitlines() if _stlist else []):
             _l=_line.strip().lower()
-            if _l.startswith("blendfunc"): _fb=_l.split()[1:]; break   # FIRST stage only
+            if _l.startswith("blendfunc"): _fb=_l.split()[1:]; break   # first stage only
         _base_opaque=(not _fb) or _fb[:2]==["gl_one","gl_zero"] or _fb[:1]==["opaque"]
-        # FIRST-STAGE ALPHA TEST + DETAIL BUNDLE (for emitter sprites).
-        #   alphafunc GT0|LT128|GE128 (tr_shader.c NameToAFunc :175-196): a per-pixel TEST -
-        #   pass or discard, nothing in between. When the stage also has NO blendfunc
-        #   (mortar_dirthit / dirtplume: `blendfunc blend` is commented out), passing pixels
-        #   draw fully OPAQUE and failing ones are see-through holes; alphaGen vertex scales
-        #   texel alpha BEFORE the test, so fading particles ERODE instead of washing out.
-        #   Only exported in that opaque case (`atest`); with a real blendfunc the current
-        #   blended path is already the closer approximation.
-        #   nextbundle (tr_shader.c :1841-1853, anything but `add` -> GL_MODULATE): a second
-        #   texture multiplied over the first - the fine grain detail on the dirt plumes.
-        #   Captured as `bundle` {map, scale[sx,sy]} from `tcmod scale`; animated tcmods
-        #   (scroll/rotate) are baked at phase 0 by the consumer.
+        # First-stage alpha test and nextbundle detail layer (emitter sprites).
+        #   alphafunc GT0|LT128|GE128 (tr_shader.c NameToAFunc :175-196) is pass/discard. With no
+        #   blendfunc (mortar_dirthit, dirtplume) passing pixels are fully opaque and fading
+        #   particles erode instead of fading; exported as `atest` only in that case.
+        #   nextbundle (tr_shader.c :1841-1853) multiplies a second texture over the first;
+        #   exported as `bundle` {map, scale} plus any tcmods.
         _atest0=None; _bundle0=None
         if _stlist:
             _s0=_stlist[0]
@@ -443,11 +394,8 @@ def parse_shader_props_file(txt):
                         except Exception: _brot=None
                 if _bmap:
                     _bundle0={"map":_bmap,"scale":list(_bsc or (1.0,1.0))}
-                    # BASE-stage `tcmod rotate` (before nextbundle): the base texcoords spin
-                    # too (RB_CalcRotateTexCoords, tr_shade_calc.c:1599-1631). vsssource /
-                    # vsssource2 (scripts/sprites.shader) counter-rotate base +20 / bundle
-                    # -20 - the in-game volumetric churn. Exported as `brot` so the viewer
-                    # rotates the base image at runtime alongside the bundle pattern.
+                    # Base-stage `tcmod rotate` (RB_CalcRotateTexCoords, tr_shade_calc.c:1599-1631).
+                    # vsssource/vsssource2 counter-rotate base and bundle to get the smoke churn.
                     for _line in _bp[0].splitlines():
                         _l=_line.strip()
                         if _l.startswith("//"): continue
@@ -456,25 +404,17 @@ def parse_shader_props_file(txt):
                             try:
                                 _bundle0["brot"]=float(_mbr.group(1)); break
                             except Exception: pass
-                    # ANIMATED tcmods: exported so the viewer composites them at RUNTIME
-                    # (the drifting grain that reads as falling dirt in-game). tcmods apply
-                    # in LISTED order (tr_shader.c ParseStage tcMod chain): scroll BEFORE
-                    # scale (mortar_dirthit: `scroll 0 -.1` then `scale 8 16`) means
-                    # tc=(uv+o)*S, so the pattern drifts at the scroll rate in BASE uv/sec
-                    # regardless of S; scroll listed after scale drifts at rate/scale.
+                    # Animated bundle tcmods are applied by the viewer at runtime. tcmods run in listed
+                    # order: scroll before scale (mortar_dirthit) drifts at the scroll rate in base UV
+                    # space, scroll after scale drifts at rate/scale. `prescale` records which.
                     if _bscr and (_bscr[0] or _bscr[1]):
                         _bundle0["scroll"]=list(_bscr)
                         _bundle0["prescale"]=bool(_scr_i is not None and (_sc_i is None or _scr_i<_sc_i))
                     if _brot: _bundle0["rotate"]=_brot
-        # BASE-stage (single-bundle) `tcmod rotate <deg/sec>`: the whole first-stage texture
-        # spins about its centre every frame (RB_CalcRotateTexMatrix, tr_shade_calc.c:809-826:
-        # degs = -degsPerSecond * shaderTime, texcoords rotated about (0.5,0.5)). This is the
-        # aircraft propeller effect - the prop / c47prop vehicle shaders draw a flat clampmap
-        # quad whose texcoords rotate at `tcmod rotate 5000` so it reads as a spinning disc.
-        # Only the part of stage 0 BEFORE any nextbundle is the base (the nextbundle's own
-        # `tcmod rotate` is already captured as bundle.rotate above). clamp is exported only
-        # alongside a rotate: a static clampmap sits inside [0,1] where clamp vs repeat is
-        # invisible, so flagging it there would risk regressing other clampmap surfaces.
+        # Base-stage `tcmod rotate <deg/sec>` (RB_CalcRotateTexCoords, tr_shade_calc.c:1599-1631)
+        # spins the texture about (0.5,0.5), e.g. the prop/c47prop propeller discs. Only the part
+        # of stage 0 before any nextbundle counts. `clamp` is exported only with a rotate, since
+        # clamp vs repeat is invisible on a static clampmap.
         _texrotate=None; _clampbase=False
         if _stlist:
             _s0base=re.split(r'(?im)^\s*nextbundle\b.*$', _stlist[0], maxsplit=1)[0]
@@ -490,8 +430,8 @@ def parse_shader_props_file(txt):
         needs_alpha=bool(_has_atest or (not _base_opaque))
         # no explicit cull keyword -> fall back to the cull_* naming convention.
         if not sawcull and name.startswith("cull_"): twosided=True
-        # record any shader that declares a blend (even alpha) so emitter sprites can read an
-        # explicit additive=False, distinguishing "known alpha" from "no shader info".
+        # Record any shader with render hints, so emitter sprites can tell an explicit
+        # additive=False apart from "no shader info".
         if additive or autosprite or frames or sawblend or sawsprite or pulse or twosided or needs_alpha or _sawrgb or _atest0 or _bundle0 or _texrotate or _flaps:
             rec={"additive":additive,"autosprite":autosprite,"autosprite2":autosprite2,"lightglow":lightglow,"frames":frames,"fps":fps,
                  "spritescale":spritescale,"sprite":sawsprite,"twosided":twosided,"sprite_type":sprite_type,
@@ -501,18 +441,15 @@ def parse_shader_props_file(txt):
             if _texrotate:
                 rec["texrotate"]=_texrotate
                 if _clampbase: rec["clamp"]=True
-            # camera-distance LOD fade. inv=False -> AGEN_DIST_FADE (opaque inside near,
-            # gone by near+range: the real leaf/branch cards). inv=True ->
-            # AGEN_ONE_MINUS_DIST_FADE (invisible inside near, opaque past near+range: the
-            # billboard stand-in the engine swaps in at long range).
             if _flaps: rec["flap"]=_flaps
+            # distfade: inv=False fades out between near and near+range (leaf cards); inv=True
+            # fades in over that range (the long-range billboard stand-ins).
             if _fade_near is not None:
                 rec["distfade"]={"near":_fade_near,
                                  "range":(_fade_range if _fade_range else 256.0) or 256.0,
                                  "inv":_fade_inv}
-            # only assert tint/alpha facts when the shader actually declared its stages
-            # (a bare qer_editorimage stub tells us nothing) - a blend line is the signal
-            # that the stage list is real.
+            # Only report tint/alpha facts when a blendfunc shows the stage list is real
+            # (a bare qer_editorimage stub says nothing).
             if sawblend:
                 rec["rgbvertex"]=_rgbvert
                 rec["srcalpha"]=bool(_srcalpha)
@@ -530,19 +467,12 @@ def build_shader_props(vfs):
 
 # ---------------------------------------------------------------------- tik parsing
 def expand_tik_includes(txt, vfs, _depth=0, _chain=None, _budget=None):
-    """Splice $include'd files inline, mirroring the engine's TikiScript parser
-    (corepp/tiki_script.cpp ProcessCommand: a `$include <path>` line loads that file
-    in place at the directive). Several MOHAA assets - notably both grenades - keep their
-    whole setup/animations body in a shared _base.txt that each wrapper .tik pulls in this
-    way, so without expansion the wrapper parses as empty (no skelmodel, no surface->shader
-    map). The include path is used verbatim as a VFS path (engine LoadFile(argument1)) and
-    may nest; a chain guard blocks include cycles and a depth cap stops runaway recursion.
-
-    The cycle guard only blocks a file that includes itself somewhere in its OWN ancestry,
-    which leaves sibling fan-out unbounded: 16 levels of a file that includes the next one
-    50 times expands to ~50**16 lines with no cycle anywhere. _budget caps the TOTAL
-    spliced output instead, so a hostile (or merely broken) include graph stops rather
-    than eating all memory. 24 MB is far beyond any real .tik chain."""
+    """Splice $include'd files inline, like the engine's TikiScript parser
+    (corepp/tiki_script.cpp ProcessCommand). Some assets (e.g. both grenades) keep their
+    whole setup/animations body in a shared _base.txt, so the wrapper .tik parses as empty
+    without this. Includes may nest: _chain blocks cycles, _depth caps recursion, and
+    _budget caps the total spliced size (24 MB) so a fan-out include graph can't exhaust
+    memory."""
     if vfs is None or _depth>16 or "$include" not in txt.lower(): return txt
     if _budget is None: _budget=[24*1024*1024]
     if _budget[0]<=0: return txt
@@ -563,7 +493,7 @@ def expand_tik_includes(txt, vfs, _depth=0, _chain=None, _budget=None):
         except Exception:
             out.append(line); continue
         _budget[0]-=len(sub)
-        if _budget[0]<=0:                       # include graph too large - stop splicing
+        if _budget[0]<=0:                       # include graph too large: stop splicing
             out.append(line); break
         out.append(expand_tik_includes(sub, vfs, _depth+1, _chain+(key,), _budget))
     return "".join(out)
@@ -622,9 +552,8 @@ def _have_pil():
         return False
 
 def texture_has_varied_alpha(vfs, texpath):
-    """True if the texture carries a REAL alpha channel (not constant ~255). Decides
-    whether an animated nextbundle modulates the ALPHA-TEST pattern too (GL_MODULATE
-    multiplies alpha as well as RGB - scrolling holes), or only the RGB grain."""
+    """True if the texture has a real (non-constant) alpha channel. Decides whether an
+    animated nextbundle also modulates the alpha-test pattern or only the RGB grain."""
     try:
         if not _have_pil(): return False
         from PIL import Image
@@ -639,8 +568,8 @@ def texture_has_varied_alpha(vfs, texpath):
 
 _GL1_LUT=None
 def _gl1_lut():
-    """256x256 byte table: _GL1_LUT[m*256+v] = round(v*255/m) - the un-premultiply divide,
-    done as a lookup so the per-texel pass below needs no float math and no numpy."""
+    """256x256 table: LUT[m*256+v] = round(v*255/m). The un-premultiply divide as a
+    lookup, so the per-texel loop needs no float math or numpy."""
     global _GL1_LUT
     if _GL1_LUT is None:
         t=bytearray(256*256)
@@ -651,34 +580,19 @@ def _gl1_lut():
     return _GL1_LUT
 
 def dataurl_gl_one_additive(durl):
-    """Re-encode a sprite so Canvas-2D 'lighter' reproduces `blendFunc GL_ONE GL_ONE`.
+    """Re-encode a sprite so Canvas-2D 'lighter' matches `blendFunc GL_ONE GL_ONE`.
 
-    A stage whose SOURCE blend factor is GL_ONE (`blendFunc GL_ONE GL_ONE`, or the
-    `blendfunc add` shorthand - tr_shader.c NameToSrcBlendMode -> GLS_SRCBLEND_ONE)
-    never reads the fragment alpha: the GPU computes dst.rgb = src.rgb + dst.rgb, so
-    EVERY texel of the texture's RGB is added regardless of its alpha channel, and
-    `alphaGen entity` on such a stage is a no-op.
+    With a GL_ONE source factor (also `blendfunc add`; tr_shader.c NameToSrcBlendMode) the
+    GPU adds every texel's RGB regardless of alpha. Canvas 'lighter' is premultiplied (adds
+    rgb*a), so the native alpha would clip the sprite to its alpha footprint (e.g. the
+    bh_metal_fastpiece sparks drew at about half size). Forcing alpha to 255 restores the
+    light, but 'lighter' also sums alpha, so black texels would paint opaque squares over
+    the transparent canvas backdrop.
 
-    Canvas 'lighter' is PREMULTIPLIED - it adds (rgb * a) - so shipping the native
-    alpha masks the sprite down to its alpha footprint. bh_metal_fastpiece.tga (the
-    spark splinter skin) carries alpha only over x 2..5 / y 3..28 of 8x32 while its RGB
-    spans x 1..6 / y 1..30: the browser added 2.18x less light than the GPU, which is
-    the ~0.5x spark size against in-game footage. corona_util's hard-keyed synthetic
-    alpha cost 1.92x and took the soft glow falloff with it.
-
-    Flattening alpha to 255 fixes the light but breaks the BACKDROP: 'lighter' is
-    `plus-lighter`, alpha_r = alpha_s + alpha_b, and the viewer's canvas is transparent
-    (draw(): ctx.clearRect over the CSS backdrop). An opaque BLACK texel adds nothing to
-    the colour but drives destination alpha to 1, punching an opaque black square where
-    the backdrop used to show - the corona boxes.
-
-    So compensate instead of flatten: let the alpha carry the texel's own intensity as
-    COVERAGE and pre-divide the RGB by it.
+    Instead, move the intensity into alpha and pre-divide RGB by it:
         A'   = max(R,G,B)
-        RGB' = RGB * 255 / A'          (A' > 0; pure black -> fully transparent)
-    Canvas then adds RGB' * A'/255 == RGB - the exact GPU contribution, verified to
-    within half a byte per texel - while a black texel contributes zero alpha, so the
-    backdrop is untouched and no square appears. Bright cores (A' ~ 255) are unchanged.
+        RGB' = RGB * 255 / A'   (pure black -> fully transparent)
+    Canvas then adds RGB' * A'/255 == RGB, and black texels add no alpha.
     """
     if not durl or not _have_pil(): return durl
     try:
@@ -691,22 +605,23 @@ def dataurl_gl_one_additive(durl):
             m=r if r>=g else g
             if b>m: m=b
             if m==0:
-                d[i]=0; d[i+1]=0; d[i+2]=0; d[i+3]=0     # black adds nothing AND no coverage
+                d[i]=0; d[i+1]=0; d[i+2]=0; d[i+3]=0     # black: no colour, no coverage
             else:
                 k=m<<8
                 d[i]=L[k|r]; d[i+1]=L[k|g]; d[i+2]=L[k|b]; d[i+3]=m
         buf=io.BytesIO(); Image.frombytes("RGBA",im.size,bytes(d)).save(buf,"PNG")
         return "data:image/png;base64,"+base64.b64encode(buf.getvalue()).decode()
     except Exception:
-        return durl                                       # never lose a sprite over this
+        return durl                                       # keep the original on any failure
 
 def texture_to_dataurl(vfs, texpath, max_dim=512, emitter_clean=False, keep_alpha=False, bundle_path=None, bundle_scale=(1.0,1.0)):
-    """Load a stored texture and return a browser-embeddable data: URL.
-    jpg/png pass through; tga/dds are decoded (Pillow) and re-encoded.
-    emitter_clean=True (for additive emitter sprites): never JPEG-encode, and floor
-    near-black pixels to pure (0,0,0). JPEG's lossy near-black leaves a faint box that
-    additive ('lighter') blending then adds in as a visible rectangle behind the glow;
-    lossless PNG + a black floor makes the background add exactly zero -> no box."""
+    """Load a stored texture and return a data: URL for the browser.
+
+    jpg/png pass through; tga/dds are decoded with Pillow and re-encoded.
+    emitter_clean: for additive emitter sprites. Always PNG, with near-black keyed to
+        transparent, so JPEG noise doesn't add up to a visible box behind the glow.
+    keep_alpha: keep the alpha channel instead of flattening to opaque JPEG.
+    bundle_path/bundle_scale: bake a nextbundle detail layer into the image."""
     data=vfs.read(texpath)
     if data is None: return None
     ext=texpath.rsplit(".",1)[-1].lower()
@@ -727,11 +642,9 @@ def texture_to_dataurl(vfs, texpath, max_dim=512, emitter_clean=False, keep_alph
             im=im.resize((max(1,int(im.size[0]*r)),max(1,int(im.size[1]*r))))
         has_alpha=("A" in im.getbands())
         if bundle_path is not None:
-            # nextbundle GL_MODULATE bake (tr_shader.c:1841-1853): RGB(A) *= detail texel,
-            # bundle tiled `tcmod scale sx sy` times across the quad (texcoords *s with
-            # GL_REPEAT). Animated tcmods (mortar_noise scroll, dirtnoise rotate) are baked
-            # at phase 0 - static grain; the drift/spin is not reproduced. RGB-only when the
-            # base has no alpha so the emitter_clean alpha synthesis below still applies.
+            # Bake the nextbundle layer (GL_MODULATE, tr_shader.c:1841-1853): multiply by the detail
+            # texture tiled `tcmod scale` times. Animated tcmods are baked at phase 0. RGB-only when
+            # the base has no alpha, so the alpha synthesis below still applies.
             try:
                 _nd=vfs.read(bundle_path)
                 if _nd:
@@ -752,38 +665,26 @@ def texture_to_dataurl(vfs, texpath, max_dim=512, emitter_clean=False, keep_alph
             except Exception:
                 pass
         if emitter_clean:
-            # Give the sprite a transparent background so it composites cleanly in any blend
-            # mode (a plain black background still draws as a box where a sprite is drawn
-            # source-over). For a no-alpha glow/arc texture, synthesise alpha by hard-keying
-            # near-black to transparent and everything brighter to fully opaque - the bright
-            # pixels keep alpha 255 so the additive glow is unchanged. Done with C-level
-            # Pillow ops (no slow/fragile per-pixel Python loop). If anything here fails we
-            # fall through to the normal encoding below so a texture never silently vanishes.
+            # Give emitter sprites a transparent background so they composite cleanly in any blend
+            # mode. On failure, fall through to the normal encoding so the texture still loads.
             try:
                 from PIL import ImageChops
                 TH=18
                 if not has_alpha:
                     rgb=im.convert("RGB"); r,g,b=rgb.split()
                     mx=ImageChops.lighter(ImageChops.lighter(r,g),b)   # per-pixel max(r,g,b)
-                    # Alpha from brightness. A pure 0-or-255 cutoff dithered the dirt sprites
-                    # (mortar_dirthit) into a crunchy mess; a smooth ramp keeps their edges and
-                    # see-through gaps clean like in-game. Pure black (< TH) floors to 0 so
-                    # additive blending adds no background box; from TH up, alpha rises
-                    # smoothly to 255 by ~64 brightness (so mid/bright dirt is fully opaque,
-                    # only the darkest fringes fade) - crisp, not washed out, not dithered.
+                    # No alpha channel: derive alpha from brightness. Below TH -> 0 (no background box under
+                    # additive blending), then a smooth ramp to 255 by 64. A hard cutoff made the dirt
+                    # sprites (mortar_dirthit) look dithered.
                     def _a(v):
                         if v<TH: return 0
                         return 255 if v>=64 else int((v-TH)*255/(64-TH))
                     alpha=mx.point(_a)
                     rgb.putalpha(alpha); im=rgb
                 else:
-                    # texture HAS a real alpha channel. Keep its own soft alpha (mist, dust,
-                    # smoke rely on the gradient) and only floor the NEAR-TRANSPARENT fringe
-                    # to zero so faint <~10% pixels don't haze the edges. A steep 96->150
-                    # alpha test was tried to crisp up the dirt sprites but it crushed soft
-                    # sprites (the white `mist`) into blocky low-quality patches and, under
-                    # additive blend, whitened them at grazing angles. The dirt sprites read
-                    # fine with their native alpha at 512px; a gentle fringe floor is enough.
+                    # Real alpha channel: keep its soft gradient (mist, dust, smoke) and only zero the
+                    # near-transparent fringe (< ~10%) so the edges don't haze. A steeper alpha test turned
+                    # soft sprites like `mist` into blocky patches.
                     im=im.convert("RGBA")
                     _a=im.getchannel("A")
                     im.putalpha(_a.point(lambda v: 0 if v<26 else v))
@@ -794,15 +695,13 @@ def texture_to_dataurl(vfs, texpath, max_dim=512, emitter_clean=False, keep_alph
         if has_alpha and keep_alpha:
             im=im.convert("RGBA"); buf=io.BytesIO(); im.save(buf,"PNG")
             return "data:image/png;base64,"+base64.b64encode(buf.getvalue()).decode()
-        # MOHAA model surfaces are opaque unless the shader's BASE stage blends/alpha-tests
-        # (tr_shader.c FinishShader). A diffuse map's alpha is then a reflection/spec weight,
-        # NOT scene coverage (tc_coat, facewrap: opaque reflection stage 0 + blendFunc
-        # GL_ONE_MINUS_SRC_ALPHA GL_SRC_ALPHA diffuse stage 1 -> SS_OPAQUE). Drop it here.
+        # Model surfaces are opaque unless the base stage blends or alpha-tests
+        # (tr_shader.c FinishShader); otherwise the diffuse alpha is a reflection/spec weight
+        # (tc_coat, facewrap), so drop it.
         im=im.convert("RGB"); buf=io.BytesIO(); im.save(buf,"JPEG",quality=86)
         return "data:image/jpeg;base64,"+base64.b64encode(buf.getvalue()).decode()
     except Exception:
-        # last resort: if the bytes are already a browser format, embed them raw so the
-        # texture appears (a box is far better than an invisible sprite -> sphere fallback)
+        # Last resort: embed browser-native bytes as-is so the texture still appears.
         try:
             if ext in ("jpg","jpeg"): return "data:image/jpeg;base64,"+base64.b64encode(data).decode()
             if ext=="png": return "data:image/png;base64,"+base64.b64encode(data).decode()
@@ -810,9 +709,8 @@ def texture_to_dataurl(vfs, texpath, max_dim=512, emitter_clean=False, keep_alph
         return None
 
 def build_global_surface_shaders(tik_index):
-    """Most common shader assigned to each exact surface name across all tiks -
-    a last-resort skin for surfaces like 'head'/'hand' on composite models whose
-    own folder has no sibling defining them."""
+    """Most common shader for each exact surface name across all tiks. A last-resort skin
+    for surfaces like 'head'/'hand' on composite models with no sibling defining them."""
     from collections import Counter
     cnt={}
     for pairs in tik_index.values():
@@ -867,19 +765,14 @@ def resolve_surface_texmap(skd_relpath, surface_names, vfs, shader_index, tik_in
     return res
 
 def resolve_surface_textures(skd_relpath, surface_names, vfs, shader_index, tik_index, global_surf=None):
-    """Map each .skd surface name to a stored texture path (backward-compatible)."""
+    """Map each .skd surface name to a stored texture path."""
     return {s:t for s,(t,sh) in resolve_surface_texmap(
         skd_relpath, surface_names, vfs, shader_index, tik_index, global_surf).items()}
 
 def _solid_white_dataurl():
-    """A small solid-OPAQUE white PNG data URL, standing in for the engine's built-in
-    `$whiteimage` (which has no file on disk). Used as the pulse overlay for the healthpack
-    shaders (firstaid_dm etc.), whose `map $whiteimage` + `blendFunc GL_SRC_ALPHA GL_ONE`
-    stage adds a white glow modulated by rgbGen wave. Built with stdlib zlib/struct so it
-    never depends on Pillow (and sidesteps the Pillow optimize=True encoding pitfall)."""
-    # Rebuilt each call (no module-level cache to accidentally drop): a 4x4 opaque-white PNG,
-    # built with stdlib zlib/struct so it never depends on Pillow (sidesteps the Pillow
-    # optimize=True encoding pitfall). Stands in for the engine's built-in $whiteimage.
+    """4x4 opaque white PNG data URL standing in for the engine's built-in `$whiteimage`
+    (no file on disk). Used as the pulse overlay for the healthpack shaders. Built with
+    zlib/struct so it doesn't depend on Pillow."""
     import zlib, struct
     w=h=4
     raw=b"".join(b"\x00"+b"\xff\xff\xff\xff"*w for _ in range(h))   # opaque white RGBA rows
@@ -899,22 +792,18 @@ def write_textures_manifest(vfs, skd_relpath, surface_names, shader_index, tik_i
     """Resolve a .skd's surfaces to textures, embed them as data URLs, and write a
     {surface_name: entry} JSON manifest for mohaa_view.py --textures.
 
-    entry is either a plain data-url string (simple opaque surface) or, when the
-    surface's shader carries render hints, an object:
-        {"tex":url, "additive":bool, "autosprite":bool, "frames":[url,...], "fps":N}
-    The viewer reproduces additive glow, camera-facing sprites and frame animation
-    (flames, electric arcs) from these. Returns (n_textured, n_surfaces)."""
+    An entry is a plain data-URL string for a simple opaque surface, or an object
+    {"tex": url, ...} carrying the shader's render hints (additive, autosprite, frames/fps,
+    twosided, texrotate, distfade, atest, flap, pulse, ...). Returns (n_textured, n_surfaces)."""
     import json
     tm=resolve_surface_texmap(skd_relpath, surface_names, vfs, shader_index, tik_index, global_surf)
     man={}; framecache={}
     for s in surface_names:
         tp, sh = tm.get(s.lower(), (None,None))
         props=(shader_props or {}).get((sh or "").lower())
-        # PULSATING OVERLAY (items.shader bangalore_pulsating / _ghosting): a shader with a
-        # base diffuse stage PLUS a separate additive `rgbGen wave` pulse stage. The diffuse
-        # pick (tp) is the SOLID base when one is visible; the pulse texture is its own stage.
-        # Built specially so the base is encoded opaque (NOT black-keyed) and the pulse is
-        # carried as an overlay the viewer animates. _ghosting has no base (pulse only).
+        # Pulsating overlay (bangalore_pulsating / _ghosting): the base diffuse is encoded
+        # opaque (not black-keyed) and the pulse stage is carried separately for the viewer to
+        # animate. _ghosting has no visible base.
         pulse=props.get("pulse") if props else None
         if pulse:
             entry={}
@@ -922,7 +811,7 @@ def write_textures_manifest(vfs, skd_relpath, surface_names, shader_index, tik_i
                 bdu=texture_to_dataurl(vfs, tp, max_dim=max_dim, emitter_clean=False)
                 if bdu: entry["tex"]=bdu
             if str(pulse["map"]).lower() in ("$whiteimage","$white"):
-                pdu=_solid_white_dataurl()   # engine $whiteimage -> solid opaque white glow
+                pdu=_solid_white_dataurl()   # engine $whiteimage: solid white glow
             else:
                 ptp=vfs.find_texture(pulse["map"])
                 pdu=texture_to_dataurl(vfs, ptp, max_dim=max_dim, emitter_clean=True) if ptp else None
@@ -932,29 +821,21 @@ def write_textures_manifest(vfs, skd_relpath, surface_names, shader_index, tik_i
             if entry: man[s]=entry
             continue
         if not tp:
-            # animmap-only shader on a MAIN-model surface (building bh_wood_puff.tik / any
-            # spritebeam-style .tik DIRECTLY, not as a sub-tik): the shader is `animmap 20
-            # woodpuff1..7.tga` with no `map`/`clampmap`, so resolve_surface_texmap found no
-            # base texture and the surface would render as an untextured flat quad. Fall back
-            # to the FIRST animmap frame as the base (the frame list below carries the cycle),
-            # mirroring the sub-tik / emitter animmap fallback so the puff shows its texture
-            # even when viewed as a standalone model.
+            # animmap-only shader (e.g. bh_wood_puff.tik opened directly) has no map/clampmap, so
+            # use the first animmap frame as the base instead of leaving the quad untextured.
             if props and props.get("frames"):
                 tp=vfs.find_texture(props["frames"][0])
             if not tp: continue
-        # effect surfaces (additive flame/arc, autosprite, frame-animated) get a transparent
-        # background via emitter_clean so the flame/arc has no black box; ordinary opaque
-        # surfaces (vehicle body, world geometry) keep their plain encoding.
+        # Effect surfaces (additive, autosprite, frame-animated) get a transparent background so
+        # they draw without a black box; ordinary opaque surfaces keep the plain encoding.
         eff=bool(props and (props["additive"] or props["autosprite"] or props["frames"]))
-        # base-stage `tcmod rotate` (spinning propeller disc) + its clampmap flag: carried
-        # through on whichever entry shape this surface ends up as (FX object, twosided
-        # object, or - via the tail below - a plain surface promoted to an object).
+        # Texture rotation (propeller discs) and clamp flag, carried on whichever entry shape
+        # the surface ends up as.
         texrot=props.get("texrotate") if props else None
         clampf=bool(props and props.get("clamp"))
         dfade=props.get("distfade") if props else None
-        # keep the diffuse alpha only when the shader needs it as coverage (alphaFunc cutout or
-        # translucent base stage); opaque garment/face shaders (tc_coat, facewrap, wehrmact_*)
-        # otherwise drop it so the surface renders solid instead of see-through.
+        # Keep the diffuse alpha only when the shader uses it as coverage (alpha test or a
+        # translucent base); opaque garment/face shaders (tc_coat, facewrap) render solid.
         keepA=bool(props and props.get("needs_alpha"))
         du=texture_to_dataurl(vfs, tp, max_dim=max_dim, emitter_clean=eff, keep_alpha=keepA)
         if not du: continue
@@ -979,17 +860,15 @@ def write_textures_manifest(vfs, skd_relpath, surface_names, shader_index, tik_i
             if props.get("flap"): entry["flap"]=props["flap"]
             man[s]=entry
         else:
-            # plain (non-FX) surface. Promote to an object when the shader declares two-sided
-            # culling (cull_* garment panels) and/or a spinning-propeller `tcmod rotate`;
-            # a bare opaque surface stays a compact plain data-url string.
+            # Plain surface: a bare data-URL string, promoted to an object only when it carries
+            # extra hints (two-sided cull, tcmod rotate, distfade, alpha test, flap).
             extra={}
             if props and props.get("twosided"): extra["twosided"]=True
             if texrot: extra["texrotate"]=texrot
             if clampf: extra["clamp"]=True
             if dfade: extra["distfade"]=dfade
-            # alphaFunc on an opaque base stage: the surface is alpha-TESTED, not blended
-            # (tr_shader.c:1129-1146). The viewer needs the threshold to reproduce the hard
-            # cutout; without it a leaf card's sub-threshold texels ghost instead of vanishing.
+            # alphaFunc on an opaque base means alpha-tested, not blended (tr_shader.c:1129-1146);
+            # the viewer needs the threshold to reproduce the hard cutout.
             if props and props.get("atest"): extra["atest"]=props["atest"]
             if props and props.get("flap"): extra["flap"]=props["flap"]
             if extra: extra["tex"]=du; man[s]=extra
@@ -998,59 +877,43 @@ def write_textures_manifest(vfs, skd_relpath, surface_names, shader_index, tik_i
     return len(man), len(surface_names)
 
 # ===========================================================================
-# TIKI ANIMATION CATALOG - full $include / $path / includes{} resolution
+# TIKI ANIMATION CATALOG - $include / $path / includes{} resolution
 # ===========================================================================
-# A character .tik almost never lists its own animations. allied_pilot.tik ends
-# its setup with `path models/human/protoanimations` and then pulls the real
-# list in with `$include models/human/new_generic_human.tik`; the player models
-# go `$include models/player/base/include.txt` -> twelve anims_*.txt files. The
-# engine resolves that with TikiScript, and the rules that matter here are:
+# Character .tiks rarely list their own animations: allied_pilot.tik sets
+# `path models/human/protoanimations` and then `$include`s new_generic_human.tik, and
+# the player models include base/include.txt, which pulls in twelve anims_*.txt files.
+# The TikiScript rules followed here:
 #
-#   $path <dir>      TikiScript::ProcessCommand (corepp/tiki_script.cpp:414-421)
-#                    stores <dir> in THIS script's `path`, appending a trailing
-#                    '/' when absent. `path` inside setup{} writes the same field
-#                    (TIKI_ParseSetup, tiki/tiki_parse.cpp:1038-1045).
+#   $path <dir>      Sets THIS script's path, adding a trailing '/'
+#                    (corepp/tiki_script.cpp:414-421). `path` inside setup{} writes
+#                    the same field (tiki/tiki_parse.cpp:1038-1045).
 #
-#   $include <file>  opens a CHILD TikiScript (tiki_script.cpp:398-412). A fresh
-#                    TikiScript starts with path[0]=0 (tiki_script.cpp:50), so an
-#                    include does NOT inherit the parent's path - each file owns
-#                    its own path scope, and every anim inside it resolves against
-#                    that file's own $path.
+#   $include <file>  Opens a child script with an empty path (tiki_script.cpp:50,
+#                    398-412), so each file resolves anims against its own $path.
 #
-#   <alias> <file>   TIKI_ParseAnimations (tiki_parse.cpp:470-472) builds the .skc
-#                    reference as currentScript->path + token, where currentScript
-#                    is the INNERMOST script that produced the token
-#                    (tiki_script.cpp:646,666). Flags follow on the SAME line -
-#                    TIKI_ParseAnimationFlags uses TokenAvailable(false)
-#                    (tiki_parse.cpp:240): weight/crossblend take a value,
-#                    deltadriven/default_angles/notimecheck/dontrepeate/random/
-#                    autosteps_run/autosteps_walk/autosteps_dog are bare.
+#   <alias> <file>   The .skc path is the innermost script's path + token
+#                    (tiki_parse.cpp:470-472). Flags follow on the same line
+#                    (tiki_parse.cpp:240): weight/crossblend take a value, the rest
+#                    (deltadriven, default_angles, notimecheck, ...) are bare.
 #
-#   includes <names…>{…}
-#                    TIKI_ParseIncludes (tiki_parse.cpp:320-341) activates the
-#                    block only when one of <names> prefix-matches sv_mapname, and
-#                    with no map loaded the mapname defaults to "utils" - which is
-#                    exactly why the developers named the everything-block
-#                    `includes test utils`. The viewer is not a level, so instead
-#                    of picking one group it walks EVERY group and files each one
-#                    under its own menu branch; nothing is hidden.
+#   includes <names>{...}
+#                    Active only when a name prefix-matches sv_mapname, which is
+#                    "utils" with no map loaded (tiki_parse.cpp:320-341). The viewer
+#                    has no map, so it walks every group, each under its own branch.
 #
-#   $mapspec <names>{…}
-#                    the same map gate applied inside animations{} (tiki_parse.cpp:
-#                    415-447). Walked as a branch here for the same reason.
+#   $mapspec <names>{...}
+#                    The same map gate inside animations{} (tiki_parse.cpp:415-447),
+#                    walked the same way.
 #
-# The result is a node tree plus one de-duplicated animation table. Nodes are
-# referenced BY INDEX, so a file included by forty mission groups is emitted once
-# and pointed at forty times: the tree stays small and building an animation once
-# serves every branch it appears under.
+# The result is a node tree plus one de-duplicated animation table. Nodes reference
+# anims by index, so a file included by forty groups is stored and built only once.
 _CAT_DEPTH_MAX = 24
 _CAT_SPLIT_MIN = 20        # anims in one node before it is split by .skc subfolder
 _CAT_FLAG_VAL  = ("weight", "crossblend")     # flags that consume the next token
 
 def _cat_comments(text):
-    """Strip TikiScript comments. Line comments FIRST, block comments second -
-    retail tiks carry `//****...` banner lines whose stray `/*` would otherwise
-    pair with a later `*/QUAKED` and swallow a whole animations{} block."""
+    """Strip TikiScript comments. Line comments go first: retail tiks have `//****`
+    banner lines whose `/*` would otherwise pair with a later `*/` and swallow a block."""
     text = "\n".join(l.split("//", 1)[0] for l in text.splitlines())
     return re.sub(r'/\*.*?\*/', '', text, flags=re.S)
 
@@ -1104,29 +967,25 @@ def _cat_child(st, parent, name):
     return ci
 
 def _cat_add_anim(st, node, alias, skc, flags, client, server, direct=False):
-    """Register one animation, de-duplicated on (alias, resolved .skc). The same
-    entry may be listed under many branches; it is stored - and later built - once."""
+    """Register one animation, de-duplicated on (alias, resolved .skc). An entry can be
+    listed under many branches but is stored, and later built, only once."""
     key = (alias.lower(), skc.lower())
     ai = st["akey"].get(key)
     if ai is None and direct:
-        # An alias the primary .tik lists inline that one of its $include files has
-        # already registered is the SAME animation, even when the two spell the path
-        # differently (the inline copy resolves against the .tik's own $path). TIKI
-        # looks animations up by alias, so alias identity is what counts here - and
-        # collapsing them is what stops a .tik that inlines a few hundred of its
-        # included aliases from baking all of them into the page a second time.
+        # An alias listed inline in the primary .tik that an $include already registered is
+        # the same animation (TIKI looks anims up by alias), even if its path is spelled
+        # differently. Merging them avoids baking hundreds of duplicates into the page.
         ai = st["alias"].get(alias.lower())
     if ai is None:
         ent = {"n": alias, "s": skc}
         if flags:
             ent["f"] = flags
         if direct:
-            # declared in the PRIMARY .tik's own animations{} block, and not already
-            # claimed by one of its $include files. Only these are baked into the page;
-            # everything reached through $include/$path is built on click.
+            # Declared directly in the primary .tik (not via $include): baked into the page.
+            # Everything reached through $include/$path is built on demand.
             ent["d"] = 1
-        # a stable id keyed on identity, not on menu position: the on-demand build
-        # cache next to the HTML stays valid across rebuilds and across models
+        # Stable id from identity rather than menu position, so the on-demand build cache
+        # survives rebuilds and is shared across models.
         ent["id"] = _cache_id(alias + "|" + skc)
         if client:
             ent["c"] = client
@@ -1219,10 +1078,8 @@ def _cat_animations(st, body, node, curpath, depth, direct=False):
 
 # ---- one file / one same-file block --------------------------------------
 def _cat_include(st, token, parent, depth):
-    """$include: open the referenced file as its own script with a FRESH path
-    scope, filed under its own menu branch. The node for a given file is built
-    once and re-referenced, so `human_rifle.tik` pulled in by forty mission
-    groups costs one subtree."""
+    """$include: open the file as its own script with a fresh path scope, under its own
+    menu branch. Each file's node is built once and re-referenced by later includes."""
     if depth >= _CAT_DEPTH_MAX:
         return
     inc = _cat_norm(token)
@@ -1252,9 +1109,8 @@ def _cat_include(st, token, parent, depth):
     _cat_scan(st, _cat_comments(sub), ci, "", depth + 1)
 
 def _cat_lastpath(body, curpath):
-    """The $path in force after a block has been walked. Used when an animations{}
-    body is deferred: its $path lines are ordinary TikiScript commands and still
-    govern the rest of the file, so the last one has to carry out of the block."""
+    """The $path in force after a deferred animations{} body. Its $path lines are ordinary
+    commands, so the last one still governs the rest of the file."""
     for ln in body.splitlines():
         t = ln.split()
         if t and t[0].lower().lstrip("$") == "path" and len(t) > 1:
@@ -1262,14 +1118,12 @@ def _cat_lastpath(body, curpath):
     return curpath
 
 def _cat_scan(st, text, node, curpath, depth, deferred=None):
-    """Walk one script body (comments already stripped). `curpath` is this
-    script's TikiScript::path and is threaded through every same-file block.
+    """Walk one script body (comments already stripped). `curpath` is this script's
+    TikiScript path, threaded through every same-file block.
 
-    The file's OWN animations{} bodies are deferred to the end of the walk so that
-    every $include has already registered its aliases. De-duplication is
-    first-wins, so an alias a .tik lists inline AND pulls in through an include is
-    kept once, on the include side - which is what stops a model that inlines a
-    few hundred of its included aliases from baking all of them into the page."""
+    The file's own animations{} bodies are deferred until every $include has registered
+    its aliases. De-duplication is first-wins, so an alias that is both inlined and
+    included is kept once, on the include side, and isn't baked into the page."""
     top = deferred is None
     if top:
         deferred = []
@@ -1352,10 +1206,8 @@ def _cat_scan(st, text, node, curpath, depth, deferred=None):
 
 # ---- post passes ----------------------------------------------------------
 def _cat_split(st, node, done=None):
-    """A single file can contribute several hundred aliases (new_generic_human.tik
-    alone runs to the high hundreds). When a node holds more than _CAT_SPLIT_MIN
-    of them and they span more than one .skc folder, break it into one child per
-    folder so the submenu stays walkable."""
+    """Split a node with more than _CAT_SPLIT_MIN aliases spanning several .skc folders
+    into one child per folder, so large submenus (e.g. new_generic_human.tik) stay usable."""
     if done is None:
         done = set()
     if node in done:
@@ -1387,9 +1239,8 @@ def _cat_split(st, node, done=None):
     nd["a"] = []
 
 def _cat_prune(st, node, done=None):
-    """Drop branches that carry nothing. After de-duplication a mission group whose
-    every include already appeared under `test utils` collapses to empty; the
-    groups that DO add something (lockpick / caught_smoking / plunger) survive."""
+    """Drop empty branches. After de-duplication, a mission group whose includes all
+    appeared under `test utils` is empty; groups that add something survive."""
     if done is None:
         done = {}
     if node in done:
@@ -1418,18 +1269,18 @@ def _cat_count(st, node, seen=None):
     return len(acc)
 
 def build_anim_catalog(txt, vfs, self_path=None):
-    """Resolve every animation a .tik can reach, through $include chains, per-file
-    $path scopes and all `includes <map>{}` groups. Returns
+    """Resolve every animation a .tik can reach through $include chains, per-file $path
+    scopes and all `includes <map>{}` groups. Returns
 
-        {"anims":[{n,s,f,id,c,v}, ...],     # unique animations, de-duplicated
-         "nodes":[{n,a:[animIdx],k:[nodeIdx]}, ...],
-         "root": <node index>,
-         "files": <files pulled in>,
-         (each anim carries "d":1 when the PRIMARY .tik declares it itself)
+        {"anims":   [{n,s,f,id,c,v,d}, ...],   # unique animations; d=1 when the primary
+                                                # .tik declares it itself
+         "nodes":   [{n,a:[animIdx],k:[nodeIdx],c}, ...],
+         "root":    <node index>,
+         "files":   <number of files read>,
          "missing": [unresolved $include paths]}
 
-    Nodes reference each other by index, so a file included by many groups is
-    stored once. Nothing is filtered by map name - every group is a branch."""
+    Nodes reference each other by index, so a file included by many groups is stored
+    once. Nothing is filtered by map name; every group becomes a branch."""
     st = {"anims": [], "akey": {}, "alias": {}, "nodes": [], "fcache": {}, "vfs": vfs,
           "files": 1, "missing": []}
     root = _cat_node(st, os.path.basename(_cat_norm(self_path) or "model.tik"))

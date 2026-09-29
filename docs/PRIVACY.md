@@ -5,14 +5,15 @@ If you change one, change the other (`PRIVACY_TEXT` in `mohaa_launcher.py`).
 
 ```
 PRIVACY NOTICE  --  MOHAA Model Viewer
-Last updated: 22 August 2026
+Last updated: 29 September 2026
 
 1. THE SHORT VERSION
    This program does not collect, transmit, sell, share or profile anything.
    It contains no telemetry, no analytics, no crash reporting, no advertising
    and no tracking identifiers, and it never checks for updates on its own. The
-   only time it uses the network is when YOU open Help --> Check for updates;
-   everything else it does happens entirely on your computer.
+   program uses the network only when YOU open Help --> Check for updates, and
+   the Windows startup script only to install missing Python packages (see 3);
+   everything else happens entirely on your computer.
 
 2. WHAT IS STORED, AND WHERE
    The program writes three things, all on your own machine, all readable and
@@ -22,10 +23,11 @@ Last updated: 22 August 2026
         Written to the program's "output" folder (the one beside the "bin" folder
         that holds the scripts). In a flat / portable install - all files in one
         folder - it sits in that folder instead. Same on Windows, macOS and Linux.
-        Contains: the .pk3 paths you loaded, your chosen output folder, theme,
-        window layout, view angles, and the paths of any external programs you
-        configured. It contains file paths, which on most systems include your
-        user name.
+        Contains: the .pk3 paths you loaded, the recent-files list (unless
+        Options --> Don't save recent files is on), your chosen output folder,
+        theme, window layout, view angles, and the paths of any external
+        programs you configured. It contains file paths, which on most systems
+        include your user name.
 
      b) Console log  --  output_console.log, in the same folder as (a).
         A copy of the Output pane. Overwritten on each launch. It contains the
@@ -34,7 +36,7 @@ Last updated: 22 August 2026
      c) Working files
         A temporary workspace under your system temp folder (mohaaview_*), and
         the generated .html viewers in your chosen output folder. Both are
-        removable from Options --> Clear %temp% files / Clear built models.
+        removable from File --> Clear built models / Clear %temp% files.
 
    None of this is transmitted anywhere. If you want it gone, delete the folders
    above; the program will simply start fresh.
@@ -54,9 +56,11 @@ Last updated: 22 August 2026
        privacy policy, not this one. It happens only when you open that window and
        click to install; nothing is ever checked automatically.
 
-     - The optional setup script, python_installer_updater.bat, downloads Python
-       from python.org and packages from pypi.org when you choose to run it, under
-       those sites' own privacy policies.
+     - On Windows, the startup script (RUN -- Medal of Honor Model Viewer.bat)
+       installs any missing Python packages from pypi.org. If no suitable Python
+       is found and you agree when asked, it runs python_installer_updater.bat,
+       which downloads Python from python.org. Both sites apply their own
+       privacy policies.
 
    The viewer itself makes no other network requests.
 
@@ -103,6 +107,6 @@ Last updated: 22 August 2026
    version.
 
 9. CONTACT
-   Questions about this notice: open an issue on the project's repository, or
-   use the contact address given in the repository README.
+   Questions about this notice: open an issue on the project's GitHub
+   repository (github.com/searingwolfe/mohaa-model-viewer).
 ```
