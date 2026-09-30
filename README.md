@@ -120,7 +120,7 @@ Extract the `mohaa-model-viewer-main` folder anywhere on your PC.
   4. tells you if the Microsoft Edge WebView2 Runtime is missing, in which case
      models open in your browser. WebGL needs nothing extra.
 
-  It then opens the launcher and its own window closes.
+  The .bat file then opens the launcher and its own window closes.
 
 * **`bin\python_installer_updater.bat`** installs a Python that suits your Windows
 version and CPU (Windows 7 → 3.8, Windows 8/8.1 → 3.11, Windows 10/11 → latest),
