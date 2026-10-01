@@ -18,6 +18,7 @@ class Vfs:
     Later paks override earlier ones for the same path (how pak6/7/8 patch the base game)."""
     def __init__(self, pak_paths):
         self.zips=[]; self.index={}     # lower/normalised path -> (zip_idx, real_name)
+        self._by_name=None              # image file name minus extension -> [paths], built on first use
         for p in pak_paths:
             try: z=zipfile.ZipFile(p)
             except Exception: continue
@@ -47,7 +48,7 @@ class Vfs:
         for z in self.zips:
             try: z.close()
             except Exception: pass
-        self.zips=[]; self.index={}
+        self.zips=[]; self.index={}; self._by_name=None
     def find_texture(self,path):
         """Resolve a texture reference to a stored file, trying the given extension first,
         then the common image extensions."""
@@ -58,6 +59,35 @@ class Vfs:
         for e in (".tga",".jpg",".jpeg",".dds",".png",".tif",".tiff"):
             if base+e in self.index: return base+e
         return None
+    _IMG_EXT=(".tga",".jpg",".jpeg",".dds",".png",".tif",".tiff")
+    def find_texture_by_name(self,path):
+        """A texture with the same file name as `path` in some other folder, e.g. the
+        mapfrance shader's `map textures/models/items/france.tga`, which only exists under
+        textures/models/maps/. With several matches, the one sharing the most leading
+        folders with `path` wins, then the usual extension order."""
+        p=self._k(path)
+        if not p: return None
+        stem=re.sub(r'\.(tga|jpg|jpeg|dds|png|tif|tiff)$','',p).rsplit("/",1)[-1]
+        if self._by_name is None:
+            self._by_name={}
+            for k in self.index:
+                b,dot,ext=k.rpartition(".")
+                if dot and "."+ext in self._IMG_EXT:
+                    self._by_name.setdefault(b.rsplit("/",1)[-1],[]).append(k)
+        cands=self._by_name.get(stem)
+        if not cands: return None
+        want=p.split("/")[:-1]
+        def _rank(k):
+            have=k.split("/")[:-1]; n=0
+            while n<len(want) and n<len(have) and want[n]==have[n]: n+=1
+            return (-n, self._IMG_EXT.index("."+k.rsplit(".",1)[-1]), k)
+        return min(cands,key=_rank)
+    def pak_of(self,path):
+        """File name of the pak a stored path is read from (the last one loaded wins)."""
+        e=self.index.get(self._k(path))
+        if not e: return ""
+        try: return os.path.basename(self.zips[e[0]].filename or "")
+        except Exception: return ""
 
 def _cache_id(s):
     """Short stable id for the animation cache (not a security hash).
@@ -86,10 +116,11 @@ def _is_aux_map(p):
     return ("common/reflection" in pl or "common/env" in pl or "/env/" in pl
             or "reflection" in pl or "specular" in pl or "_spec." in pl or "cubemap" in pl)
 
-def parse_shader_file(txt):
+def parse_shader_file(txt, editor=None):
     """Return {shadername_lower: diffuse_texture_path} for one .shader script.
     Prefers the first stage map that isn't an environment/reflection/specular helper,
-    then qer_editorimage, then any map."""
+    then qer_editorimage, then any map. If `editor` is a dict, each shader's
+    qer_editorimage is also stored in it."""
     out={}; i=0; n=len(txt)
     while i<n:
         m=_SHADER_HDR.match(txt,i)
@@ -119,14 +150,19 @@ def parse_shader_file(txt):
         diffuse=[p for p in stage_maps if not _is_aux_map(p)]
         pick = (diffuse[0] if diffuse else None) or qer or (stage_maps[0] if stage_maps else None)
         if pick: out[name]=pick
+        if editor is not None:
+            if qer: editor[name]=qer
+            else: editor.pop(name,None)          # a later redefinition without one
         i=j+1
     return out
 
-def build_shader_index(vfs):
+def build_shader_index(vfs, editor=None):
+    """{shader: diffuse path} across all .shader files; `editor` collects the
+    qer_editorimage paths (see parse_shader_file)."""
     SH={}
     for k in list(vfs.names()):
         if k.endswith(".shader"):
-            try: SH.update(parse_shader_file(vfs.read(k).decode("latin-1","replace")))
+            try: SH.update(parse_shader_file(vfs.read(k).decode("latin-1","replace"), editor))
             except Exception: pass
     return SH
 
@@ -167,13 +203,14 @@ def _parse_pulse_and_base(block):
     """Find a pulsating overlay stage (e.g. items.shader bangalore_pulsating*): a stage with
     `rgbGen wave <func> <base> <amp> <phase> <freq>` and an additive blendfunc.
 
-    Returns (pulse, basevisible). pulse is
+    Returns (pulse, basevisible, basefade). pulse is
         {"map":texpath, "wave":[func,base,amp,phase,freq], "distnear":N, "distrange":R}
     or None. basevisible is True when another stage draws a solid/alpha base, as opposed
-    to the pulse-only "ghosting" variant."""
-    pulse=None; basevisible=False
+    to the pulse-only "ghosting" variant. basefade is True when that base stage has its
+    own `alphaGen distFade` (bplane_pulse does, bangalore_pulsating doesn't)."""
+    pulse=None; basevisible=False; basefade=False
     for st in _shader_stages(block):
-        smap=None; wave=None; additive=False; dnear=1024.0; drange=512.0; sawblend=False
+        smap=None; wave=None; additive=False; dnear=1024.0; drange=512.0; sawblend=False; fade=False
         for line in st.splitlines():
             ls=line.strip()
             if not ls: continue
@@ -195,6 +232,7 @@ def _parse_pulse_and_base(block):
                 try: wave=[wm.group(1).lower(), float(wm.group(2)), float(wm.group(3)),
                            float(wm.group(4)), float(wm.group(5))]
                 except Exception: wave=None
+            if re.match(r'(?i)alphagen\s+distfade\b', ls): fade=True
             am=re.match(r'(?i)alphagen\s+distfade\s+([-\d.]+)\s+([-\d.]+)', ls)
             if am:
                 try: dnear=float(am.group(1)); drange=float(am.group(2))
@@ -203,7 +241,8 @@ def _parse_pulse_and_base(block):
             pulse={"map":smap,"wave":wave,"distnear":dnear,"distrange":drange}
         elif smap and not additive:
             basevisible=True            # opaque or alpha-blended base stage
-    return pulse, basevisible
+            basefade=basefade or fade
+    return pulse, basevisible, basefade
 
 def parse_shader_props_file(txt):
     """Return {shadername_lower: render-hint dict} for one .shader script.
@@ -344,7 +383,7 @@ def parse_shader_props_file(txt):
                 if fr: frames=fr
         # Pulsating overlay (e.g. bangalore_pulsating); basevisible separates it from the
         # pulse-only _ghosting variant.
-        pulse, basevisible = _parse_pulse_and_base(block)
+        pulse, basevisible, _basefade = _parse_pulse_and_base(block)
         # Opacity (tr_shader.c FinishShader): opaque unless the first stage blends or a stage
         # alpha-tests. Otherwise the diffuse alpha is a reflection/spec weight for a later stage
         # (tc_coat, facewrap, tc_hat) and must not be treated as coverage.
@@ -444,7 +483,10 @@ def parse_shader_props_file(txt):
             if _flaps: rec["flap"]=_flaps
             # distfade: inv=False fades out between near and near+range (leaf cards); inv=True
             # fades in over that range (the long-range billboard stand-ins).
-            if _fade_near is not None:
+            # fDistNear/fDistRange are per shader, so the last distFade sets them for every
+            # stage (tr_shader.c ParseStage :1389-1414): bplane_pulse's wire fades at 1024 512
+            # like its pulse. A pulse shader's base only fades if its own stage asks for it.
+            if _fade_near is not None and (not pulse or _basefade):
                 rec["distfade"]={"near":_fade_near,
                                  "range":(_fade_range if _fade_range else 256.0) or 256.0,
                                  "inv":_fade_inv}
@@ -719,9 +761,16 @@ def build_global_surface_shaders(tik_index):
             cnt.setdefault(s,Counter())[sh]+=1
     return {s:c.most_common(1)[0][0] for s,c in cnt.items()}
 
-def resolve_surface_texmap(skd_relpath, surface_names, vfs, shader_index, tik_index, global_surf=None):
+def resolve_surface_texmap(skd_relpath, surface_names, vfs, shader_index, tik_index, global_surf=None,
+                           editor_index=None, misses=None):
     """Like resolve_surface_textures but returns {surface_lower: (texpath, shadername)}
-    so callers can also look up per-surface shader render properties."""
+    so callers can also look up per-surface shader render properties.
+
+    When a shader's map isn't in the paks, the engine fails to load the stage
+    (tr_shader.c ParseStage :925-932), so in-game the pulse_map* models show no texture.
+    Here the shader's qer_editorimage, then a texture of the same file name elsewhere in
+    the paks, stands in. `misses`, if a dict, gets
+    {surface: (shader, missing_path, found_path_or_None, "editor"|"name"|"surface"|None)}."""
     import fnmatch
     key=skd_relpath.lower().replace("\\","/")
     pairs=tik_index.get(key, [])
@@ -751,16 +800,25 @@ def resolve_surface_texmap(skd_relpath, surface_names, vfs, shader_index, tik_in
         return None
     res={}
     for s in surface_names:
-        sl=s.lower(); tex=None
+        sl=s.lower(); tex=None; miss=None; via=None
         shader=shader_for(sl)
         if shader:
             mp=shader_index.get(shader.lower())
             tex=vfs.find_texture(mp) if mp else None
             if tex is None: tex=vfs.find_texture(shader)
+            if tex is None and mp:
+                miss=(shader, mp)
+                qer=(editor_index or {}).get(shader.lower())
+                if qer and qer.lower()!=mp.lower():
+                    tex=vfs.find_texture(qer); via="editor"
+                if tex is None:
+                    tex=vfs.find_texture_by_name(mp); via="name"
         if tex is None:                        # surface name itself may be a shader/texture
             mp=shader_index.get(sl)
             tex=vfs.find_texture(mp) if mp else vfs.find_texture(sl)
             if mp and shader is None: shader=sl
+            via="surface"
+        if miss and misses is not None: misses[sl]=miss+(tex, via if tex else None)
         res[sl]=(tex, shader)
     return res
 
@@ -785,18 +843,29 @@ def _solid_white_dataurl():
          +_chunk(b"IEND",b""))
     return "data:image/png;base64,"+base64.b64encode(png).decode()
 
+def _translucent(durl, props):
+    """True for a base that blends with its own alpha (barbwire's `blendFunc blend`), as
+    opposed to an opaque or alpha-tested one. Only a PNG kept its alpha channel."""
+    return bool(props and props.get("needs_alpha") and not props.get("atest")
+                and not props.get("additive") and durl.startswith("data:image/png"))
+
 # ------------------------------------------------------------------- convenience
 def write_textures_manifest(vfs, skd_relpath, surface_names, shader_index, tik_index,
                             out_path, max_dim=512, global_surf=None, shader_props=None,
-                            anim_max_dim=128, anim_max_frames=32):
+                            anim_max_dim=128, anim_max_frames=32, editor_index=None, log=None):
     """Resolve a .skd's surfaces to textures, embed them as data URLs, and write a
     {surface_name: entry} JSON manifest for mohaa_view.py --textures.
 
     An entry is a plain data-URL string for a simple opaque surface, or an object
     {"tex": url, ...} carrying the shader's render hints (additive, autosprite, frames/fps,
-    twosided, texrotate, distfade, atest, flap, pulse, ...). Returns (n_textured, n_surfaces)."""
+    twosided, texrotate, distfade, atest, flap, pulse, ...). Returns (n_textured, n_surfaces).
+
+    log(kind, text), if given, reports shader maps missing from the paks: "warn" (red) for
+    the miss, "note" (yellow) for the stand-in found by resolve_surface_texmap."""
     import json
-    tm=resolve_surface_texmap(skd_relpath, surface_names, vfs, shader_index, tik_index, global_surf)
+    misses={}
+    tm=resolve_surface_texmap(skd_relpath, surface_names, vfs, shader_index, tik_index, global_surf,
+                              editor_index=editor_index, misses=misses)
     man={}; framecache={}
     for s in surface_names:
         tp, sh = tm.get(s.lower(), (None,None))
@@ -808,8 +877,15 @@ def write_textures_manifest(vfs, skd_relpath, surface_names, shader_index, tik_i
         if pulse:
             entry={}
             if props.get("basevisible") and tp:
-                bdu=texture_to_dataurl(vfs, tp, max_dim=max_dim, emitter_clean=False)
-                if bdu: entry["tex"]=bdu
+                # A blended base (bplane_pulse's barbed wire) keeps its alpha like the plain
+                # shader does; an opaque one (bangalore_pulsating) is encoded solid.
+                bdu=texture_to_dataurl(vfs, tp, max_dim=max_dim, emitter_clean=False,
+                                       keep_alpha=bool(props.get("needs_alpha")))
+                if bdu:
+                    entry["tex"]=bdu
+                    for k in ("twosided","distfade","atest"):
+                        if props.get(k): entry[k]=props[k]
+                    if _translucent(bdu,props): entry["blend"]=True
             if str(pulse["map"]).lower() in ("$whiteimage","$white"):
                 pdu=_solid_white_dataurl()   # engine $whiteimage: solid white glow
             else:
@@ -871,8 +947,24 @@ def write_textures_manifest(vfs, skd_relpath, surface_names, shader_index, tik_i
             # the viewer needs the threshold to reproduce the hard cutout.
             if props and props.get("atest"): extra["atest"]=props["atest"]
             if props and props.get("flap"): extra["flap"]=props["flap"]
+            if _translucent(du,props): extra["blend"]=True
             if extra: extra["tex"]=du; man[s]=extra
             else: man[s]=du
+    # Only misses that still produced an entry are reported here: a stand-in was found, or
+    # the surface draws just its pulse stage. A surface left out of the manifest is reported
+    # by the launcher's untextured-surface check instead.
+    if log:
+        for s in surface_names:
+            m=misses.get(s.lower())
+            if not m or s not in man: continue
+            sh,mp,found,via=m
+            log("warn","MISSING ASSET  surface '%s'  ->  shader '%s' maps '%s', which isn't in any "
+                       "of the loaded .pk3 files." % (s, sh, mp))
+            if found:
+                src={"editor":"the shader's qer_editorimage","name":"same file name"}.get(via,"named after the surface")
+                pak=vfs.pak_of(found)
+                log("note","  Found '%s' elsewhere in the loaded paks and loaded it from %s (%s%s)."
+                    % (mp.replace("\\","/").rsplit("/",1)[-1], found, src, ", "+pak if pak else ""))
     with open(out_path,"w",encoding="utf-8") as f: json.dump(man,f)
     return len(man), len(surface_names)
 

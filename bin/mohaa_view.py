@@ -1769,6 +1769,7 @@ def build_payload(skd,anims_data,base_channels,referenced,convention,wT_payload,
                 if ent.get("distfade"): sr["distfade"]=ent["distfade"]
                 if ent.get("atest"): sr["atest"]=ent["atest"]
                 if ent.get("flap"): sr["flap"]=ent["flap"]
+                if ent.get("blend"): sr["blend"]=True
             elif ent:
                 sr["tex"]=ent
         surf_ranges.append(sr)
@@ -1852,7 +1853,7 @@ ANIM_PRELOAD_MAX=150
 # Page format revision, baked into each HTML as <!--mohaa-viewer-rev:N-->. Bump it when
 # the page gains features a cached HTML must pick up, and raise VIEWER_REV_REQUIRED in
 # mohaa_launcher.py to match so older pages are rebuilt. History: docs/CHANGELOG.md.
-VIEWER_REV=67
+VIEWER_REV=69
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!--mohaa-viewer-rev:__REV__-->
@@ -2415,7 +2416,7 @@ const view={tex:hasTex,mesh:true,wire:false,nodes:true,labels:true,wasd:false,sp
 // pulseOnly surfaces (_ghosting) have no solid base.
 function mkSurfTex(s){
   if(!s.tex&&!s.pulse)return null;
-  const rec={additive:!!s.additive,autosprite:!!s.autosprite,autosprite2:!!s.autosprite2,lightglow:!!s.lightglow,twosided:!!s.twosided,fps:s.fps||0,frames:null,pulse:null,pulseOnly:false,texrotate:s.texrotate||0,clamp:!!s.clamp,distfade:s.distfade||null,atest:s.atest||null};
+  const rec={additive:!!s.additive,autosprite:!!s.autosprite,autosprite2:!!s.autosprite2,lightglow:!!s.lightglow,twosided:!!s.twosided,fps:s.fps||0,frames:null,pulse:null,pulseOnly:false,texrotate:s.texrotate||0,clamp:!!s.clamp,distfade:s.distfade||null,atest:s.atest||null,blend:!!s.blend};
   if(s.tex){const im=new Image();im.onload=()=>{im._ok=1;draw();};im._clamp=!!s.clamp;im.src=s.tex;rec.img=im;}
   if(s.frames&&s.frames.length>1){
     rec.frames=s.frames.map(u=>{const f=new Image();f.onload=()=>{f._ok=1;draw();};f.src=u;return f;});
@@ -3553,12 +3554,12 @@ function _buildOcclusionDepth(){
   _occZ=null;
   if(GLR)return;                                            // GL path: real depth test, skip
   if(DATA.dontdraw||!(view.tex||view.mesh||view.wire))return;  // mesh not drawn -> no occluder
-  const V=model,T=DATA.tris; if(!V||!T||!T.length)return;
+  const V=model,T=LT; if(!V||!T||!T.length)return;
   const gw=Math.max(1,Math.ceil(W/_OCC_CELL)), gh=Math.max(1,Math.ceil(H/_OCC_CELL));
   const z=new Float32Array(gw*gh); z.fill(Infinity);
   const cache={};
   const pr=(i)=>{let c=cache[i];if(c)return c;c=project([V[i*3],V[i*3+1],V[i*3+2]]);cache[i]=c;return c;};
-  const sr=DATA.surfRanges;
+  const sr=LSR;
   for(let t=0;t<T.length;t++){
     const tr=T[t],a=pr(tr[0]),b=pr(tr[1]),c=pr(tr[2]);
     if(a[2]<=0||b[2]<=0||c[2]<=0)continue;                  // behind camera - not an occluder
@@ -4161,7 +4162,7 @@ function distFadeAlpha(tex,C){
  if(t<0)t=0;else if(t>1)t=1;
  return df.inv?t:(1-t);}
 function drawAutospriteSurf(si,tex,img){
- const s=DATA.surfRanges[si], V=model;
+ const s=LSR[si], V=model;
  const nv=s.vend-s.vstart;
  const quads=(nv>0&&nv%4===0&&(s.end-s.start)===(nv>>2)*2)?(nv>>2):0;
  ctx.globalCompositeOperation=tex.additive?'lighter':'source-over';
@@ -4340,7 +4341,9 @@ function draw2DScene(){ctx.clearRect(0,0,W,H);
          else if(img._pat&&!_spin&&!_hard){ctx.fillStyle=img._pat;ctx.fill();}
          else{try{ctx.clip();ctx.drawImage(_src,0,0,iw,ih);}catch(e){}}
          ctx.setTransform(DPR,0,0,DPR,0,0);
-         if(!add&&sh<0.99&&!_spin&&!_hard&&!_drop){ctx.fillStyle='rgba(0,0,0,'+(1-sh)*0.55+')';ctx.beginPath();
+         // A translucent base (blend) skips the shade pass too: it would darken the
+         // see-through part of the triangle into a grey box.
+         if(!add&&sh<0.99&&!_spin&&!_hard&&!_drop&&!(tex&&tex.blend)){ctx.fillStyle='rgba(0,0,0,'+(1-sh)*0.55+')';ctx.beginPath();
            ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.lineTo(c[0],c[1]);ctx.closePath();ctx.fill();}
          ctx.restore();
        }
@@ -4405,7 +4408,7 @@ function draw2DScene(){ctx.clearRect(0,0,W,H);
        // (tr_sprite.c:151-157), which match autoSprite2 for a vertical major axis and can't pick
        // up roll, and drawn with drawQuadPersp so tall cards don't shear away from screen centre.
        if(tex.autosprite2){
-         const s2=DATA.surfRanges[si],V2=model,nv2=s2.vend-s2.vstart;
+         const s2=LSR[si],V2=model,nv2=s2.vend-s2.vstart;
          const q2=(nv2>0&&nv2%4===0&&(s2.end-s2.start)===(nv2>>2)*2)?(nv2>>2):0;
          if(q2){
            ctx.globalAlpha=_fa;
@@ -4935,8 +4938,13 @@ function attRebuild(){
       a.vbase=vbase;a.vn=g.v.length;
       for(const s of (g.sr||[])){
         const st=T.length;
-        for(let t=s.start;t<s.end;t++){const tr=g.t[t];T.push([tr[0]+vbase,tr[1]+vbase,tr[2]+vbase]);}
-        const rec={name:s.name,start:st,end:T.length};
+        // Vertex range for the per-surface passes (centre/radius, distFade, autosprite quads):
+        // the span of the surface's own indices, as build_payload gives host surfaces.
+        let v0=Infinity,v1=-1;
+        for(let t=s.start;t<s.end;t++){const tr=g.t[t];T.push([tr[0]+vbase,tr[1]+vbase,tr[2]+vbase]);
+          for(let k=0;k<3;k++){if(tr[k]<v0)v0=tr[k];if(tr[k]>v1)v1=tr[k];}}
+        const rec={name:s.name,start:st,end:T.length,
+                   vstart:vbase+(v1>=0?v0:0),vend:vbase+(v1>=0?v1+1:0)};
         if(s.tex)rec.tex=s.tex;
         // Forward the sidecar's shader hints; this is the only path an attachment's surfaces take
         // into LSR/LTEX.
@@ -6270,12 +6278,11 @@ function initGLRenderer(){
  // Flat shading derives the face normal in the fragment shader (dFdx/dFdy): core in
  // WebGL2's GLSL ES 3.00, an extension in WebGL1. Without it, fall back to the 2D path.
  if(!isGL2&&!gl.getExtension('OES_standard_derivatives'))return null;
- const NV=DATA.verts.length;
+ // 32-bit indices are core in WebGL2 and an extension in WebGL1. They're used once the model
+ // (host plus attachments) passes 65535 vertices; see buildSurfBufs.
+ const canU32=isGL2||!!gl.getExtension('OES_element_index_uint');
+ if(DATA.verts.length>65535&&!canU32)return null;   // no 32-bit indices on this WebGL1: use the 2D path
  let IdxArr=Uint16Array,idxType=gl.UNSIGNED_SHORT;
- if(NV>65535){
-   if(isGL2||gl.getExtension('OES_element_index_uint')){IdxArr=Uint32Array;idxType=gl.UNSIGNED_INT;}
-   else return null;                  // no 32-bit indices on this WebGL1: use the 2D path
- }
  function mkShader(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){try{console.error('GL shader: '+gl.getShaderInfoLog(s));}catch(_e){}return null;}
    return s;}
@@ -6335,16 +6342,29 @@ function initGLRenderer(){
  const posBuf=gl.createBuffer();
  gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);gl.bufferData(gl.ARRAY_BUFFER,model,gl.DYNAMIC_DRAW);
  let dirty=false;
- const UV=DATA.uvs,hasUV=!!(UV&&UV.length);
- let uvBuf=null;
- if(hasUV){uvBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,uvBuf);
-   gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(UV),gl.STATIC_DRAW);}
- // per-surface triangle + deduped wireframe-edge index buffers (surface tris are
- // contiguous ranges of DATA.tris, so hidden/billboarded surfaces skip cleanly)
- function buildSurfBufs(){return LSR.map(s=>{
-   const tris=[];for(let t=s.start;t<s.end;t++){const tr=LT[t];tris.push(tr[0],tr[1],tr[2]);}
+ // UVs follow LUV (host plus attachments), padded to the vertex count so the attribute can
+ // never read past the end of the buffer.
+ let uvBuf=null,hasUV=false;
+ function uploadUV(){
+   const U=LUV;if(!(U&&U.length))return;
+   const a=new Float32Array(Math.max(U.length,(model.length/3)*2));a.set(U);
+   if(!uvBuf)uvBuf=gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER,uvBuf);gl.bufferData(gl.ARRAY_BUFFER,a,gl.STATIC_DRAW);hasUV=true;}
+ uploadUV();
+ // Per-surface triangle and deduped wireframe-edge index buffers for every live surface (LSR:
+ // the host's, then any attachments'). Surface tris are contiguous ranges of LT, so hidden or
+ // billboarded surfaces skip cleanly.
+ let bufLSR=null;                   // the LSR the buffers below were cut from
+ function buildSurfBufs(){
+   bufLSR=LSR;
+   const big=(model.length/3)>65535;
+   IdxArr=(big&&canU32)?Uint32Array:Uint16Array;idxType=(big&&canU32)?gl.UNSIGNED_INT:gl.UNSIGNED_SHORT;
+   // Without 32-bit indices (rare WebGL1), triangles past vertex 65535 can't be drawn.
+   const fits=tr=>IdxArr!==Uint16Array||(tr[0]<65536&&tr[1]<65536&&tr[2]<65536);
+   return LSR.map(s=>{
+   const tris=[];for(let t=s.start;t<s.end;t++){const tr=LT[t];if(fits(tr))tris.push(tr[0],tr[1],tr[2]);}
    const eset=new Set(),edges=[];
-   for(let t=s.start;t<s.end;t++){const tr=LT[t];
+   for(let t=s.start;t<s.end;t++){const tr=LT[t];if(!fits(tr))continue;
      for(let k=0;k<3;k++){const a2=tr[k],b2=tr[(k+1)%3];
        const key=a2<b2?(a2+'_'+b2):(b2+'_'+a2);
        if(!eset.has(key)){eset.add(key);edges.push(a2,b2);}}}
@@ -6354,6 +6374,14 @@ function initGLRenderer(){
    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new IdxArr(edges),gl.STATIC_DRAW);
    return{tb:tb,tn:tris.length,eb:eb,en:edges.length};});}
  let surfBufs=buildSurfBufs();
+ // Attachments add surfaces (attRebuild replaces LSR/LT/LUV), so the per-surface index buffers
+ // and the UV buffer are re-cut. Positions come free: posBuf is uploaded from `model`, which
+ // already carries the attachment vertices after the host's.
+ function resyncSurfaces(){
+   try{for(const b of surfBufs){gl.deleteBuffer(b.tb);gl.deleteBuffer(b.eb);}}catch(e){}
+   surfBufs=buildSurfBufs();
+   uploadUV();
+   dirty=true;}
  // fixed ground grid, same anchors as the 2D grid (cx0/gy/cz0, radius-scaled)
  const gpts=[];{const g=rad,gy=groundY;
    for(let i=-4;i<=4;i++){gpts.push(cx0+i*g/4,gy,cz0-g, cx0+i*g/4,gy,cz0+g);
@@ -6420,6 +6448,8 @@ function initGLRenderer(){
    gl.useProgram(prog);
    gl.uniformMatrix4fv(uMVP,false,buildMVP(nearP,farP));
    gl.uniform3f(uTexRot,1.0,0.0,0.0);   // default: no texcoord spin (set per prop surface below)
+   // attRebuild can redraw before it calls rebuildSurfaces, so check here too.
+   if(bufLSR!==LSR)resyncSurfaces();
    if(dirty){gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);gl.bufferData(gl.ARRAY_BUFFER,model,gl.DYNAMIC_DRAW);dirty=false;}
    // grid first with depth writes OFF: the model always paints over it, matching
    // the 2D paint order, and grid lines never punch holes in the depth buffer.
@@ -6434,7 +6464,7 @@ function initGLRenderer(){
    if(DATA.dontdraw||!(view.tex||view.mesh||view.wire))return;
    bindGeom();
    // Classify surfaces for this frame, using the same per-surface rules as the 2D path.
-   const sr=DATA.surfRanges,solid=[],adds=[],pulses=[],wires=[];
+   const sr=LSR,solid=[],blends=[],adds=[],pulses=[],wires=[];
    for(let si=0;si<sr.length;si++){const s=sr[si];
      if(hiddenSurf.has(si))continue;                     // +nodraw (server anim command)
      if(view.treesprite&&!isLodSprite(si))continue;      // Tree Sprite: stand-in only
@@ -6452,7 +6482,7 @@ function initGLRenderer(){
      // two-sided surfaces, and no culling at all in pure-wireframe view
      const cull=!add&&!(tex&&(tex.pulseOnly||tex.autosprite))&&
                 !((tex&&tex.twosided)||(s&&s.twosided))&&(view.tex||view.mesh);
-     if(textured){(add?adds:solid).push({si:si,mode:add?2:1,img:img,cull:cull,fa:_fa,at:_atv});}
+     if(textured){(add?adds:(tex.blend?blends:solid)).push({si:si,mode:add?2:1,img:img,cull:cull,fa:_fa,at:_atv});}
      else if(view.mesh&&!(tex&&tex.pulseOnly)){solid.push({si:si,mode:0,img:null,cull:cull,fa:_fa,at:0});}
      if(view.tex&&hasUV&&tex&&tex.pulse&&tex.pulse.img&&tex.pulse.img._ok){
        const g=pulseGlow(tex.pulse);
@@ -6461,13 +6491,19 @@ function initGLRenderer(){
    // push fills back a hair so the wireframe lines win the depth tie
    gl.enable(gl.POLYGON_OFFSET_FILL);gl.polygonOffset(1,1);
    gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
-   for(const d of solid){setCull(d.cull);
+   const fill=d=>{setCull(d.cull);
      gl.uniform1i(uMode,d.mode);
      gl.uniform1f(uAlpha,d.fa===undefined?1:d.fa);gl.uniform1f(uAtest,d.at||0);
      if(d.mode===0){const pc=hexRGB(palette[d.si%palette.length]);gl.uniform3f(uColor,pc[0],pc[1],pc[2]);gl.uniform3f(uTexRot,1.0,0.0,0.0);}
      else{gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texFor(d.img));setTexRot(d.si);}
      const b=surfBufs[d.si];gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,b.tb);
-     gl.drawElements(gl.TRIANGLES,b.tn,idxType,0);}
+     gl.drawElements(gl.TRIANGLES,b.tn,idxType,0);};
+   for(const d of solid)fill(d);
+   // Translucent bases (blendFunc blend: the barbed wire planes) after the opaque ones and
+   // without depth writes, since the engine clears the depth mask for a blended stage
+   // (tr_shader.c ParseStage :1149-1153). Every layer behind them still draws.
+   gl.depthMask(false);
+   for(const d of blends)fill(d);
    // additive stages after all solid geometry: depth-TESTED against it (an occluded
    // flame stays hidden) but never depth-written (glow does not block anything)
    gl.depthMask(false);gl.blendFunc(gl.ONE,gl.ONE);
@@ -6496,15 +6532,7 @@ function initGLRenderer(){
  function doResize(){glcv.width=Math.max(1,Math.round(W*DPR));glcv.height=Math.max(1,Math.round(H*DPR));}
  doResize();
  return{render:render,resize:doResize,markDirty:function(){dirty=true;},
-   // attachments add surfaces, so the per-surface index buffers (and the UV buffer)
-   // have to be re-cut. Positions come free: posBuf is uploaded from `model`, which
-   // already carries the attachment vertices appended after the host's.
-   rebuildSurfaces:function(){
-     try{for(const b of surfBufs){gl.deleteBuffer(b.tb);gl.deleteBuffer(b.eb);}}catch(e){}
-     surfBufs=buildSurfBufs();
-     if(uvBuf&&LUV&&LUV.length){gl.bindBuffer(gl.ARRAY_BUFFER,uvBuf);
-       gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(LUV),gl.STATIC_DRAW);}
-     dirty=true;}};
+   rebuildSurfaces:resyncSurfaces};
 }
 // The WebGL renderer is created once. Display > WebGL (or the launcher's View > Viewer
 // renderer) switches GLR between it and null (the 2D renderer). WebGL is the default.
@@ -6847,7 +6875,7 @@ def main(argv):
                 # one-sided card. The page's mkSurfTex understands all of these keys.
                 if isinstance(_du,dict):
                     for _k in ("additive","autosprite","autosprite2","lightglow","twosided",
-                               "clamp","texrotate","fps","frames","atest","distfade","pulse"):
+                               "clamp","texrotate","fps","frames","atest","distfade","pulse","blend"):
                         _v=_du.get(_k)
                         if _v: _sr[_k]=_v
                     # `cull` arrives as a raw shader keyword on some entries and as `twosided` on others;
@@ -7371,4 +7399,4 @@ def main(argv):
     return 0
 
 if __name__=="__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main(sys.argv))

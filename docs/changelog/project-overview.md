@@ -78,11 +78,12 @@ in-game footage. Where the two disagree, the footage wins and the notes say why.
   clipping. See [sprite-roll-rules.md](sprite-roll-rules.md).
 - **Shaders.** Resolved in Python into render hints (additive, alphaFunc, animMap,
   nextbundle + tcMod, deformVertexes autosprite/autosprite2/lightglow, distFade, spriteGen,
-  spriteScale, rgbGen vertex) that the JS applies.
+  spriteScale, rgbGen vertex) that the JS applies. A stage map missing from the paks is
+  replaced by the shader's `qer_editorimage` or a same-named texture, with an Output note.
 
 ## Current state
 
-- Version 1.0.000 (pre-release), `VIEWER_REV` 67.
+- Version 1.0.000 (pre-release), `VIEWER_REV` 69.
 - Windows is the main platform (embedded pane); macOS and Linux run the launcher and open
   pages in the browser.
 

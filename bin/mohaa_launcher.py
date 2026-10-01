@@ -48,16 +48,16 @@ NOWIN=dict(creationflags=0x08000000) if sys.platform.startswith("win") else {}  
 THEMES={
  "dark":dict(BG="#0e1116",PANEL="#161b22",LINE="#2b333d",TXT="#d6dde6",DIM="#8b97a6",
              ACCENT="#7ee787",TAG_C="#f2f5f8",ORIGIN="#c084fc",BONE_C="#566778",
-             BTN_BG="#21272f",BTN_HOV="#2d3a2d",ERR_C="#f47067",SEL_BG="#243042",
+             BTN_BG="#21272f",BTN_HOV="#2d3a2d",ERR_C="#f47067",WARN_C="#e3b341",SEL_BG="#243042",
              TIP_BG="#1c232c",TIP_TXT="#d6dde6",ENTRY_BG="#10151c"),
  "light":dict(BG="#f5f7fa",PANEL="#ffffff",LINE="#d0d7de",TXT="#1f2328",DIM="#57606a",
              ACCENT="#0969da",TAG_C="#7c6408",ORIGIN="#8250df",BONE_C="#57606a",
-             BTN_BG="#eef1f4",BTN_HOV="#ddebff",ERR_C="#cf222e",SEL_BG="#ddf4ff",
+             BTN_BG="#eef1f4",BTN_HOV="#ddebff",ERR_C="#cf222e",WARN_C="#9a6700",SEL_BG="#ddf4ff",
              TIP_BG="#ffffff",TIP_TXT="#1f2328",ENTRY_BG="#ffffff"),
 }
 # Module-level colour names used throughout the UI; apply_theme() re-points them at the
 # active palette.
-BG=PANEL=LINE=TXT=DIM=ACCENT=TAG_C=ORIGIN=BONE_C=BTN_BG=BTN_HOV=ERR_C=SEL_BG=TIP_BG=TIP_TXT=ENTRY_BG=""
+BG=PANEL=LINE=TXT=DIM=ACCENT=TAG_C=ORIGIN=BONE_C=BTN_BG=BTN_HOV=ERR_C=WARN_C=SEL_BG=TIP_BG=TIP_TXT=ENTRY_BG=""
 globals().update(THEMES["dark"])
 
 def _mono_family():
@@ -222,7 +222,7 @@ PAK_ENTRY_MAX=getattr(getattr(MTX,"Vfs",None),"MAX_ENTRY",192*1024*1024)
 # Source mtimes are the usual rebuild trigger, but a zip round-trip can scramble them,
 # so the baked rev is the backstop. Also gates the animation/attachment sidecar caches
 # (see _stamp_anim_cache).
-VIEWER_REV_REQUIRED=67
+VIEWER_REV_REQUIRED=69
 # Sentinel subdir for single-file builds (Browse / drag-drop / Recent / path bar). It
 # routes the output HTML to a "standalone" folder beside "models" instead of the
 # pak-mirroring tree; the null byte means it can't collide with a real folder name.
@@ -613,7 +613,7 @@ class App(tk.Tk):
         except Exception:
             self._logfile=None
         self._pk3_paths=[]; self._tmp=None; self._animroot=None
-        self._vfs=None; self._SH=None; self._TI=None; self._GS=None; self._PROPS=None; self._tex_ready=False; self._tex_gen=0
+        self._vfs=None; self._SH=None; self._TI=None; self._GS=None; self._PROPS=None; self._ED=None; self._tex_ready=False; self._tex_gen=0
         self._tree_entry={}
         self._all_files=[]           # (relpath, kind) kind in {"skd","tik"} from the last pak scan
         self._filter_after=None
@@ -1308,7 +1308,7 @@ class App(tk.Tk):
         sb=ttk.Scrollbar(logwrap,command=self._log.yview); self._log.configure(yscrollcommand=sb.set)
         sb.pack(side="right",fill="y"); self._log.pack(side="left",fill="both",expand=True)
         self._log.tag_config("ok",foreground=ACCENT); self._log.tag_config("err",foreground=ERR_C)
-        self._log.tag_config("dim",foreground=DIM)
+        self._log.tag_config("dim",foreground=DIM); self._log.tag_config("note",foreground=WARN_C)
         self._log.bind("<Button-3>",self._show_log_menu)
         # Escape cancels a build only while the Output pane has focus; clicking it focuses it
         # (a disabled Text doesn't always take focus on its own).
@@ -1861,7 +1861,7 @@ class App(tk.Tk):
                                        highlightbackground=LINE,highlightcolor=ACCENT)
             self._log.configure(bg=PANEL,fg=TXT,insertbackground=TXT,highlightbackground=LINE)
             self._log.tag_config("ok",foreground=ACCENT); self._log.tag_config("err",foreground=ERR_C)
-            self._log.tag_config("dim",foreground=DIM)
+            self._log.tag_config("dim",foreground=DIM); self._log.tag_config("note",foreground=WARN_C)
             self._retheme_tree_tags()
             self._retheme_tag_text()
             self._menubar.configure(bg=PANEL); self._menubar_line.configure(bg=LINE)
@@ -2643,7 +2643,7 @@ class App(tk.Tk):
         self._pk3_paths=[]; self._cfg["pk3s"]=[]; self._save_config()
         self._tree.delete(*self._tree.get_children()); self._tree_entry.clear(); self._all_files=[]
         self._pk3_label.configure(text="No .pk3 loaded")
-        self._vfs=None; self._SH=None; self._TI=None; self._tex_ready=False
+        self._vfs=None; self._SH=None; self._TI=None; self._ED=None; self._tex_ready=False
         self._set_status("Paks cleared","0 paks")
 
     def _add_pk3s(self, paths):
@@ -2692,12 +2692,13 @@ class App(tk.Tk):
         if MTX is None:
             self._log_q.put(("dim","(mohaa_textures.py not found - models will load untextured)")); return
         try:
-            vfs=MTX.Vfs(paks); SH=MTX.build_shader_index(vfs); TI=MTX.build_tik_index(vfs)
+            ED={}                                # shader -> qer_editorimage, for missing-map stand-ins
+            vfs=MTX.Vfs(paks); SH=MTX.build_shader_index(vfs,ED); TI=MTX.build_tik_index(vfs)
             GS=MTX.build_global_surface_shaders(TI)
             PROPS=MTX.build_shader_props(vfs) if hasattr(MTX,"build_shader_props") else {}
             if gen!=self._tex_gen: return        # a newer reload superseded this one
             old=self._vfs
-            self._vfs=vfs; self._SH=SH; self._TI=TI; self._GS=GS; self._PROPS=PROPS; self._tex_ready=True
+            self._vfs=vfs; self._SH=SH; self._TI=TI; self._GS=GS; self._PROPS=PROPS; self._ED=ED; self._tex_ready=True
             if old is not None and hasattr(old,"close"):
                 try: old.close()                  # release the previous reload's pak handles
                 except Exception: pass
@@ -2931,7 +2932,8 @@ class App(tk.Tk):
                         import mohaa_view as MV
                         surfs=[s["name"] for s in MV.parse_skd(skd_target)["surfaces"]]
                         manifest=os.path.join(self._tmp,"_tex_"+os.path.basename(entry)+".json")
-                        nt,ns=MTX.write_textures_manifest(self._vfs,tex_key,surfs,self._SH,self._TI,manifest,global_surf=self._GS,shader_props=self._PROPS)
+                        nt,ns=MTX.write_textures_manifest(self._vfs,tex_key,surfs,self._SH,self._TI,manifest,global_surf=self._GS,shader_props=self._PROPS,
+                                                          editor_index=self._ED,log=self._log_kind)
                         self._log_q.put(("dim",f"textures: {nt}/{ns} surfaces"))
                         if nt<ns: self._report_surface_misses(manifest,surfs)
                         if nt==0: manifest=None
@@ -3199,7 +3201,8 @@ class App(tk.Tk):
                             for v in tik_map.values(): allpairs+=v
                             local_TI[skel_vfs]=allpairs; local_TI[skel_vfs.lower()]=allpairs
                         except Exception: pass
-                        nt,ns=MTX.write_textures_manifest(self._vfs,skel_vfs,surfs,self._SH,local_TI,manifest,global_surf=self._GS,shader_props=self._PROPS)
+                        nt,ns=MTX.write_textures_manifest(self._vfs,skel_vfs,surfs,self._SH,local_TI,manifest,global_surf=self._GS,shader_props=self._PROPS,
+                                                          editor_index=self._ED,log=self._log_kind)
                         self._log_q.put(("dim",f"textures: {nt}/{ns} surfaces"))
                         # Report unresolved surfaces, passing the tik's own surface->shader pairs so the message
                         # can name the shader that failed.
@@ -3885,6 +3888,9 @@ class App(tk.Tk):
                     # Missing-asset warnings: shown in red but, unlike "err", they don't abort the open or
                     # stall a batch.
                     elif kind=="warn": self._log_line(msg,"err")
+                    # Yellow: a problem worked around, e.g. a missing shader map replaced by a
+                    # texture found elsewhere in the paks.
+                    elif kind=="note": self._log_line(msg,"note")
                     elif kind=="js": self._embed_js(msg)
                 except Exception as e:
                     # A bad handler must never kill the poll loop.
@@ -3919,6 +3925,11 @@ class App(tk.Tk):
         """Red, non-fatal Output line. Thread-safe (goes through _log_q like every
         other worker-thread message)."""
         try: self._log_q.put(("warn",msg))
+        except Exception: pass
+
+    def _log_kind(self,kind,msg):
+        """Thread-safe Output line of any _poll_log kind ("warn" red, "note" yellow, ...)."""
+        try: self._log_q.put((kind,msg))
         except Exception: pass
 
     def _asset_miss_reason(self, ref):
@@ -4310,7 +4321,8 @@ class App(tk.Tk):
                         except Exception: pass
                     nt,ns=MTX.write_textures_manifest(self._vfs,tex_key,surfs,self._SH,local_TI,
                                                       manifest,global_surf=self._GS,
-                                                      shader_props=self._PROPS)
+                                                      shader_props=self._PROPS,
+                                                      editor_index=self._ED,log=self._log_kind)
                     self._log_q.put(("dim",f"- attach textures: {nt}/{ns} surfaces"))
                     if nt<ns:
                         self._report_surface_misses(manifest,surfs,
@@ -4814,4 +4826,4 @@ if __name__=="__main__":
         # already ran in _on_close, so exit immediately.
         os._exit(0)
     else:
-        _run_app()
+        _run_app()

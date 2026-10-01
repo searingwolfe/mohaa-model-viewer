@@ -39,6 +39,8 @@ ascending order, so add new ones at the end of their section.
 - rev 65: attached models are assembled and posed like the main build: `--attachpart` passes the head/hands/hat skelmodels a player .tik lists beside its body, merged onto one skeleton, and the bind pose is reported with its bone coverage so an unposed skeleton is flagged.
 - rev 66: the WebGL renderer actually runs. Its shaders were GLSL ES 1.00 with `dFdx`, which a WebGL2 context rejects, so every page in a modern browser or WebView2 had silently fallen back to the 2D renderer; they're now compiled as GLSL ES 3.00 on WebGL2. WebGL also culled the wrong faces (it kept the ones the engine and the 2D path drop); it now culls `GL_FRONT` like `GL_Cull` (`tr_backend.c:137-175`). A Display > WebGL toggle switches between the renderers, remembered per browser, with WebGL the default. Also removed: the unused start-anim emitter schedule (`fxcmds` / `FXC`, never emitted since the schedule was retired) and a size clamp that never applied; the Corona orbit tooltip no longer mentions the toward-eye growth removed in rev 11.
 - rev 67: the launcher can choose the renderer. The page reads `#renderer=gl|2d` from its boot hash (ahead of the browser's saved choice), exposes `setViewerRenderer()` so View > Viewer renderer switches the open page, and reports its own Display > WebGL toggle to the launcher (`mohaa-renderer gl|2d`) so both stay in sync.
+- rev 68: attach-to-bone models draw in WebGL. The WebGL pass listed only the host's own surfaces (`DATA.surfRanges`) instead of the live list that includes attachments (`LSR`), so attachments showed only in 2D. Its index and UV buffers now follow attachments too (32-bit indices once the combined model passes 65535 vertices, re-cut whenever the surface list changes). Attached surfaces also get a vertex range, which fixes attached autosprite surfaces (a muzzle flash): WebGL threw an error on every frame and 2D never drew them. Attachments now also hide particles behind them in the 2D renderer.
+- rev 69: translucent bases (`blendFunc blend`, e.g. barbed wire) are flagged `blend`. WebGL draws them after the opaque surfaces without depth writes, as the engine does for a blended stage (`tr_shader.c:1149-1153`), and the 2D renderer no longer darkens their see-through part into a grey box.
 
 ## Launcher cache floor (VIEWER_REV_REQUIRED)
 
@@ -58,6 +60,8 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - rev 65: attachment sidecars again: a multi-part model (player/human) cached before this holds only its body mesh, and a rigged one holds an unposed, folded skeleton.
 - rev 66: pages built before the WebGL fixes never use WebGL and have no renderer toggle.
 - rev 67: pages built before this ignore the launcher's renderer setting.
+- rev 68: pages built before this don't draw attachments in WebGL.
+- rev 69: pages and attachment sidecars built before this draw barbwire_long_pulse with a black background and the pulse_map models untextured.
 
 ## Launcher (mohaa_launcher.py)
 
@@ -80,6 +84,7 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - View > Viewer renderer (WebGL, the default, or 2D canvas) sets the renderer for every page and switches the open one; it follows the page's own Display > WebGL toggle too.
 - The Theme submenu was removed from Options; View > Toggle Dark / Light (Ctrl+T) covers it.
 - Pak entries over 192 MB are skipped when extracting to the workspace or reading a `.map`, as they already were for reads through the pak index.
+- New yellow Output lines (`note`) for problems that were worked around, such as a missing shader map replaced by a texture found elsewhere in the paks.
 
 ## Notable fixes (mohaa_view.py)
 
@@ -149,6 +154,8 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - Additive sprites use premultiply compensation (`_gl1_lut`) instead of their native alpha or flattened alpha. Native alpha under-lit sparks (~0.5x size) and flattening punched opaque black squares into the backdrop (corona boxes).
 - The `.shader` block scanner is linear-time (explicit `pos` matching). Slicing the remaining text per block was O(n^2) and the name pattern could backtrack.
 - The animation cache id tries `md5(usedforsecurity=False)` and falls back to plain md5, then blake2s, so FIPS-mode systems don't lose the animation catalogue.
+- A pulse shader's base stage keeps its alpha when it blends (bplane_pulse / bspindle_pulse were encoded as opaque JPEGs, so barbwire_long_pulse drew a black background) and carries its cull, alphaFunc and distFade hints like the plain shader. distFade near/range are per shader, so the last `alphaGen distFade` in the block applies to every stage that uses it.
+- A shader map missing from the paks falls back to the shader's `qer_editorimage`, then to a texture of the same file name elsewhere in the paks, and the Output pane says so (red for the miss, yellow for the stand-in). The pulse_map1-4 shaders (mapfrance, mapcarentan, mapstlo, mapstrehaia) point at `textures/models/items/`, but their textures ship in `textures/models/maps/`; in-game they are untextured. A pulse surface with a missing base used to be reported as textured.
 
 ## Windows scripts (.bat)
 
