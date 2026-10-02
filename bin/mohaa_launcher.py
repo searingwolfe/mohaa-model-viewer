@@ -4826,4 +4826,4 @@ if __name__=="__main__":
         # already ran in _on_close, so exit immediately.
         os._exit(0)
     else:
-        _run_app()
+        _run_app()
