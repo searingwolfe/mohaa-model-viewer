@@ -257,7 +257,7 @@ if not os.path.exists(CONFIG):
 #  docs/ and the RUN .bat. On each release, bump VERSION here and in docs/version.txt,
 #  then tag the release commit v<version>.
 # ============================================================================
-VERSION="1.1.000"
+VERSION="1.0.000"
 VERSION_LABEL="version "+VERSION
 # GitHub coordinates for the update check. If GitHub can't be reached, the check
 # reports it and changes nothing on disk.

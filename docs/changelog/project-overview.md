@@ -90,7 +90,7 @@ Model Viewer and what both share; the Map Viewer has its own notes in
 
 ## Current state
 
-- Version 1.1.000, the first with the Map Viewer. `VIEWER_REV` 69; the Map Viewer's
+- Version 1.0.000 (pre-release), with both viewers. `VIEWER_REV` 69; the Map Viewer's
   `MAP_VIEWER_REV` 11 and `INDEX_VERSION` 6.
 - Windows is the main platform (embedded pane); macOS and Linux run the launchers and open
   pages in the browser.

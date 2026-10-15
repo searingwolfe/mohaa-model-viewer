@@ -20,12 +20,10 @@ ascending order, so add new ones at the end of their section.
 - `tcmod rotate` comments cite `RB_CalcRotateTexCoords` (renderergl1 `tr_shade_calc.c:1599-1631`)
   instead of renderergl2's `RB_CalcRotateTexMatrix`.
 
-## Documentation and version 1.1.000 (October 2026)
+## Documentation (October 2026)
 
-- Version 1.1.000 (`VERSION` in mohaa_launcher.py and `docs/version.txt`), the first with
-  the Map Viewer, so Help → Check for updates offers it to existing 1.0.000 installs.
 - README split for the two programs: a shared introduction and table of contents, then
-  How To Install / Uninstall, MOHAA Model Viewer and MOHAA .bsp Viewer, then the shared
+  How To Install / Uninstall, MOHAA .tik Model Viewer and MOHAA .bsp Map Viewer, then the shared
   sections (Updating, Where Your Files Go, Privacy & Security, Licence & Legal, For
   Developers, Contact & Credits). Map Viewer screenshots in `screenshots/map1-4.jpg`.
 - The Map Viewer's comments and docstrings were reviewed the way the Model Viewer's were
