@@ -16,7 +16,7 @@ self-contained HTML pages that open in the launcher's embedded 3D pane or in any
 # Table of Contents
 
 ### [How To Install / Uninstall](https://github.com/searingwolfe/mohaa-model-viewer?tab=readme-ov-file#how-to-install--uninstall-1)<br>
-## [MOHAA Model .tik Viewer](https://github.com/searingwolfe/mohaa-model-viewer?tab=readme-ov-file#mohaa-model-viewer)<br><br>[MOHAA Map .bsp Viewer](https://github.com/searingwolfe/mohaa-model-viewer?tab=readme-ov-file#mohaa-bsp-viewer)<br><br>
+## [MOHAA .tik Model Viewer](https://github.com/searingwolfe/mohaa-model-viewer?tab=readme-ov-file#mohaa-model-viewer)<br><br>[MOHAA .bsp Map Viewer](https://github.com/searingwolfe/mohaa-model-viewer?tab=readme-ov-file#mohaa-bsp-viewer)<br><br>
 ### [Updating](https://github.com/searingwolfe/mohaa-model-viewer?tab=readme-ov-file#updating-1)<br>
 ### [Where Your Files Go](https://github.com/searingwolfe/mohaa-model-viewer?tab=readme-ov-file#where-your-files-go-1)<br>
 ### [Privacy & Security](https://github.com/searingwolfe/mohaa-model-viewer?tab=readme-ov-file#privacy--security-1)<br>
@@ -106,7 +106,7 @@ Everything the programs keep is inside it, in `output/`
 (see [Where Your Files Go](#where-your-files-go-1)). Python and its packages stay
 installed; remove Python from Windows Settings → Apps if nothing else needs it.
 
-# MOHAA Model .tik Viewer
+# MOHAA .tik Model Viewer
 
 A browser-based 3D asset viewer aiming at exact in-game visual parity across every asset
 type the engine ships: skeletal models, animations, vehicles, weapons, projectiles,
@@ -198,7 +198,7 @@ opened in a plain browser shows everything already built into it.
 ![Model Viewer: Image 6](screenshots/src6.png)
 ![Model Viewer: Image 7](screenshots/src7.png)
 
-# MOHAA Map .bsp Viewer
+# MOHAA .bsp Map Viewer
 
 **MOHAA Map Viewer** opens the game's maps. A compiled `.bsp` is decompiled back into
 `.map` source and shown whole: textured, lit like the game, every entity one click away.
