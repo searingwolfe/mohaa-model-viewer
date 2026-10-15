@@ -1,4 +1,4 @@
-# MoH:AA Model Viewer & Map Viewer
+# MOH:AA Model Viewer & Map Viewer
 
 Two view-only tools for *Medal of Honor: Allied Assault (2002)* in one download. Both read
 the game's own `.pk3` files, share one Python setup and launcher style, and build
