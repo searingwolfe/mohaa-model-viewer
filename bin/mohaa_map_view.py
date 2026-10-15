@@ -48,10 +48,10 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 10
+MAP_VIEWER_REV = 11
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
-INDEX_VERSION = 5
+INDEX_VERSION = 6
 
 # Default longest side of the textures embedded in the page. 256 keeps a large map's
 # page around 10-20 MB; the launcher can ask for 128 or 512.
@@ -274,8 +274,8 @@ def _alpha_gen(agen):
 def parse_shaders(txt, out):
     """Every shader block in one .shader script, as the map viewer needs it:
     {name_lower: {"name", "editor", "light", "map", "parms", "trans", "keywords",
-                  "blend0", "alphafunc", "cull", "sky", "sprite", "anim", "lmstage",
-                  "nst", "rgb0", "ptm", "pag", "pdw"}}.
+                  "blend0", "alphafunc", "cull", "sky", "sprite", "lod", "anim",
+                  "lmstage", "nst", "rgb0", "ptm", "pag", "pdw"}}.
     "map" is the picture the game shows ("ptm", "pag", "pdw": its stage's texture
     scale, alphaGen and depthWrite). Later definitions of the same name replace
     earlier ones, as in the engine."""
@@ -306,7 +306,8 @@ def parse_shaders(txt, out):
         i = k + 1
         info = {"name": name, "editor": None, "light": None, "map": None, "parms": [],
                 "trans": None, "keywords": [], "blend0": None, "alphafunc": None,
-                "cull": None, "sky": None, "sprite": False, "anim": None, "stage0map": None,
+                "cull": None, "sky": None, "sprite": False, "lod": False, "anim": None,
+                "stage0map": None,
                 # how the game lights it: a $lightmap stage, the number of stages and the
                 # first stage's rgbGen (tr_shader.c ParseStage / R_FindShader)
                 "lmstage": False, "nst": 0, "rgb0": ""}
@@ -359,6 +360,11 @@ def parse_shaders(txt, out):
                 info["sprite"] = True
         info["nst"] = len(stages)
         sts = [_parse_stage(st) for st in stages]
+        # A tree's long-range stand-in: an autoSprite2 card that fades in with distance
+        # (alphaGen oneMinusDistFade) as the tree's own leaf cards fade out (plain distFade).
+        # The Model Viewer's isLodSprite uses the same pairing.
+        info["lod"] = bool(re.search(r"(?im)^\s*deformvertexes\s+autosprite2\b", "".join(top))) and any(
+            (st["agen"] or [""])[0] in ("oneminusdistfade", "oneminustikidistfade") for st in sts)
         for si, st in enumerate(sts):
             if st["lm"]:
                 info["lmstage"] = True
@@ -873,16 +879,29 @@ class TextureTable:
             self.cache.put(ckey, val)
         return val
 
-    def add(self, name, model=False):
-        """Index of the entry for a shader name (with or without textures/)."""
+    @staticmethod
+    def _key(name, model):
+        """The entry name for a shader name: brush textures always under textures/, model
+        shaders as the .tik names them."""
         key = name.lower().replace("\\", "/")
         if not model and not key.startswith("textures/"):
             key = "textures/" + key
+        return key
+
+    def info(self, name, model=False):
+        """The parsed shader for a name (with or without textures/), or None."""
+        key = self._key(name, model)
+        info = self.shaders.get(key)
+        if info is None and model and not key.startswith("textures/"):
+            info = self.shaders.get("textures/" + key)
+        return info
+
+    def add(self, name, model=False):
+        """Index of the entry for a shader name (with or without textures/)."""
+        key = self._key(name, model)
         if key in self.index:
             return self.index[key]
-        info = self.shaders.get(key)
-        if info is None and model:
-            info = self.shaders.get(("textures/" + key) if not key.startswith("textures/") else key)
+        info = self.info(name, model)
         ent = {"n": key}
         bits, cont, surf = shader_render_bits(info) if info else (0, 0, 0)
         grp = util_group(key, cont, surf)
@@ -1185,6 +1204,7 @@ class ModelBuilder:
         self.index = {}
         self.total_verts = 0
         self.failed = {}
+        self.lod_left_out = 0       # tree stand-in surfaces dropped (see _build)
 
     def get(self, path):
         """The model's number in the page, building it the first time; -1 if it can't be
@@ -1331,6 +1351,18 @@ class ModelBuilder:
             eng += len(s["verts"])
             if hidden(sname):
                 continue
+            shader = shader_map.get(sname)
+            if shader is None:
+                for pat, sh in shader_map.items():
+                    if pat == "all" or (pat.endswith("*") and sname.startswith(pat[:-1])):
+                        shader = sh
+                        break
+            # A tree's long-range stand-in card: the game only fades it in far away, as the
+            # tree's own leaves fade out, and the page draws the whole tree at any distance.
+            sinfo = self.texs.info(shader or sname, model=True)
+            if sinfo and sinfo.get("lod"):
+                self.lod_left_out += 1
+                continue
             first = len(idx)
             base = nverts
             for weights, (u, v) in zip(s["verts"], s["uvs"]):
@@ -1350,12 +1382,6 @@ class ModelBuilder:
                 idx += (base + a, base + b, base + c)
             if nverts > MODEL_MAX_VERTS:
                 raise ValueError("too many vertices (%d)" % nverts)
-            shader = shader_map.get(sname)
-            if shader is None:
-                for pat, sh in shader_map.items():
-                    if pat == "all" or (pat.endswith("*") and sname.startswith(pat[:-1])):
-                        shader = sh
-                        break
             ti = self.texs.add(shader or sname, model=True)
             # [first index, index count, texture, name, first vertex, vertex count, engine offset]
             surfs.append([first, len(idx) - first, ti, sname, base, nverts - base, eo])
@@ -1734,7 +1760,8 @@ def build(src, args):
             if mi >= 0:
                 model_of[str(ei)] = mi
         log("models: %d placed, %d different (%d vertices) in %.1f s"
-            % (len(model_of), len(mb.models), mb.total_verts, time.time() - t0))
+            % (len(model_of), len(mb.models), mb.total_verts, time.time() - t0)
+            + (", %d tree stand-in sprites left out" % mb.lod_left_out if mb.lod_left_out else ""))
         if mb.failed:
             items = sorted(mb.failed.items())
             for p, why in items[:15]:

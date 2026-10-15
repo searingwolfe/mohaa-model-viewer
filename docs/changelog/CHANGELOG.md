@@ -368,3 +368,12 @@ Changes to `python_installer_updater.bat` unless noted.
   - `.dcl` files (binary decal data) are listed as map data instead of opening in the
     text editor, where they showed as garbage.
   - `mohaa_map_view.py` prints its usage when run without arguments.
+- Map Viewer page rev 11 (`MAP_VIEWER_REV` 11, `MAP_VIEWER_REV_REQUIRED` 11,
+  `INDEX_VERSION` 6): trees no longer draw their long-range stand-in. MOHAA's tree models
+  carry a flat card of the whole tree (`deformVertexes autoSprite2` with `alphaGen
+  oneMinusDistFade`) that the game fades in only far away, as the tree's own leaf cards
+  fade out (`alphaGen distFade`). The page draws the whole tree at any distance, so the
+  card was drawn on top of it, turned to face the camera on every axis (a top-down view
+  showed side-on trunks). Model surfaces with such a shader are now left out of the page
+  (19 shaders, used by 12 tree and palm models in the retail paks); the build log counts
+  them. The shader index records the pairing (`lod`), hence the new `INDEX_VERSION`.

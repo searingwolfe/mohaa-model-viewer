@@ -230,6 +230,10 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
 - Lighting: dynamic lights (lamps switched by script, muzzle flashes) and the
   `alphaGen distFade` fade-out aren't drawn. Portal skies (`textures/common/skyportal`
   with a `script_skyorigin`) show the plain sky box; no retail Allied Assault map uses one.
+- Trees are drawn whole at any distance. A tree model's long-range stand-in (a card of
+  the whole tree with `deformVertexes autoSprite2` and `alphaGen oneMinusDistFade`, which
+  the game fades in far away as the leaf cards fade out) is left out of the page, so a
+  tree never shows twice; the Model Viewer's Tree Sprite toggle still shows it.
 - A `.map` has no compiled light, so it is always drawn full bright.
 - The sky shows its far box only. A sky shader's cloud layer (the stages drawn over the
   box, such as the scrolling clouds of `textures/sky/africanight`) isn't drawn.
