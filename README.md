@@ -106,7 +106,7 @@ Everything the programs keep is inside it, in `output/`
 (see [Where Your Files Go](#where-your-files-go-1)). Python and its packages stay
 installed; remove Python from Windows Settings → Apps if nothing else needs it.
 
-# MOHAA Model Viewer
+# MOHAA Model .tik Viewer
 
 A browser-based 3D asset viewer aiming at exact in-game visual parity across every asset
 type the engine ships: skeletal models, animations, vehicles, weapons, projectiles,
@@ -198,7 +198,7 @@ opened in a plain browser shows everything already built into it.
 ![Model Viewer: Image 6](screenshots/src6.png)
 ![Model Viewer: Image 7](screenshots/src7.png)
 
-# MOHAA .bsp Viewer
+# MOHAA Map .bsp Viewer
 
 **MOHAA Map Viewer** opens the game's maps. A compiled `.bsp` is decompiled back into
 `.map` source and shown whole: textured, lit like the game, every entity one click away.
