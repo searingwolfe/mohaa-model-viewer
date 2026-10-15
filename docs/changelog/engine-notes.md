@@ -93,3 +93,12 @@ and line numbers next to the code that depends on them.
   as part of the file name and the load fails with `ERR_FILE_NOT_FOUND`.
 - Build `file:` URLs with `pathlib.Path.as_uri()`. Hand-built `"file://" + path` breaks on
   Windows drive letters and on `#`, `%` or non-ASCII characters.
+- WebView2 needs a writable folder for its browser files (the "user data folder").
+  tkwebview2 passes none, so WebView2 would create `pythonw.exe.WebView2` beside the
+  Python executable, which fails in a read-only install such as `C:\Program Files` and
+  leaves the pane blank with no error the launcher sees. `mohaa_launcher.py` sets the
+  documented `WEBVIEW2_USER_DATA_FOLDER` environment variable to `output/webview2`, which
+  overrides that default. pywebview 4.4.1 starts it in private mode (its default), so a
+  page's local storage lasts only while the launcher is open.
+- A map page needs WebGL2 and `DecompressionStream` (its data is gzipped); both are in
+  every current browser and WebView2 runtime.

@@ -18,16 +18,19 @@ gamefiles/
 paks/
 models/
 standalone/
+maps_standalone/
 
 # ---------------------------------------------------------------------------
-#  Runtime output -- the program writes the config, console log and every built
-#  model into an "output" folder beside bin/. None of it belongs in the repo.
+#  Runtime output -- both programs write their config, console log and every built
+#  model / map into an "output" folder beside bin/. None of it belongs in the repo.
 #  (config + log are also matched by name in case of a flat / portable install,
 #  and *.new covers files staged by a locked in-place update.)
 # ---------------------------------------------------------------------------
 /output/
 mohaa_viewer_config.json
 output_console.log
+mohaa_map_viewer_config.json
+output_console_map.log
 *.new
 
 # ---------------------------------------------------------------------------
@@ -44,6 +47,8 @@ venv/
 *_tik_view.html
 *_skd_view/
 *_tik_view/
+*_bsp_view.html
+*_map_view.html
 python_installer.exe
 
 # Editors / OS

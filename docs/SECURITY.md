@@ -2,11 +2,12 @@
 
 ## Threat model — please read
 
-This program's job is to open **`.pk3` archives and game files that you supply**.
-A `.pk3` is an ordinary ZIP file. If you downloaded one from a mod site, a Discord
-server or a forum, treat it as untrusted input, because that is exactly what it is.
+Both programs exist to open **`.pk3` archives and game files that you supply**:
+models in the Model Viewer, `.bsp` and `.map` files in the Map Viewer. A `.pk3` is an
+ordinary ZIP file. If you downloaded one (or a map) from a mod site, a Discord server or
+a forum, treat it as untrusted input, because that is exactly what it is.
 
-The program is written on that assumption. Specifically:
+The programs are written on that assumption. Specifically:
 
 | Attack surface | Mitigation |
 |---|---|
@@ -15,8 +16,11 @@ The program is written on that assumption. Specifically:
 | Hostile `.shader` scripts | The block scanner is linear-time and matched with an explicit position, so a crafted shader cannot cause a quadratic parse hang during pak loading. |
 | Decompression bombs | Archive entries are capped at 192 MB, whether read into memory or extracted to the workspace, and skipped beyond that. |
 | `$include` expansion bombs | Cycle guard, depth cap, **and** a total-output budget, so sibling fan-out cannot exhaust memory. |
-| Game-file text reaching the generated HTML | Model payload and title are escaped for inline-`<script>` embedding, and the page carries a Content-Security-Policy that pins every source to `self`/`file`/`data`/`blob` with `connect-src 'none'`. |
-| Configured external programs | Only an existing file at an absolute path is launched, without a shell and with the model file as its only argument, so a planted config can't trigger a `PATH` or current-directory lookup or smuggle in extra arguments. |
+| Malformed `.bsp` files | Every lump must lie inside the file, record counts come from the lump sizes rather than from count fields, a brush with more sides than the map compiler allows (300) is skipped, and NaN or infinite numbers are skipped or written as 0. A file that still breaks the reader is reported as damaged, and nothing is written for it. |
+| Malformed `.map` text | The page's parser skips a broken primitive up to the next one and lists it as a warning, and rejects patch grids over the engine's 129-point limit and terrain blocks far past the 9 x 9 the editor writes, so a crafted file can't make it allocate without bound. |
+| Decompiled `.map` files | A decompile never replaces a `.map` the program didn't write (its own start with a marker line); the mapper's source next to a `.bsp` is kept, and the decompile is saved as `<name>_decompiled.map`. Clear built maps deletes only its own pages and the `.map` files carrying that marker, and only inside its `maps` / `maps_standalone` folders. |
+| Game-file text reaching the generated HTML | Model payload and title are escaped for inline-`<script>` embedding. A map page carries the map's text, textures and models base64-encoded in a non-executable block, its title and summary escaped, and shows game-file text only through escaping. Both pages carry a Content-Security-Policy that pins every source to `self`/`file`/`data`/`blob` with `connect-src 'none'`. |
+| Configured external programs | Only an existing file at an absolute path is launched, without a shell and with the model or map file as its only argument, so a planted config can't trigger a `PATH` or current-directory lookup or smuggle in extra arguments. |
 
 **No mitigation is perfect.** If you find a way around any of the above, please
 report it.

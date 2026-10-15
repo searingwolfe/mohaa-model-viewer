@@ -7,6 +7,11 @@ approximation: behaviour is taken from the engine source
 ([OpenMOHAA](https://github.com/openmoh/openmohaa)) and checked frame by frame against
 in-game footage. Where the two disagree, the footage wins and the notes say why.
 
+The repository also holds the **MOHAA Map Viewer**, which opens `.bsp` and `.map` files
+with the same launcher window, pak handling and embedded pane. This file covers the
+Model Viewer and what both share; the Map Viewer has its own notes in
+[map-viewer.md](map-viewer.md).
+
 ## Repository layout
 
 | Path | Role |
@@ -15,9 +20,11 @@ in-game footage. Where the two disagree, the footage wins and the notes say why.
 | `bin/mohaa_launcher.py` | Tkinter desktop app: pak loading and tree, build orchestration, embedded WebView2 pane, on-demand animation and attachment builds, settings, updater. |
 | `bin/mohaa_view.py` | Model builder. Parses `.skd` / `.skb` / `.skc` / `.tik` / `.map`, solves the skeleton and IK, writes an `.obj`, and fills the page template (`_HTML_TEMPLATE`, all of the viewer's HTML/CSS/JS) with the model payload. |
 | `bin/mohaa_textures.py` | Pak virtual filesystem (`Vfs`), `.shader` index and render hints, texture resolution and `data:` URL encoding, `$include` expansion, and the animation catalogue (`build_anim_catalog`). |
-| `bin/python_installer_updater.bat` | Windows setup: installs a Python suited to the Windows version and CPU, then the packages. Run by the RUN .bat on request (`/fromrun` skips its closing pause), or on its own. |
+| `RUN -- Medal of Honor Map Viewer.bat`, `bin/mohaa_map_*.py`, `bin/mohaa_bsp.py`, `bin/mohaa_entdefs.py` | The Map Viewer, a separate program built on the same launcher (`MapApp` subclasses `App`); see [map-viewer.md](map-viewer.md). |
+| `bin/python_installer_updater.bat` | Windows setup for both viewers: installs a per-user Python suited to the Windows version and CPU, then the packages. Run by either RUN .bat on request (`/fromrun` skips its closing pause), or on its own. |
 | `docs/` | Privacy, security and licensing notices, `requirements.txt`, `version.txt` (read by the updater) and these notes. |
-| `output/` | Created at runtime beside `bin/`: config, console log, built pages. Git-ignored. |
+| `screenshots/` | The pictures in the README. |
+| `output/` | Created at runtime beside `bin/`: both programs' configs and console logs, built pages, and the embedded pane's WebView2 folder (`webview2/`). Git-ignored. |
 
 ## How a model gets built
 
@@ -60,7 +67,7 @@ in-game footage. Where the two disagree, the footage wins and the notes say why.
 - Sidecar folders carry a `.rev` stamp; a mismatch with `VIEWER_REV_REQUIRED` clears the
   cached `a<id>.js` / `at<key>.js` files once.
 - `VERSION` (mohaa_launcher.py) and `docs/version.txt` must match on each release; Help →
-  Check for updates compares them.
+  Check for updates compares them. Both viewers share the version and update together.
 
 ## The renderer in brief
 
@@ -83,8 +90,9 @@ in-game footage. Where the two disagree, the footage wins and the notes say why.
 
 ## Current state
 
-- Version 1.0.000 (pre-release), `VIEWER_REV` 69.
-- Windows is the main platform (embedded pane); macOS and Linux run the launcher and open
+- Version 1.1.000, the first with the Map Viewer. `VIEWER_REV` 69; the Map Viewer's
+  `MAP_VIEWER_REV` 10 and `INDEX_VERSION` 5.
+- Windows is the main platform (embedded pane); macOS and Linux run the launchers and open
   pages in the browser.
 
 ## Known issues and open work

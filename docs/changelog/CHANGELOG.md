@@ -20,6 +20,30 @@ ascending order, so add new ones at the end of their section.
 - `tcmod rotate` comments cite `RB_CalcRotateTexCoords` (renderergl1 `tr_shade_calc.c:1599-1631`)
   instead of renderergl2's `RB_CalcRotateTexMatrix`.
 
+## Documentation and version 1.1.000 (October 2026)
+
+- Version 1.1.000 (`VERSION` in mohaa_launcher.py and `docs/version.txt`), the first with
+  the Map Viewer, so Help → Check for updates offers it to existing 1.0.000 installs.
+- README split for the two programs: a shared introduction and table of contents, then
+  How To Install / Uninstall, MOHAA Model Viewer and MOHAA .bsp Viewer, then the shared
+  sections (Updating, Where Your Files Go, Privacy & Security, Licence & Legal, For
+  Developers, Contact & Credits). Map Viewer screenshots in `screenshots/map1-4.jpg`.
+- The Map Viewer's comments and docstrings were reviewed the way the Model Viewer's were
+  in September: current behaviour only, OpenMOHAA references kept. Unused code removed:
+  `terrain_square_tris` (mohaa_bsp.py), `_fmtv` (mohaa_map_view.py), `spawnflag_names`
+  (mohaa_entdefs.py), and a duplicate `twosided` test in the cull check.
+- SECURITY lists the Map Viewer's attack surfaces (`.bsp` and `.map` parsing, decompiled
+  files, the map page); THIRD_PARTY_NOTICES notes the q3map and OpenMOHAA `/*QUAKED*/`
+  derivations and that a decompiled map stays its author's work; requirements.txt,
+  project-overview, development-workflow (Map Viewer checks, values that change together,
+  two more batch-file pitfalls), engine-notes (the WebView2 folder) and map-viewer.md
+  (damaged files, planned work) cover both programs.
+- Privacy notice (`docs/PRIVACY.md`, `PRIVACY_TEXT`), dated 15 October 2026: it now lists
+  four stored things, adding the embedded pane's `webview2` folder and the display choices
+  pages keep in browser storage. The Map Viewer's wording is in `_PRIVACY_SWAPS`
+  (mohaa_map_launcher.py), which rewraps the paragraphs it changes; two of its lines had
+  run wider than the rest.
+
 ## Viewer page revisions (VIEWER_REV)
 
 - rev 2: backdrop colour picker.
@@ -85,6 +109,7 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - The Theme submenu was removed from Options; View > Toggle Dark / Light (Ctrl+T) covers it.
 - Pak entries over 192 MB are skipped when extracting to the workspace or reading a `.map`, as they already were for reads through the pak index.
 - New yellow Output lines (`note`) for problems that were worked around, such as a missing shader map replaced by a texture found elsewhere in the paks.
+- The embedded pane's WebView2 keeps its browser files in `output/webview2` (the `WEBVIEW2_USER_DATA_FOLDER` environment variable, set before the pane is created). tkwebview2 names no folder, so WebView2 created `pythonw.exe.WebView2` beside Python, which fails where Python is installed read-only (`C:\Program Files`) and left the pane blank. A `pythonw.exe.WebView2` folder left beside Python by older versions can be deleted. This applies to both viewers.
 
 ## Notable fixes (mohaa_view.py)
 
@@ -173,3 +198,173 @@ Changes to `python_installer_updater.bat` unless noted.
 - Fixed the installer closing the moment it opened. Its Windows-version probe passed PowerShell a string with `\"` inside a `FOR /F` command; cmd has no `\"` escape, so the `)` in `$($v.Major)` ended the command list and cmd exited with a syntax error. The probe now reads `[Environment]::OSVersion.Version.ToString()`, with every parenthesis inside the quotes.
 - The RUN .bat checks everything before starting the launcher: it uses the py launcher's default Python if that is 3.8+ with tkinter, otherwise the newest suitable one on PATH or in the default install folders (so a Python installed moments ago is found without a new window), and if there is none it explains why (none, too old, or no tkinter) and asks Y to run the installer or N to close. It then installs Pillow and the embedded-pane packages if missing (the latter only on Windows 8.1+), reports a missing WebView2 Runtime, and starts the launcher with the `pythonw.exe` beside the chosen Python, so the launcher always runs on the interpreter that has the packages. Also fixed: its Pillow message echoed `(>=10.3)` unescaped, which redirected the text into a file named `=10.3)`.
 - The installer accepts `/fromrun`, which skips its closing pause and PATH note when the RUN .bat calls it.
+- The installer serves both viewers (both RUN .bat files call it the same way) and looks for Python where the RUN .bat files do: the py launcher's default first, then PATH, then the per-user and all-users install folders (`%ProgramFiles%\Python3*` is new).
+- Its Microsoft Store alias check never matched: `echo !CAND! | find` runs on a pipe, where delayed expansion is off, so `find` saw the literal text `!CAND!`; it now pipes `%~1`. It also read each version through `for /f`, which hands the command to `cmd /c` and mangles a quoted path containing `(`, `)` or `&`; Python is now run directly and its output read back with `set /p`.
+- After installing, it finds the new Python with the same search, so per-user folders with a `-32` or `-arm64` suffix are found too (it only tried `Python3XY`), and it reports the installer's exit code when that isn't 0.
+- Python is installed with `InstallLauncherAllUsers=0`. The py launcher's all-users default needs administrator rights, so the otherwise per-user quiet install could stop at a UAC prompt.
+- Messages say "models and maps" and the closing note names both RUN .bat files.
+
+## Map Viewer (October 2026)
+
+- First version of the MOHAA Map Viewer: `RUN -- Medal of Honor Map Viewer.bat` and
+  `bin/mohaa_map_launcher.py`, `mohaa_map_view.py`, `mohaa_map_page.py`, `mohaa_bsp.py`,
+  `mohaa_entdefs.py`. It opens `.bsp` files (turned back into `.map` source by its own
+  decompiler) and `.map` files in a WebGL2 viewer with Free-look and Radiant-look cameras,
+  info cards for any clicked face or entity, same-kind selection, find, and MOHRadiant's
+  filters. Details in [map-viewer.md](map-viewer.md).
+- `MAP_VIEWER_REV` 1, `MAP_VIEWER_REV_REQUIRED` 1, `INDEX_VERSION` 2.
+- The Model Viewer's files are unchanged: the map launcher subclasses `mohaa_launcher.App`.
+- Map Viewer page rev 2 (`MAP_VIEWER_REV` 2, `MAP_VIEWER_REV_REQUIRED` 2,
+  `INDEX_VERSION` 4):
+  - The game's own lighting. A `.bsp` now opens lit the way the game lights it: the
+    compiled polygons with their lightmaps (brightened like `R_ColorShiftLightingBytes`
+    with `r_mapOverBrightBits 1`), vertex light where the engine uses it, patches and
+    terrain with their lightmap pages, static props with their baked vertex light, other
+    models with the light grid at their origin, and the sky box (`skyParms` far box)
+    behind the sky brushes. Show > **Full Brightness** (B), off by default, switches back
+    to MOHRadiant's look. A `.map` has no compiled light, so the button is disabled there.
+    Water, slime and lava keep their editor picture at Full Brightness (as MOHRadiant
+    shows them) but are drawn with the shader's own picture, solid unless the shader
+    blends, with the game's lighting.
+  - See-through editor brushes (hint, clip, trigger, nodraw...) are drawn one-sided as
+    MOHRadiant draws them: looking through a hint brush no longer shows the letters of
+    its far side. With the camera inside such a brush, its inner sides are drawn instead.
+  - Caulk is pushed half a unit back in depth, so it no longer sparkles along the corner
+    where a wall meets the caulked end of the next brush.
+  - With Fog on, everything past the fog's far end is the fog colour.
+  - A brush entity whose faces are all filtered out (a trigger with Triggers off) loses
+    its label, setsize box and target links too.
+  - The FOV slider runs from 60 to 150 (was 30 to 120).
+  - A shader's picture is the last opaque stage it draws (the stage that covers the
+    surface), not its first stage: frenchfloor_wood1 showed `poster4` from its
+    environment-map stage. The cached shader index is rebuilt for this.
+  - The decompiler finds a face's draw surface through a spatial index instead of a scan
+    of every surface on the plane, so large maps decompile much faster. The output is the
+    same apart from rare ties between two equally good surfaces.
+- Map Viewer page rev 3 (`MAP_VIEWER_REV` 3, `MAP_VIEWER_REV_REQUIRED` 3,
+  `INDEX_VERSION` 5):
+  - With the game's lighting, a surface's picture is drawn the way its shader stage
+    draws it in game: the stage's `tcMod scale` (`RB_CalcScaleTexCoords`; the Omaha sea
+    was one stretched tile, it now repeats 16 x 22 times as in game), its `alphaGen`
+    (`const`, the `sCoord` / `tCoord` fades of `RB_CalcAlphaFromTexCoords` that make the
+    shoreline see-through toward the beach, vertex alpha), and `depthWrite` on a blended
+    stage (the surf hides what is under it).
+  - See-through surfaces are drawn in layers: the game's own (water, glass, glows), then
+    the models', then the editor's volumes (triggers, clips, hints, nodraw). Water used
+    to be drawn after the triggers and painted over every trigger face above it.
+  - The picture a shader shows: a stage that multiplies its texture by the lightmap
+    (`map X` / `nextBundle` / `map $lightmap`) is the surface's own texture, then the
+    stage drawing the `qer_editorimage` (unless it is a glow added on top), then the last
+    solid stage; reflection stages (`tcGen environment`) count only when nothing else is
+    left. Snow shaders that draw a sparkle layer first now show their snow, and
+    cathedral walls, bookcases and broken windows no longer show their gold or sky
+    reflection map. `clampmapx` / `clampmapy` stages are read too.
+- Map Viewer page rev 4 (`MAP_VIEWER_REV` 4, `MAP_VIEWER_REV_REQUIRED` 4): lines are
+  hidden behind walls. X-ray used to draw every setsize box, target link and facing
+  arrow through walls, and the link arrowheads were painted over the 3D view, so a wall
+  in front of a group of path nodes showed a web of lines and triangles. Now only the
+  selection's own outline, box, links and arrow show through walls (with X-ray on), and
+  the arrowheads are drawn in 3D, camera-facing, hidden by walls like their lines.
+  Labels still show through walls.
+- Map Viewer page rev 5 (`MAP_VIEWER_REV` 5, `MAP_VIEWER_REV_REQUIRED` 5): point-entity
+  boxes are coloured the way MOHRadiant's camera colours them (read from its brush
+  drawing in `mohradiant.exe`):
+  - `info_pathnode` looks as it does in MOHRadiant, which has no definition for the
+    class ("Not found in source.") and draws its stand-in: a dark green 16-unit cube on
+    the origin. The viewer drew the magenta 32 x 32 x 32 box from entdefs' navigate.cpp.
+    A node with a `"targetname"` is pink (MOHRadiant turns an `info_path...` class's
+    colour inside out when it has one; `"target"` and `"$targetname"` don't count), and
+    a `"_color"` key paints the box flat (the cyan friendlynodes).
+  - A path node with AI flags gets MOHRadiant's thick outline by its spawnflags, first
+    match: COVER green, CORNER_LEFT yellow, CORNER_RIGHT yellow-green, SNIPER red, CRATE
+    dark red, CONCEALMENT blue, DUCK cyan; black for flags that don't go together
+    (`IsValidPathnode` in navigate.cpp, whose `ai_editmode` node colours are the same).
+    A node's info card says which colours it has and why.
+  - Box sides are shaded as MOHRadiant shades them (`SetShadeForPlane`: 0.6 facing x,
+    0.8 facing y, 1.0 up and down), and any other point entity with a `"_color"` key
+    (`info_waypoint`, `script_origin`...) is drawn flat in that colour.
+- Map Viewer page rev 6 (`MAP_VIEWER_REV` 6, `MAP_VIEWER_REV_REQUIRED` 6):
+  - Every point entity whose class is defined in the game code (code/*.cpp in
+    entdefs.pk3) is drawn as MOHRadiant draws it, as its "Not found in source." stand-in:
+    a dark green 16-unit cube on the origin. Player starts were tall 32 x 32 x 96 boxes;
+    script origins, spline paths, grenade hints and waypoints change the same way.
+    Classes defined in a .tik keep their definition's colour and box.
+  - Facing arrows are MOHRadiant's (`Brush_DrawFacingAngle`): white, 4 pixels wide, from
+    the middle of the box out to 2.5 times its half-width, with a head that opens up and
+    down. They were thin lines in the entity's colour from the floor.
+  - A legend: `L` in the viewer (or the new "L legend" chip next to "H hotkeys", or the
+    Legend button in the info card of a node), and Help > Legend (`F2`) in the launcher.
+    It lists the path-node box and border colours, the entity markers, and every editor
+    surface (caulk, the clips, trigger, hint, vis, skip, areaportal, origin, nodraw,
+    ladder, sky, liquids...) with its picture and what it does in game. Both read one
+    table, `LEGEND` in mohaa_map_view.py; the page carries its editor pictures.
+  - The viewer's theme key moved from `L` to `T`.
+- Map Viewer page rev 7 (`MAP_VIEWER_REV` 7, `MAP_VIEWER_REV_REQUIRED` 7): hovering a
+  model or a marker outlines its box in the accent colour, as hovering a brush outlines
+  its edges; until now only a click showed an entity's (red) box. Selecting what is
+  under the mouse takes its hover outline away. The legend lists the hover outline too.
+- Map Viewer page rev 8 (`MAP_VIEWER_REV` 8, `MAP_VIEWER_REV_REQUIRED` 8): the sky.
+  - The game's sky is drawn behind everything, as `RB_StageIteratorSky` draws it
+    (`qglDepthRange(1, 1)` in `tr_sky.c`), so whatever is behind a sky brush shows
+    through it, as in game. It used to be painted on the sky brush and hide what was
+    behind. The sky box now also shows with Full Brightness on and on `.map` pages; it
+    used to need the game's lighting.
+  - Simple Sky (`K`, a new button beside Full Brightness, off by default) draws sky
+    brushes as MOHRadiant does: solid, with the shader's picture tiled. Editor look turns
+    it on, In-game look off; it is remembered with the other options.
+  - The Sky filter has a key, `Ctrl+K`, and shows or hides sky brushes completely.
+  - Where only the game's sky is under the mouse, a click (or the hover outline) goes to
+    the nearest sky brush.
+  - Sky shaders use their editor picture (`qer_editorimage`, else the image named after
+    the shader, such as `textures/sky/africanight.jpg`) instead of their first stage's
+    picture. Africanight's is a dark additive cloud layer, so its sky brushes looked
+    black.
+  - The decompiler writes `0 0 0 1 1` on sky faces, as EA's sources do. A sky polygon's
+    texture coordinates are laid out on their own, not projected from the face, so the
+    fitted alignment was meaningless (`19 58 180 172.624994 -59.500001`).
+  - The legend's Sky row and the launcher's shortcut list (`F1`) list `Ctrl+K` and `K`.
+- Map Viewer page rev 9 (`MAP_VIEWER_REV` 9, `MAP_VIEWER_REV_REQUIRED` 9):
+  - Editor look also turns Full Brightness on (MOHRadiant is always full bright), and
+    In-game look turns it off (the game's own lighting), as they already did Simple Sky.
+  - Ctrl+Alt+click selects the whole path through an entity: everything its `"target"`
+    chain leads to and everything whose target leads to it, so a path node in the middle
+    of a chain selects the whole chain (forks and loops included; Shift adds the path to
+    the selection). The Links section of an entity's info card offers the same as a link.
+  - Ctrl+Shift+click shows the clicked face's texture, as middle-click does (in Radiant,
+    Ctrl+Shift+click selects a single face). Middle-click didn't work on Windows,
+    although it does in Chromium tests. A likely cause is the mouse moving a few pixels
+    as the wheel is pressed, which turned the click into a middle-drag, so a middle
+    click now has 10 pixels of slack instead of 4. Ctrl+Shift+click on a model or
+    marker, which has no face, says so instead of showing "Nothing selected".
+  - The Radiant-look camera hints show `Shift` fast and `Ctrl` grid step, like Free-look's
+    `Shift` fast; both hint blocks were regrouped so no line wraps in the middle.
+  - The shortcut list (`H`), the launcher's (`F1`) and the Radiant-look button's tooltip
+    list the new clicks and `Shift`.
+- Map Viewer page rev 10 (`MAP_VIEWER_REV` 10, `MAP_VIEWER_REV_REQUIRED` 10): looking
+  around follows the camera tilt (Q / E), as the Model Viewer's free-look does. Mouse
+  look, the arrow keys, A / Z and the Radiant-look right-drag turn used to change yaw and
+  pitch as if the camera weren't tilted, so dragging down on a tilted screen looked off to
+  the side (at 90 degrees of tilt, entirely sideways). The movement is now rotated by the
+  roll first (`lookBy`). Space / C rise along the tilted screen's up instead of straight
+  up; A / D already strafed along its right. The camera hints in the panel list one key
+  per row, with End and a spacer row (laid out by hand in mohaa_map_page.py).
+- Damaged files and cleanup (October 2026, no page rev change; all 54 retail maps
+  decompile byte for byte as before):
+  - The `.bsp` size check counts the 29 lump entries that are always read.
+  - A brush with more sides than q3map writes (300, `MAX_BUILD_SIDES`) is skipped as
+    damaged.
+  - A face spanning more cells of the decompiler's spatial index than there are filled
+    cells (a huge sky face, or an unclosed brush in a damaged file) walks the filled cells
+    instead of every empty one in its bounds.
+  - NaN or infinite numbers in a damaged `.bsp` (planes, vertices, texture fits, static
+    model origins) are skipped or written as 0; they used to crash the decompiler. A file
+    that still breaks the reader stops with "looks damaged" (exit code 5) instead of a
+    traceback, and `mohaa_bsp.py` on its own does the same (exit code 3). Checked with
+    randomly corrupted copies of retail maps.
+  - `image_dims` returns None for a damaged image header instead of raising.
+  - The page refuses a `terrainDef` past 257 x 257 points and a patch over the engine's
+    129-point grid limit (`MAX_GRID_SIZE`, `cm_patch.c`), so a crafted `.map` can't make
+    it allocate without bound. Like other broken primitives, they're listed as warnings.
+  - `.dcl` files (binary decal data) are listed as map data instead of opening in the
+    text editor, where they showed as garbage.
+  - `mohaa_map_view.py` prints its usage when run without arguments.

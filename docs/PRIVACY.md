@@ -3,9 +3,15 @@
 This is the same text shown in the program under **Help -> Privacy & Legal**.
 If you change one, change the other (`PRIVACY_TEXT` in `mohaa_launcher.py`).
 
+The Map Viewer shows the same notice under its own name, worded for its own files:
+`mohaa_map_viewer_config.json`, `output_console_map.log` and `mohaamap_*` temp folders,
+its decompiled `.map` files among the working files, and where you left the camera on
+each map among the display choices (`_PRIVACY_SWAPS` in `mohaa_map_launcher.py`, which
+must be checked whenever this text changes).
+
 ```
 PRIVACY NOTICE  --  MOHAA Model Viewer
-Last updated: 29 September 2026
+Last updated: 15 October 2026
 
 1. THE SHORT VERSION
    This program does not collect, transmit, sell, share or profile anything.
@@ -16,7 +22,7 @@ Last updated: 29 September 2026
    everything else happens entirely on your computer.
 
 2. WHAT IS STORED, AND WHERE
-   The program writes three things, all on your own machine, all readable and
+   The program stores four things, all on your own machine, all readable and
    deletable by you at any time:
 
      a) Settings file  --  mohaa_viewer_config.json
@@ -36,7 +42,15 @@ Last updated: 29 September 2026
      c) Working files
         A temporary workspace under your system temp folder (mohaaview_*), and
         the generated .html viewers in your chosen output folder. Both are
-        removable from File --> Clear built models / Clear %temp% files.
+        removable from File --> Clear built models / Clear %temp% files. On
+        Windows, the embedded 3D pane (Microsoft Edge WebView2) also keeps its
+        browser files in a "webview2" folder beside (a).
+
+     d) Display choices in the browser
+        The viewer pages remember a few display choices (theme, backdrop colour,
+        renderer, placement angles) in the browser's local storage. The embedded
+        pane runs in private mode and forgets them when the program closes; in
+        your own browser they stay with that browser's data for local files.
 
    None of this is transmitted anywhere. If you want it gone, delete the folders
    above; the program will simply start fresh.

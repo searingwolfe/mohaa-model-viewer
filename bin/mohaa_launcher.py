@@ -90,7 +90,7 @@ PRIVACY_SUMMARY=("This program collects nothing and sends nothing, and has no\n"
                  "telemetry. It uses the network only when you check for updates.")
 
 PRIVACY_TEXT = """PRIVACY NOTICE  --  MOHAA Model Viewer
-Last updated: 29 September 2026
+Last updated: 15 October 2026
 
 1. THE SHORT VERSION
    This program does not collect, transmit, sell, share or profile anything.
@@ -101,7 +101,7 @@ Last updated: 29 September 2026
    everything else happens entirely on your computer.
 
 2. WHAT IS STORED, AND WHERE
-   The program writes three things, all on your own machine, all readable and
+   The program stores four things, all on your own machine, all readable and
    deletable by you at any time:
 
      a) Settings file  --  mohaa_viewer_config.json
@@ -121,7 +121,15 @@ Last updated: 29 September 2026
      c) Working files
         A temporary workspace under your system temp folder (mohaaview_*), and
         the generated .html viewers in your chosen output folder. Both are
-        removable from File --> Clear built models / Clear %temp% files.
+        removable from File --> Clear built models / Clear %temp% files. On
+        Windows, the embedded 3D pane (Microsoft Edge WebView2) also keeps its
+        browser files in a "webview2" folder beside (a).
+
+     d) Display choices in the browser
+        The viewer pages remember a few display choices (theme, backdrop colour,
+        renderer, placement angles) in the browser's local storage. The embedded
+        pane runs in private mode and forgets them when the program closes; in
+        your own browser they stay with that browser's data for local files.
 
    None of this is transmitted anywhere. If you want it gone, delete the folders
    above; the program will simply start fresh.
@@ -213,6 +221,12 @@ def _write_base_dir():
         pass
     return HERE
 DATADIR=_write_base_dir()
+# The embedded pane's WebView2 needs a folder for its browser files. tkwebview2 leaves it
+# unset, so WebView2 would create "pythonw.exe.WebView2" beside Python, which fails in a
+# read-only install such as C:\Program Files and leaves the pane blank. The environment
+# variable overrides that default (Microsoft's documented WEBVIEW2_USER_DATA_FOLDER).
+if sys.platform.startswith("win"):
+    os.environ.setdefault("WEBVIEW2_USER_DATA_FOLDER",os.path.join(DATADIR,"webview2"))
 VIEWER=os.path.join(HERE,"mohaa_view.py")
 # Largest pak entry that is extracted or read into memory; bigger ones are skipped as
 # decompression bombs. Same limit as the pak index (mohaa_textures.Vfs.MAX_ENTRY).
@@ -243,7 +257,7 @@ if not os.path.exists(CONFIG):
 #  docs/ and the RUN .bat. On each release, bump VERSION here and in docs/version.txt,
 #  then tag the release commit v<version>.
 # ============================================================================
-VERSION="1.0.000"
+VERSION="1.1.000"
 VERSION_LABEL="version "+VERSION
 # GitHub coordinates for the update check. If GitHub can't be reached, the check
 # reports it and changes nothing on disk.

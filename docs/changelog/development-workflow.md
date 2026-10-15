@@ -5,9 +5,9 @@ beyond Python 3, Node.js and a headless browser.
 
 ## Before shipping a change
 
-1. **Static checks.** `python -m py_compile` (or `ast.parse`) on all three `bin/*.py`
-   files. Extract each `<script>` block from `_HTML_TEMPLATE` in `mohaa_view.py` and run
-   `node --check` on it.
+1. **Static checks.** `python -m py_compile` (or `ast.parse`) on every `bin/*.py` file.
+   Extract each `<script>` block from `_HTML_TEMPLATE` in `mohaa_view.py` and from
+   `HTML_TEMPLATE` in `mohaa_map_page.py` and run `node --check` on it.
 2. **Runtime check.** Static checks miss temporal-dead-zone errors (a `const` read before
    its line runs) and most behaviour. Build a real page and load it headlessly
    (Playwright, or jsdom with stubbed canvas/`requestAnimationFrame`); run the launcher
@@ -33,16 +33,29 @@ beyond Python 3, Node.js and a headless browser.
    - morph track resampling (`morph_track`) and driven helper bones;
    - two-sided surfaces skipping the back-face cull;
    - forced rebuilds recreating the WebView2 pane (a hash-only navigation doesn't reload).
+6. **Map Viewer.** Rebuild a spread of retail maps (single-player, `dm`, `obj`) and compare
+   the decompiled `.map` files byte for byte with the previous build: the decompiler is
+   deterministic, so every changed byte needs a reason. Load the pages headlessly, switch
+   between the In-game and Editor looks, and check the console stays clean and
+   `gl.getError()` is 0 after a draw. Spot-check:
+   - a mapper's own `.map` beside a `.bsp` is never replaced (`output_map_path`), and
+     Clear built maps touches only its own files (`_is_built_file`);
+   - see-through editor brushes drawn one-sided, and their inner sides from inside;
+   - caulk's half-unit depth push, and the sky at the far end of the depth range;
+   - looking around with the camera tilted (`lookBy`).
 
 ## Things that must change together
 
 | When you change | Also update |
 |---|---|
 | Page output or sidecar format | `VIEWER_REV` (mohaa_view.py) and `VIEWER_REV_REQUIRED` (mohaa_launcher.py) to the same number, plus a line in [CHANGELOG.md](CHANGELOG.md) |
-| A release | `VERSION` (mohaa_launcher.py) and `docs/version.txt`, then tag the commit `v<version>` (the updater downloads that tag) |
-| The privacy notice | `docs/PRIVACY.md` and `PRIVACY_TEXT` (mohaa_launcher.py), with the date |
-| Viewer hotkeys | the page's `#helpCard` table and `HOTKEYS_VIEWER` (mohaa_launcher.py) |
-| Package requirements | `docs/requirements.txt`, the RUN .bat and `python_installer_updater.bat` (`Pillow>=10.3.0`, `pywebview==4.4.1`) |
+| Map page output (mohaa_map_page.py, or the payload mohaa_map_view.py packs) | `MAP_VIEWER_REV` (mohaa_map_view.py) and `MAP_VIEWER_REV_REQUIRED` (mohaa_map_launcher.py) to the same number, plus a line in [CHANGELOG.md](CHANGELOG.md) |
+| The cached shader / entity-definition index | `INDEX_VERSION` (mohaa_map_view.py) |
+| A release | `VERSION` (mohaa_launcher.py) and `docs/version.txt`, then tag the commit `v<version>` (the updater downloads that tag). Both viewers ship together. |
+| The privacy notice | `docs/PRIVACY.md` and `PRIVACY_TEXT` (mohaa_launcher.py), with the date; then check every left-hand text in `_PRIVACY_SWAPS` (mohaa_map_launcher.py) still matches |
+| Viewer hotkeys | Model Viewer: the page's `#helpCard` table and `HOTKEYS_VIEWER` (mohaa_launcher.py). Map Viewer: its page's `#helpCard` (mohaa_map_page.py) and `HOTKEYS_VIEWER` (mohaa_map_launcher.py) |
+| The Map Viewer's legend | `LEGEND` (mohaa_map_view.py) only: the page and the launcher's Help > Legend both read it |
+| Package requirements | `docs/requirements.txt`, both RUN .bat files and `python_installer_updater.bat` (`Pillow>=10.3.0`, `pywebview==4.4.1`) |
 
 ## Engine references
 
@@ -53,7 +66,11 @@ beyond Python 3, Node.js and a headless browser.
   `cgame/cg_volumetricsmoke.cpp`, `renderergl1/tr_sprite.c`, `renderergl1/tr_shader.c`,
   `renderergl1/tr_shade_calc.c`, `renderergl1/tr_shade.c`, `skeletor/skeletorbones.cpp`,
   `tiki/tiki_parse.cpp`, `tiki/tiki_skel.cpp`, `tiki/tiki_files.cpp`, `qcommon/q_math.c`,
-  `fgame/entity.cpp`.
+  `fgame/entity.cpp`. For the Map Viewer: `qcommon/qfiles.h`, `qcommon/cm_load.c`,
+  `qcommon/cm_terrain.c`, `qcommon/cm_patch.c`, `renderergl1/tr_bsp.c`,
+  `renderergl1/tr_light.c`, `renderergl1/tr_sky.c`, `renderergl1/tr_terrain.c`,
+  `renderergl1/tr_staticmodels.cpp` and `fgame/navigate.cpp`, plus the map compiler's
+  `polylib.c` and `map.c` (q3map).
 - Single files can be read from
   `https://raw.githubusercontent.com/openmoh/openmohaa/main/code/<dir>/<file>`; a sparse
   clone is easier for searching.
@@ -78,6 +95,11 @@ the window closing instantly; run it from a Command Prompt to see the message.
 - Parenthesise every multi-command `if` body: `if X cmd1 & cmd2` runs `cmd2` unconditionally.
 - With delayed expansion on, `!` is special; `%~` in any line, even a `REM`, must be a valid
   parameter modifier.
+- `for /f` runs its command through `cmd /c`, which strips the quotes off a quoted program
+  path containing `(`, `)` or `&`. To read a program's output, run it directly, redirect it
+  to a temp file and read that back with `set /p` (`:consider` in the .bat files does).
+- Each side of a pipe runs in a new cmd without delayed expansion, so `echo !VAR! | find`
+  sees the literal text `!VAR!`. Use a `%`-expanded value, such as `%~1`, on a pipe.
 
 ## Handy tools
 

@@ -1,14 +1,15 @@
-# MOHAA Model Viewer -- runtime dependencies (Python 3.8 or newer)
+# MOHAA Model Viewer and Map Viewer -- runtime dependencies (Python 3.8 or newer)
+# Both programs need the same packages.
 #
 # Required. MOHAA textures are .tga, which only Pillow decodes; without it every
-# model loads untextured. The floor is a SECURITY floor, not a feature floor:
-# this program feeds Pillow image data straight out of .pk3 archives the user
-# downloaded, i.e. untrusted input, and older Pillow releases carry known
+# model and map loads untextured. The floor is a SECURITY floor, not a feature
+# floor: these programs feed Pillow image data straight out of .pk3 archives the
+# user downloaded, i.e. untrusted input, and older Pillow releases carry known
 # image-decoder vulnerabilities.
 Pillow>=10.3.0
 
-# Optional, Windows only -- the embedded 3D pane. Without these the launcher
-# still works and models open in the default browser instead.
+# Optional, Windows only -- the embedded 3D pane. Without these the launchers
+# still work and pages open in the default browser instead.
 # pywebview is PINNED: tkwebview2 3.5.0 drives pywebview 4.4.1's internals
 # directly and is signature-verified against that exact call.
 #
