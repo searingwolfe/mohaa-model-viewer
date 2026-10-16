@@ -15,8 +15,8 @@
 #      turrets ...), posed and textured from their .tik files
 #    - the entity definitions (colours, boxes, spawnflag names, notes) that
 #      MOHRadiant reads from /*QUAKED*/ headers
-#    - the six pictures of each sky shader's sky box, and the editor pictures the
-#      legend shows
+#    - the six pictures of each sky shader's sky box and its cloud layers, and the
+#      editor pictures the legend shows
 #    - for a .bsp, the exact bounding box the game uses for each brush entity, and
 #      the game's lighting: lightmaps, vertex light, static-prop light, light grid
 #
@@ -48,10 +48,10 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 11
+MAP_VIEWER_REV = 14
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
-INDEX_VERSION = 6
+INDEX_VERSION = 7
 
 # Default longest side of the textures embedded in the page. 256 keeps a large map's
 # page around 10-20 MB; the launcher can ask for 128 or 512.
@@ -103,9 +103,10 @@ SURFACEPARMS = {
 
 # Render-hint bits for a texture, read by the page (keep in step with TF_* there):
 # sky, nodraw, alpha-tested, alpha-blended, additive, two-sided, missing from the paks,
-# camera-facing sprite, and multiplied over what's behind (decals, "filter" blends).
-TF_SKY, TF_NODRAW, TF_ALPHATEST, TF_BLEND, TF_ADD, TF_TWOSIDED, TF_MISSING, TF_SPRITE, TF_FILTER = (
-    1, 2, 4, 8, 16, 32, 64, 128, 256)
+# camera-facing sprite, multiplied over what's behind (decals, "filter" blends), and a
+# tree's long-range stand-in sprite (see parse_shaders' "lod").
+TF_SKY, TF_NODRAW, TF_ALPHATEST, TF_BLEND, TF_ADD, TF_TWOSIDED, TF_MISSING, TF_SPRITE, TF_FILTER, TF_LOD = (
+    1, 2, 4, 8, 16, 32, 64, 128, 256, 512)
 
 # Editor-only "utility" textures sorted into the groups the page filters by.
 _UTIL_NAMES = (
@@ -139,8 +140,8 @@ def _parse_stage(text):
     each texture bundle ("nextBundle" starts the second), the blend, alpha test,
     rgbGen / alphaGen, depthWrite, and the tcMods of the first bundle."""
     st = {"map0": None, "b": [None, None], "env": False, "blend": None, "cut": False,
-          "afunc": None, "rgb": None, "agen": None, "tcmod": [], "dw": False, "lm": False,
-          "anim": None}
+          "afunc": None, "rgb": None, "rgbx": None, "agen": None, "tcmod": [], "dw": False,
+          "lm": False, "anim": None}
     bundle = 0
     for line in text.splitlines():
         tok = line.split()
@@ -172,8 +173,10 @@ def _parse_stage(text):
             st["cut"] = True
             if st["afunc"] is None:
                 st["afunc"] = tok[1].lower()
-        elif kw == "rgbgen" and len(tok) > 1 and st["rgb"] is None:
-            st["rgb"] = tok[1].lower()
+        elif kw == "rgbgen" and len(tok) > 1:
+            if st["rgb"] is None:
+                st["rgb"] = tok[1].lower()
+            st["rgbx"] = [tok[1].lower()] + tok[2:]        # the whole rgbGen; the last one wins
         elif kw == "alphagen" and len(tok) > 1:
             st["agen"] = [tok[1].lower()] + tok[2:]
         elif kw in ("tcgen", "texgen") and len(tok) > 1 and bundle == 0:
@@ -271,11 +274,18 @@ def _alpha_gen(agen):
     return None
 
 
+def _atof(word):
+    """C's atof: the number at the start of a word, else 0 ("-" and "fromEntity" give 0)."""
+    m = re.match(r"\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?", word or "")
+    return float(m.group(0)) if m else 0.0
+
+
 def parse_shaders(txt, out):
     """Every shader block in one .shader script, as the map viewer needs it:
     {name_lower: {"name", "editor", "light", "map", "parms", "trans", "keywords",
                   "blend0", "alphafunc", "cull", "sky", "sprite", "lod", "anim",
-                  "lmstage", "nst", "rgb0", "ptm", "pag", "pdw"}}.
+                  "lmstage", "nst", "rgb0", "ptm", "pag", "pdw"}}, and for a sky shader
+    "skyh" (its cloud height) and "clouds" (its stages).
     "map" is the picture the game shows ("ptm", "pag", "pdw": its stage's texture
     scale, alphaGen and depthWrite). Later definitions of the same name replace
     earlier ones, as in the engine."""
@@ -355,11 +365,21 @@ def parse_shaders(txt, out):
                 info["cull"] = "none"
             elif kw == "skyparms" and len(tok) > 1:
                 info["sky"] = tok[1]
+                # the cloud height (ParseSkyParms): atof of the word, 0 or "-" meaning 512;
+                # with no word at all the shader has no cloud layers
+                info["skyh"] = (_atof(tok[2]) or 512.0) if len(tok) > 2 else 0.0
             elif (kw == "deformvertexes" and len(tok) > 1 and tok[1].lower().startswith("autosprite")) \
                     or kw == "spritegen":
                 info["sprite"] = True
         info["nst"] = len(stages)
         sts = [_parse_stage(st) for st in stages]
+        # A sky shader's stages are its cloud layers, drawn over the far box
+        # (tr_sky.c R_BuildCloudData). Kept as written; sky_clouds() turns them into what
+        # the page draws.
+        if info["sky"] is not None and info.get("skyh"):
+            info["clouds"] = [{"pic": st["map0"], "blend": st["blend"], "afunc": st["afunc"],
+                               "rgb": st["rgbx"], "agen": st["agen"], "tcmod": st["tcmod"]}
+                              for st in sts if st["map0"] and not st["map0"].startswith(("$", "*"))]
         # A tree's long-range stand-in: an autoSprite2 card that fades in with distance
         # (alphaGen oneMinusDistFade) as the tree's own leaf cards fade out (plain distFade).
         # The Model Viewer's isLodSprite uses the same pairing.
@@ -421,6 +441,8 @@ def shader_render_bits(info):
         bits |= TF_TWOSIDED
     if info["sprite"]:
         bits |= TF_SPRITE
+    if info.get("lod"):
+        bits |= TF_LOD
     return bits, cont, surf
 
 
@@ -455,12 +477,13 @@ def util_group(name, cont, surf):
 # ==============================================================================
 # One table for the page's legend (L) and the launcher's Help > Legend (F2). A row's
 # "sw" says how its swatch is drawn: "node" (a path node: "fill", and "line" for its
-# border), "box" (a filled square), "diamond" (a light), "arrow" (a facing arrow),
-# "link" (a target link), "label", "sel" (the selection tint), "hover" (the outline of
-# what is under the mouse) or "tex" (the editor picture of the shader "tex"; "fill"
-# stands in when the paks don't have it). "key" is the viewer's toggle for that group.
-# {"sub": text} is a small heading inside a section. The path-node colours follow
-# radiantLook / NODE_OUTLINES in the page, which draw them.
+# border), "box" (a filled square), "diamond" (a light), "wire" (a setsize box: a wire
+# cube in "fill"), "arrow" (a facing arrow), "link" (a target link), "label", "sel" (the
+# selection tint), "hover" (the outline of what is under the mouse) or "tex" (the editor
+# picture of the shader "tex"; "fill" stands in when the paks don't have it). "key" is
+# the viewer's toggle for that group. {"sub": text} is a small heading inside a section.
+# Each section is one column in both legends. The path-node colours follow radiantLook /
+# NODE_OUTLINES in the page, which draw them.
 LEGEND = [
     {"title": "AI path nodes (info_pathnode)",
      "note": "Coloured the way MOHRadiant colours them. Select a node and press N to see which of these "
@@ -508,6 +531,9 @@ LEGEND = [
           "desc": "A point entity with a \"_color\" key is painted flat in that colour."},
          {"sw": "diamond", "fill": [1, 0.92, 0.6], "name": "Light", "key": "Alt+0",
           "desc": "A light entity, in its light colour."},
+         {"sw": "wire", "fill": [0.8, 0.55, 1], "name": "Setsize box", "key": "4",
+          "desc": "An entity's bounding box (its origin plus setsize), in the entity's colour. The "
+                  "selection always shows its own, in red."},
          {"sw": "arrow", "name": "Facing arrow", "key": "5",
           "desc": "Which way an entity with an angle faces, drawn as MOHRadiant draws it."},
          {"sw": "link", "fill": [0.6, 0.75, 1], "name": "Target link", "key": "7",
@@ -570,30 +596,52 @@ LEGEND = [
          {"sw": "tex", "tex": "textures/common/origin", "name": "origin",
           "desc": "The pivot of a door or other moving brush entity."},
          {"sw": "tex", "tex": "textures/common/nodraw", "name": "nodraw",
-          "desc": "Not drawn and not solid. Rain, patharea and the other editor-only surfaces share its "
-                  "Show button."},
+          "desc": "Not drawn and not solid. The Nodraw button hides it, with rain, ladder, patharea "
+                  "and commontreeshadow."},
+         {"sw": "tex", "tex": "textures/common/rain", "name": "rain",
+          "desc": "The volume of a func_rain entity: the game makes it rain inside it. Not drawn, not "
+                  "solid."},
+         {"sw": "tex", "tex": "textures/misc_outside/commontreeshadow", "name": "commontreeshadow",
+          "desc": "A flat picture of a tree, put beside a tree model so the tree casts a shadow when the "
+                  "map is lit. It's a world brush, not part of the tree: the game never draws it, and the "
+                  "Nodraw button hides it."},
          {"sw": "tex", "tex": "textures/common/ladder", "name": "ladder",
           "desc": "A climbable surface."},
          {"sw": "box", "fill": [0.45, 0.62, 0.86], "name": "Sky", "key": "Ctrl+K",
-          "desc": "The game draws its sky box behind everything there, so whatever is behind a sky "
-                  "brush shows through it. Simple Sky (K) draws them solid and tiled, as MOHRadiant "
-                  "does. (caulksky has no sky box; skyportal shows the portal sky.)"},
+          "desc": "The game draws its sky box, and the sky's cloud layers, behind everything there, "
+                  "so whatever is behind a sky brush shows through it. Simple Sky (K) draws them "
+                  "solid and tiled, as MOHRadiant does."},
+         {"sw": "tex", "tex": "textures/common/caulksky", "name": "caulksky", "key": "Ctrl+K",
+          "desc": "Sky with no sky box. The game clears it to the fog colour (worldspawn "
+                  "farplane_color), or leaves the last frame's picture there on a map without fog. "
+                  "The viewer draws it in farplane_color, or the backdrop when there is none."},
          {"sw": "box", "fill": [0.18, 0.38, 0.62], "name": "Water, slime, lava, fog", "key": "Alt+5",
           "desc": "Liquid and fog volumes."},
          {"sw": "box", "fill": [0.68, 0.83, 0.88], "name": "Translucent", "key": "Alt+4",
           "desc": "Glass, decals, light beams and other see-through surfaces."},
          {"sw": "box", "fill": [0.55, 0.52, 0.48], "name": "Detail brushes", "key": "Ctrl+D",
           "desc": "Brushes left out of the visibility tree (trim, props)."},
+         {"sw": "box", "fill": [0.5, 0.5, 0.5], "name": "Not in the paks",
+          "desc": "A texture the loaded paks don't have, drawn flat grey. The Textures list marks it "
+                  "(missing)."},
      ]},
 ]
 
 
 def _legend_thumb(data, size):
     """A size x size PNG of an editor picture for the legend, in the cache's
-    (mime, bytes, average colour, has alpha) form."""
+    (mime, bytes, average colour, has alpha) form. A cut-out picture (an alpha channel
+    with both see-through and solid parts, such as the tree in commontreeshadow) is laid
+    on grey, so its shape shows."""
     from PIL import Image
     im = Image.open(io.BytesIO(data))
     im.load()
+    if im.mode in ("RGBA", "LA", "PA") or "transparency" in im.info:
+        rgba = im.convert("RGBA")
+        lo, hi = rgba.getchannel("A").getextrema()
+        if lo < 128 <= hi:
+            im = Image.new("RGBA", rgba.size, (110, 110, 110, 255))
+            im.alpha_composite(rgba)
     im = im.convert("RGB").resize((size, size), Image.BILINEAR)
     avg = tuple(round(c / 255.0, 3) for c in im.resize((1, 1), Image.BOX).getpixel((0, 0)))
     buf = io.BytesIO()
@@ -621,7 +669,7 @@ def legend_thumbs(vfs, shaders, cache=None, size=48):
                     break
             if not img:
                 continue
-            ckey = "legend|%s|%s|%d" % (vfs.pak_of(img), img, size)
+            ckey = "legend2|%s|%s|%d" % (vfs.pak_of(img), img, size)
             val = cache.get(ckey) if cache else None
             if val is None:
                 data = vfs.read(img)
@@ -1204,7 +1252,7 @@ class ModelBuilder:
         self.index = {}
         self.total_verts = 0
         self.failed = {}
-        self.lod_left_out = 0       # tree stand-in surfaces dropped (see _build)
+        self.lod_models = 0         # models with a long-range stand-in sprite (see _build)
 
     def get(self, path):
         """The model's number in the page, building it the first time; -1 if it can't be
@@ -1357,12 +1405,6 @@ class ModelBuilder:
                     if pat == "all" or (pat.endswith("*") and sname.startswith(pat[:-1])):
                         shader = sh
                         break
-            # A tree's long-range stand-in card: the game only fades it in far away, as the
-            # tree's own leaves fade out, and the page draws the whole tree at any distance.
-            sinfo = self.texs.info(shader or sname, model=True)
-            if sinfo and sinfo.get("lod"):
-                self.lod_left_out += 1
-                continue
             first = len(idx)
             base = nverts
             for weights, (u, v) in zip(s["verts"], s["uvs"]):
@@ -1387,6 +1429,11 @@ class ModelBuilder:
             surfs.append([first, len(idx) - first, ti, sname, base, nverts - base, eo])
         if not idx:
             raise ValueError("no triangles")
+        # A tree's long-range stand-in (TF_LOD): the game fades it in far away as the tree's
+        # own surfaces fade out. The page leaves it out, or with Simple models on draws it
+        # alone, in place of the tree.
+        if any(self.texs.entries[sf[2]]["f"] & TF_LOD for sf in surfs):
+            self.lod_models += 1
         mins = [min(pos[k::3]) for k in range(3)]
         maxs = [max(pos[k::3]) for k in range(3)]
         self.total_verts += nverts
@@ -1398,38 +1445,149 @@ class ModelBuilder:
 
 
 # ==============================================================================
-#  Sky boxes (.bsp and .map)
+#  Sky boxes and cloud layers (.bsp and .map)
 # ==============================================================================
 SKY_SUFFIXES = ("rt", "bk", "lf", "ft", "up", "dn")    # tr_shader.c ParseSkyParms
 SKY_MAX_DIM = 512
+SKY_MAX_CLOUDS = 4          # cloud layers the page draws per sky (retail skies have one)
+
+# blendFunc factors, numbered as the page's sky shader takes them (tr_shader.c
+# NameToSrcBlendMode / NameToDstBlendMode: a name that side doesn't take counts as GL_ONE)
+_SRC_BLEND = {"gl_zero": 0, "gl_one": 1, "gl_dst_color": 4, "gl_one_minus_dst_color": 5,
+              "gl_src_alpha": 6, "gl_one_minus_src_alpha": 7, "gl_dst_alpha": 8,
+              "gl_one_minus_dst_alpha": 9, "gl_src_alpha_saturate": 10}
+_DST_BLEND = {"gl_zero": 0, "gl_one": 1, "gl_src_color": 2, "gl_one_minus_src_color": 3,
+              "gl_src_alpha": 6, "gl_one_minus_src_alpha": 7, "gl_dst_alpha": 8,
+              "gl_one_minus_dst_alpha": 9}
+_SIMPLE_BLENDS = {"add": [1, 1], "filter": [4, 0], "blend": [6, 7], "alphaadd": [6, 1]}
+_WAVE_FUNCS = ("sin", "square", "triangle", "sawtooth", "inversesawtooth", "noise")
+
+
+def _blend_factors(blend):
+    """[source, destination] factors of a stage's blendFunc; [1, 0] (drawn solid) when it
+    has none, or only one word that isn't a shorthand (ParseStage then sets no blend)."""
+    words = (blend or "").split()
+    if not words:
+        return [1, 0]
+    if words[0] in _SIMPLE_BLENDS:
+        return list(_SIMPLE_BLENDS[words[0]])
+    if len(words) < 2:
+        return [1, 0]
+    return [_SRC_BLEND.get(words[0], 1), _DST_BLEND.get(words[1], 1)]
+
+
+def _wave(words):
+    """A waveform as ParseWaveForm reads it: [function, base, amplitude, phase, frequency]."""
+    func = words[0].lower() if words else "sin"
+    nums = [_atof(w) for w in words[1:5]]
+    return [func if func in _WAVE_FUNCS else "sin"] + nums + [0.0] * (4 - len(nums))
+
+
+def _cloud_rgb(rg):
+    """A cloud stage's rgbGen as the page works it out each frame: ["c", r, g, b] for a
+    constant (identity, identityLighting and the kinds a sky has nothing for are white;
+    r_overBrightBits is 0 in MOHAA, so identityLight is 1), ["w", wave] or
+    ["cw", r, g, b, wave] (colorWave)."""
+    kind, args = (rg[0], rg[1:]) if rg else ("", [])
+    if kind in ("const", "constant", "colorwave"):
+        v = [max(0.0, min(1.0, _atof(w))) for w in args[:3]]
+        v += [0.0] * (3 - len(v))
+        return ["c"] + v if kind != "colorwave" else ["cw"] + v + _wave(args[3:])
+    if kind == "wave":
+        return ["w"] + _wave(args)
+    return ["c", 1.0, 1.0, 1.0]
+
+
+def _cloud_alpha(ag):
+    """alphaGen: ["c", a] for a constant (none at all is 1), ["w", wave], or ["sky"] /
+    ["1sky"] for the worldspawn's "skyalpha" (or one minus it)."""
+    kind, args = (ag[0], ag[1:]) if ag else ("", [])
+    if kind in ("const", "constant"):
+        return ["c", max(0.0, min(1.0, _atof(args[0]) if args else 0.0))]
+    if kind == "wave":
+        return ["w"] + _wave(args)
+    if kind == "skyalpha":
+        return ["sky"]
+    if kind == "oneminusskyalpha":
+        return ["1sky"]
+    return ["c", 1.0]
+
+
+def _cloud_tcmods(mods):
+    """A stage's tcMods, in order, with their numbers (tr_shader.c ParseTexMod). The
+    random part of scroll and offset is left out; turb (it wobbles by world position),
+    bulge (it changes nothing in the engine) and the entity-driven kinds are dropped."""
+    out = []
+    for m in mods:
+        kind, args = m[0], [_atof(w) for w in m[1:]]
+        if kind in ("scroll", "offset", "scale") and len(args) >= 2:
+            out.append([kind, args[0], args[1]])
+        elif kind == "rotate" and args:
+            out.append(["rotate", args[0], args[1] if len(args) > 1 else 0.0,
+                        args[2] if len(args) > 2 else 1.0])
+        elif kind == "transform" and len(args) >= 6:
+            out.append(["transform"] + args[:6])
+        elif kind in ("stretch", "wavetrans", "wavetrant") and len(m) > 1:
+            out.append([kind] + _wave(m[1:]))
+    return out
+
+
+def sky_clouds(info, texs, blobs):
+    """A sky shader's cloud layers for the page, or None: {"h": cloud height, "s":
+    [{"b": picture, "m": its type, "f": [source factor, destination factor, alphaFunc
+    (1 GT0, 2 GE128, 3 LT128)], "rg": rgbGen, "ag": alphaGen, "tm": tcMods}, ...]}.
+    A stage whose picture isn't in the paks is left out."""
+    layers = []
+    for cs in (info or {}).get("clouds") or ():
+        img = texs._find(cs["pic"])
+        if img is None and texs.vfs is not None:
+            img = texs.vfs.find_texture_by_name(cs["pic"])
+        if img is None:
+            continue
+        src, dst = _blend_factors(cs["blend"])
+        af = {"gt0": 1, "ge128": 2, "lt128": 3}.get(cs["afunc"] or "", 0)
+        val = texs._encode(img, bool(af) or src in (6, 7, 10) or dst in (6, 7))
+        if not val:
+            continue
+        layers.append({"b": blobs.add(val[1]), "m": val[0], "f": [src, dst, af],
+                       "rg": _cloud_rgb(cs["rgb"]), "ag": _cloud_alpha(cs["agen"]),
+                       "tm": _cloud_tcmods(cs["tcmod"])})
+        if len(layers) == SKY_MAX_CLOUDS:
+            break
+    return {"h": info["skyh"], "s": layers} if layers else None
 
 
 def sky_boxes(texs, blobs, vfs):
-    """The six pictures of each sky shader's far box (skyParms <env> ...), for the
-    game's sky in the page (.bsp and .map alike). Each sky texture entry that has a box
-    gets its index as "sb"."""
-    skies = []
+    """The game's sky for the page (.bsp and .map alike): the six pictures of each sky
+    shader's far box (skyParms <env> ...) and its cloud layers. A sky texture entry with a
+    box gets its index as "sb", one with cloud layers its index as "cl"."""
+    skies, clouds = [], []
     if vfs is None:
-        return skies
+        return skies, clouds
     for te in texs.entries:
-        if not (te.get("f", 0) & TF_SKY) or not te.get("sky") or te["sky"] == "-":
+        if not (te.get("f", 0) & TF_SKY) or not te.get("sky"):
             continue
-        faces = []
-        for suf in SKY_SUFFIXES:
-            p = vfs.find_texture("%s_%s" % (te["sky"], suf))
-            data = vfs.read(p) if p else None
-            try:
-                enc = encode_image(data, SKY_MAX_DIM, False) if data else None
-            except Exception:
-                enc = None
-            if not enc:
-                faces = None
-                break
-            faces.append(blobs.add(enc[1]))
-        if faces:
-            te["sb"] = len(skies)
-            skies.append(faces)
-    return skies
+        if te["sky"] != "-":
+            faces = []
+            for suf in SKY_SUFFIXES:
+                p = vfs.find_texture("%s_%s" % (te["sky"], suf))
+                data = vfs.read(p) if p else None
+                try:
+                    enc = encode_image(data, SKY_MAX_DIM, False) if data else None
+                except Exception:
+                    enc = None
+                if not enc:
+                    faces = None
+                    break
+                faces.append(blobs.add(enc[1]))
+            if faces:
+                te["sb"] = len(skies)
+                skies.append(faces)
+        layers = sky_clouds(texs.info(te["n"]), texs, blobs)
+        if layers:
+            te["cl"] = len(clouds)
+            clouds.append(layers)
+    return skies, clouds
 
 
 # ==============================================================================
@@ -1761,7 +1919,7 @@ def build(src, args):
                 model_of[str(ei)] = mi
         log("models: %d placed, %d different (%d vertices) in %.1f s"
             % (len(model_of), len(mb.models), mb.total_verts, time.time() - t0)
-            + (", %d tree stand-in sprites left out" % mb.lod_left_out if mb.lod_left_out else ""))
+            + (", %d with a sprite version (Simple models)" % mb.lod_models if mb.lod_models else ""))
         if mb.failed:
             items = sorted(mb.failed.items())
             for p, why in items[:15]:
@@ -1783,8 +1941,11 @@ def build(src, args):
                             "br": bool(d.get("brush")), "f": list(d.get("flags") or ()),
                             "d": (d.get("desc") or "")[:6000], "s": d.get("source", ""),
                             "t": d.get("tik", "")}
-    # ---- the sky boxes (the game's sky, .bsp and .map) ---------------------------------
-    skies = sky_boxes(texs, blobs, vfs)
+    # ---- the game's sky: sky boxes and cloud layers (.bsp and .map) -------------------------
+    skies, clouds = sky_boxes(texs, blobs, vfs)
+    if clouds:
+        ncl = sum(len(c["s"]) for c in clouds)
+        log("sky: %d cloud layer%s" % (ncl, "" if ncl == 1 else "s"))
     # ---- in-game lighting (a .bsp only) ------------------------------------------------
     lit = None
     if bsp is not None:
@@ -1801,7 +1962,7 @@ def build(src, args):
               "src": blobs.add(text.encode("latin-1", "replace")),
               "tex": texs.entries, "models": mb.models if mb else [], "modelOf": model_of,
               "defs": defs, "editorFlags": {str(k): v for k, v in ME.EDITOR_FLAGS.items()},
-              "bsp": bspinfo, "lit": lit, "sky": skies, "legend": legend}
+              "bsp": bspinfo, "lit": lit, "sky": skies, "clouds": clouds, "legend": legend}
     t0 = time.time()
     b64, raw_len, gz_len = pack_payload(header, blobs)
     info = {"name": stem, "path": vpath, "kind": kind, "entities": len(ents), "brushes": nbrush,

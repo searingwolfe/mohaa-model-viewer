@@ -91,6 +91,19 @@ run at once.
   drawn instead (culling flipped), as MOHRadiant shows them.
 - **Caulk** is pushed half a unit back along each vertex's line of sight, so it loses
   every depth tie against the walls it touches (no sparkles along corners).
+- **Nodraw.** A texture the game never draws that is in no other editor group (caulk,
+  clips, triggers, hints...) goes with the Nodraw button and the In-game look: rain (the
+  volume of a `func_rain` entity), patharea, ladders, and the flat tree pictures some maps stand beside their trees
+  (`misc_outside/commontreeshadow`), which only give the tree its shadow when the map is
+  lit. Those are world brushes, not part of the tree, so hiding a tree leaves them.
+- **Trees.** A tree model carries a sprite version: a card of the whole tree
+  (`deformVertexes autoSprite2`, `alphaGen oneMinusDistFade`) that the game fades in far
+  away as the tree's own surfaces fade out (`alphaGen distFade`; `R_AddStaticModelSurfaces`
+  skips a surface outside its fade range). The page draws the whole tree without the card.
+  Simple models (`M`) draws the card alone instead, as the game shows a tree far away,
+  turned in the vertex shader the way `Autosprite2Deform` turns it: each quad about its
+  long axis, to face the camera's forward direction, so the tree stays upright. The build
+  marks those shaders `TF_LOD`. Bushes and other models without a card don't change.
 - **Lines** (setsize boxes, target links and their arrowheads, facing arrows) are
   hidden behind walls like everything else. With X-ray on, only the selection's own
   outline, box, links and arrow show faintly through walls. Labels are always drawn on
@@ -106,6 +119,20 @@ run at once.
   (`qer_editorimage`, else the image named after the shader). Editor look turns it on
   together with Full Brightness (MOHRadiant is always full bright), In-game look turns
   both off. The Sky filter (`Ctrl+K`) hides sky brushes altogether.
+- **Clouds.** A sky shader's stages are its cloud layers (the drifting clouds of
+  `textures/sky/africanight`, on m1l1, m1l2a/b, m6l3b and mohdm7), drawn over the far
+  box as `R_BuildCloudData` draws them: each pixel's direction is followed out to a
+  sphere 4096 units in radius whose top is the `skyParms` cloud height above the eye,
+  and the arc cosines of that point's x and y are the texture coordinates
+  (`R_InitSkyTexCoords`); the bottom of the box gets none. Each stage keeps its
+  blendFunc, alphaFunc, rgbGen (`const`, `wave`, `colorWave`), alphaGen (`const`,
+  `wave`, `skyAlpha` from the worldspawn's `skyalpha`) and tcMods (`scroll`, `scale`,
+  `rotate`, `transform`, `stretch`, `offset`, `wavetrans` / `wavetrant`), worked out each
+  frame from the time since the page opened and folded into one affine map; up to four
+  layers. Moving clouds redraw the view up to 30 times a second while some sky is in
+  view: an occlusion query on each frame's sky says whether any of it showed, and the
+  redrawing stops when none did until the view changes. They aren't drawn with Simple Sky
+  or Fog on, as the game's fog covers its sky.
 - **Picking** renders face / entity ids into a 1-pixel target around the cursor, then
   finds the exact point on the plane or triangle under it. What the mouse is over gets an
   outline in the accent colour: a brush's edges (all of a brush entity's brushes), or
@@ -119,7 +146,10 @@ run at once.
   follows `"target"` to the entities with that `"targetname"`, again and again, and back
   the other way to every entity whose target leads to it, so a node in the middle of a
   chain selects the whole chain, a fork or a loop included (with Shift, the path is added
-  to the selection). The Links section of an entity's info card has the same as a link.
+  to the selection). The Links section of an entity's info card has the same as a link,
+  and the Selection panel's **Same kind** and **Same path** buttons do what Alt+click and
+  Ctrl+Alt+click do (Same path shows when the selected entity has a path: its target leads
+  somewhere or something targets it).
 - **Entity boxes** (the `setsize` on the info card): for a `.bsp`, the brush model's
   exact bounds around its origin; for a `.map`, the bounds of the entity's brushes around
   its origin brush, `origin` key, or brush centre. Point entities use a `setsize` key,
@@ -146,10 +176,14 @@ run at once.
   down; drawn as camera-facing bands each frame.
 - **The legend** (`L`, the "L legend" chip, or the Legend button in a node's card; Help >
   Legend / `F2` in the launcher) explains the node colours and borders, the entity
-  markers and every editor surface. The page and the launcher both read `LEGEND` in
-  mohaa_map_view.py; the build puts the editor pictures of its textures in the page
-  (48 px PNGs, cached with the textures), and the launcher reads them from the loaded
-  paks.
+  markers (setsize boxes included) and every editor surface the retail maps use, rain
+  and caulksky included, plus the flat grey of a texture missing from the paks. The page
+  and the launcher both read `LEGEND` in mohaa_map_view.py; the build puts the editor
+  pictures of its textures in the page (48 px PNGs, cached with the textures), and the
+  launcher reads them from the loaded paks. Each of its sections (AI path nodes,
+  entities, brushes and editor surfaces) is a column that scrolls on its own, so both
+  windows stay about 640 px tall (the launcher's never taller than the launcher window);
+  the mouse wheel scrolls the column under the pointer.
 - **Remembered** per browser: theme, backdrop, display / filter choices, camera
   settings, and the camera position for each map (keyed by the map's path inside the
   paks, or its file name). The embedded pane runs WebView2 in private mode, so there
@@ -211,8 +245,8 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
   below (UpFloor / DownFloor), Ctrl+arrows and Ctrl+`,` / `.` move one 64-unit grid step,
   `[` / `]` move the cubic clip.
 - `V` switches cameras, `R` returns to the player start, `B` toggles Full Brightness,
-  `K` Simple Sky, `L` opens the legend and `T` switches the theme. The FOV slider runs
-  from 60 to 150. Press `H` in the viewer for the full list.
+  `K` Simple Sky, `M` Simple models, `L` opens the legend and `T` switches the theme. The
+  FOV slider runs from 60 to 150. Press `H` in the viewer for the full list.
 
 ## Versions
 
@@ -224,19 +258,18 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
 
 ## Known limits and open work
 
-- Each shader shows one picture (above); its other stages (a second texture bundle, an
-  added glow or highlight layer), `tcMod scroll` / `rotate` / `turb`, animated maps and
-  `deformVertexes` don't play.
+- Each shader shows one picture (above), sky clouds aside; its other stages (a second
+  texture bundle, an added glow or highlight layer), `tcMod scroll` / `rotate` / `turb`,
+  animated maps and `deformVertexes` don't play.
 - Lighting: dynamic lights (lamps switched by script, muzzle flashes) and the
   `alphaGen distFade` fade-out aren't drawn. Portal skies (`textures/common/skyportal`
   with a `script_skyorigin`) show the plain sky box; no retail Allied Assault map uses one.
-- Trees are drawn whole at any distance. A tree model's long-range stand-in (a card of
-  the whole tree with `deformVertexes autoSprite2` and `alphaGen oneMinusDistFade`, which
-  the game fades in far away as the leaf cards fade out) is left out of the page, so a
-  tree never shows twice; the Model Viewer's Tree Sprite toggle still shows it.
+- Trees don't change with distance: they are drawn whole, or as their sprite version
+  with Simple models on (above), never faded from one to the other as in game.
 - A `.map` has no compiled light, so it is always drawn full bright.
-- The sky shows its far box only. A sky shader's cloud layer (the stages drawn over the
-  box, such as the scrolling clouds of `textures/sky/africanight`) isn't drawn.
+- Clouds: `tcMod turb` and the entity-driven tcMods, `animMap` frames after the first,
+  and a second texture bundle aren't drawn; the noise waveform is a smooth stand-in for
+  the engine's.
 - `.pth`, `.min`, `.dcl` and `.vis` files are listed in the tree but not opened yet;
   `.scr` scripts open in the text editor.
 - Triangle soups in a `.bsp` (rare in MOHAA maps) are counted but not decompiled.

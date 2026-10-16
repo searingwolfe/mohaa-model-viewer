@@ -41,7 +41,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 11
+MAP_VIEWER_REV_REQUIRED = 14
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".cfg": "scr"}
@@ -88,8 +88,8 @@ HOTKEYS_VIEWER = [
     ("", "--- 3D viewer - selecting ---"),
     ("click,  Shift+click", "Select a brush or entity,  add to / remove from the selection"),
     ("Ctrl+click or N", "More info: keys, origin, setsize, targets, script lines"),
-    ("Alt+click", "Select everything of the same kind"),
-    ("Ctrl+Alt+click", "Select the whole path through an entity: its target chain, before and after it"),
+    ("Alt+click", "Select all of the same kind (Same kind button)"),
+    ("Ctrl+Alt+click", "Select the whole path through an entity, before and after it (Same path button)"),
     ("Ctrl+Shift+click", "The clicked face's texture (middle-click too)"),
     ("Backspace / Shift+H", "Hide the selection / show everything"),
     ("Ctrl+F or /", "Find (class, targetname, key, texture)"),
@@ -97,6 +97,7 @@ HOTKEYS_VIEWER = [
     ("Alt+1 ... Alt+0", "World, entities, patches, translucent, liquids, caulk, clips, paths, AI nodes, lights"),
     ("Ctrl+D / H / M / R / T / P / K", "Details, hints, models, terrain, triggers, areaportals, sky"),
     ("B,  K", "Full Brightness / the game's own lighting,  Simple Sky / the game's sky"),
+    ("M", "Simple models: trees drawn as the sprite the game shows far away"),
     ("1 - 9", "Texture, Shade, Wire, Setsizes, Arrows, Labels, Links, Fog, X-ray"),
     ("H or ?,  L", "The viewer's shortcut overlay,  the legend"),
     ("T,  \\", "Theme,  collapse the panel"),
@@ -1278,8 +1279,9 @@ class MapApp(ML.App):
 
     def _show_legend(self):
         """Help > Legend (F2): what the viewer's colours, markers and editor surfaces mean.
-        The same table as the viewer's own legend (L), LEGEND in mohaa_map_view.py; the
-        editor textures show their picture from the loaded paks."""
+        The same table as the viewer's own legend (L), LEGEND in mohaa_map_view.py: one
+        column per section (path nodes, entities, brushes and editor surfaces), each
+        scrolling on its own. The editor textures show their picture from the loaded paks."""
         w0 = getattr(self, "_legend_win", None)
         try:
             if w0 is not None and w0.winfo_exists():
@@ -1296,13 +1298,8 @@ class MapApp(ML.App):
         w.transient(self)
         self._legend_win = w
         if not old: w.configure(bg=ML.BG)
-        outer = tk.Frame(w, bg=ML.PANEL) if not old else tk.Frame(w)
-        cv = tk.Canvas(outer, highlightthickness=0, bd=0, **({"bg": ML.PANEL} if not old else {}))
-        sb = ttk.Scrollbar(outer, orient="vertical", command=cv.yview) if not old else tk.Scrollbar(outer, command=cv.yview)
-        cv.configure(yscrollcommand=sb.set)
-        inner = ttk.Frame(cv, style="Panel.TFrame") if not old else tk.Frame(cv)
-        cv.create_window((0, 0), window=inner, anchor="nw")
-        bg = ML.PANEL if not old else inner.cget("bg")
+        body = tk.Frame(w, bg=ML.PANEL) if not old else tk.Frame(w)
+        bg = ML.PANEL if not old else body.cget("bg")
         # the editor pictures, when the paks are loaded (24 px, from the builder's 48 px ones)
         thumbs = {}
         if self._tex_ready and self._vfs is not None:
@@ -1316,56 +1313,98 @@ class MapApp(ML.App):
             except Exception:
                 thumbs = {}
         w._thumbs = thumbs                     # Tk drops images nothing in Python refers to
+        # text wraps at about 44 characters, narrower on a small screen so the three
+        # columns still fit across it
         try:
             import tkinter.font as _tkfont
-            wrap = (_tkfont.nametofont("TkDefaultFont") if old else _tkfont.Font(font=ML.FONT_SMALL)).measure("x" * 50)
+            wrap = (_tkfont.nametofont("TkDefaultFont") if old else _tkfont.Font(font=ML.FONT_SMALL)).measure("x" * 44)
         except Exception:
-            wrap = 360
+            wrap = 320
+        wrap = max(200, min(wrap, (self.winfo_screenwidth() - 160) // 3 - 60))
 
         def label(parent, text, kind, **grid):
+            wl = wrap if kind != "title" else 0
             if old:
-                lb = tk.Label(parent, text=text, justify="left", anchor="w", font="TkDefaultFont",
-                              wraplength=wrap if kind in ("desc", "note") else 0)
+                lb = tk.Label(parent, text=text, justify="left", anchor="w", font="TkDefaultFont", wraplength=wl)
             else:
                 st = "PanelDim.TLabel" if kind in ("desc", "note", "sub") else "Panel.TLabel"
-                lb = ttk.Label(parent, text=text, style=st, justify="left",
-                               wraplength=wrap if kind in ("desc", "note") else 0)
+                lb = ttk.Label(parent, text=text, style=st, justify="left", wraplength=wl)
                 if kind in ("title", "name"): lb.configure(foreground=ML.ACCENT)
             lb.grid(sticky="w", **grid)
             return lb
 
-        # nodes and entities on the left, the brushes on the right
-        secs = MMV.LEGEND
-        cols = [secs[:-1], secs[-1:]] if len(secs) > 1 else [secs]
-        for ci, group in enumerate(cols):
-            colf = ttk.Frame(inner, style="Panel.TFrame") if not old else tk.Frame(inner)
-            colf.grid(row=0, column=ci, sticky="nw", padx=(4 if ci == 0 else 22, 6), pady=2)
+        # One column per section, each its own canvas under its title, so each scrolls on
+        # its own; a column's scroll bar shows only while it has more than fits.
+        cols = []
+        for ci, sec in enumerate(MMV.LEGEND):
+            colf = tk.Frame(body, bg=ML.PANEL) if not old else tk.Frame(body)
+            colf.grid(row=0, column=ci, sticky="nsew", padx=(0 if ci == 0 else 14, 0))
+            body.grid_columnconfigure(ci, weight=1)
+            label(colf, sec["title"].upper(), "title", row=0, column=0, columnspan=2, pady=(0, 4))
+            cv = tk.Canvas(colf, highlightthickness=0, bd=0, yscrollincrement=24, **({"bg": ML.PANEL} if not old else {}))
+            sb = ttk.Scrollbar(colf, orient="vertical", command=cv.yview) if not old else tk.Scrollbar(colf, command=cv.yview)
+            cv.configure(yscrollcommand=sb.set)
+            cv.grid(row=1, column=0, sticky="nsew"); sb.grid(row=1, column=1, sticky="ns", padx=(4, 0))
+            colf.grid_rowconfigure(1, weight=1); colf.grid_columnconfigure(0, weight=1)
+            inner = ttk.Frame(cv, style="Panel.TFrame") if not old else tk.Frame(cv)
+            cv.create_window((0, 0), window=inner, anchor="nw")
             r = 0
-            for sec in group:
-                label(colf, sec["title"].upper(), "title", row=r, column=0, columnspan=2, pady=(10 if r else 0, 2)); r += 1
-                if sec.get("note"):
-                    label(colf, sec["note"], "note", row=r, column=0, columnspan=2, pady=(0, 4)); r += 1
-                for row in sec["rows"]:
-                    if row.get("sub"):
-                        label(colf, row["sub"], "sub", row=r, column=0, columnspan=2, pady=(6, 2)); r += 1
-                        continue
-                    self._legend_swatch(colf, row, thumbs, bg).grid(row=r, column=0, sticky="nw", padx=(0, 9), pady=(3, 3))
-                    tf = ttk.Frame(colf, style="Panel.TFrame") if not old else tk.Frame(colf)
-                    tf.grid(row=r, column=1, sticky="w", pady=(1, 3))
-                    label(tf, row["name"] + (f"   [{row['key']}]" if row.get("key") else ""), "name", row=0, column=0)
-                    label(tf, row.get("desc", ""), "desc", row=1, column=0)
-                    r += 1
+            if sec.get("note"):
+                label(inner, sec["note"], "note", row=r, column=0, columnspan=2, pady=(0, 4)); r += 1
+            for row in sec["rows"]:
+                if row.get("sub"):
+                    label(inner, row["sub"], "sub", row=r, column=0, columnspan=2, pady=(6, 2)); r += 1
+                    continue
+                self._legend_swatch(inner, row, thumbs, bg).grid(row=r, column=0, sticky="nw", padx=(0, 9), pady=(3, 3))
+                tf = ttk.Frame(inner, style="Panel.TFrame") if not old else tk.Frame(inner)
+                tf.grid(row=r, column=1, sticky="w", pady=(1, 3))
+                label(tf, row["name"] + (f"   [{row['key']}]" if row.get("key") else ""), "name", row=0, column=0)
+                label(tf, row.get("desc", ""), "desc", row=1, column=0)
+                r += 1
+            cols.append((cv, sb, inner, colf))
+        body.grid_rowconfigure(0, weight=1)
         btn = tk.Button(w, text="Close", command=w.destroy) if old else ttk.Button(w, text="Close", command=w.destroy, cursor="hand2")
         btn.pack(side="bottom", pady=(0, 10))
-        outer.pack(side="top", fill="both", expand=True, padx=10, pady=(10, 6))
-        sb.pack(side="right", fill="y"); cv.pack(side="left", fill="both", expand=True)
-        inner.update_idletasks()
-        need_w, need_h = inner.winfo_reqwidth(), inner.winfo_reqheight()
-        cv.configure(width=need_w, height=min(need_h, max(300, self.winfo_screenheight() - 220)),
-                     scrollregion=(0, 0, need_w, need_h))
+        body.pack(side="top", fill="both", expand=True, padx=12, pady=(10, 8))
+        w.update_idletasks()
+        # About as tall as the viewer's own legend (640 px with the title and Close button),
+        # never taller than the launcher window, the screen or the longest column.
+        needs = []
+        for cv, sb, inner, colf in cols:
+            nw, nh = inner.winfo_reqwidth(), inner.winfo_reqheight()
+            cv.configure(width=nw, scrollregion=(0, 0, nw, nh))
+            colf.grid_columnconfigure(1, minsize=sb.winfo_reqwidth() + 4)   # room kept for the bar
+            needs.append(nh)
+        try:
+            lh = self.winfo_height() if self.winfo_height() > 200 else 820
+        except Exception:
+            lh = 820
+        extra = w.winfo_reqheight() - max(c[0].winfo_reqheight() for c in cols)
+        cap = max(240, min(lh, self.winfo_screenheight() - 80, 640) - extra)
+        h = min(cap, max(needs) if needs else cap)
+        for cv, sb, inner, colf in cols:
+            cv.configure(height=h)
+
+            def _fit(e=None, cv=cv, sb=sb, inner=inner):
+                if cv.winfo_height() + 1 >= inner.winfo_reqheight():
+                    sb.grid_remove(); cv.yview_moveto(0)
+                else:
+                    sb.grid()
+            cv.bind("<Configure>", _fit)
 
         def _wheel(e):
-            cv.yview_scroll(-1 if (getattr(e, "delta", 0) > 0 or getattr(e, "num", 0) == 4) else 1, "units")
+            # the column under the mouse pointer scrolls, whichever widget has the focus
+            try:
+                wdg = w.winfo_containing(e.x_root, e.y_root)
+            except Exception:
+                wdg = None
+            while wdg is not None and not any(wdg is c[3] for c in cols):
+                wdg = getattr(wdg, "master", None)
+            for cv, sb, inner, colf in cols:
+                if wdg is colf and cv.winfo_height() < inner.winfo_reqheight():
+                    up = getattr(e, "delta", 0) > 0 or getattr(e, "num", 0) == 4
+                    cv.yview_scroll(-3 if up else 3, "units")
+                    return "break"
         for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             w.bind(seq, _wheel)
         w.bind("<Escape>", lambda e: w.destroy()); w.bind("<F2>", lambda e: (w.destroy(), "break"))
@@ -1389,6 +1428,12 @@ class MapApp(ML.App):
                 cv.create_rectangle(3, 3, S - 4, S - 4, outline=hexc(row["line"]), width=3)
         elif sw == "diamond":
             cv.create_polygon(S // 2, 1, S - 2, S // 2, S // 2, S - 2, 1, S // 2, fill=fill, outline="#000000")
+        elif sw == "wire":                     # a setsize box: a wire cube
+            cv.create_rectangle(0, 0, S - 1, S - 1, fill="#2b333d", outline="")
+            for x0, y0, x1, y1 in ((4, 9, 17, 9), (17, 9, 17, 22), (17, 22, 4, 22), (4, 22, 4, 9),
+                                   (9, 4, 22, 4), (22, 4, 22, 17), (22, 17, 9, 17), (9, 17, 9, 4),
+                                   (4, 9, 9, 4), (17, 9, 22, 4), (17, 22, 22, 17), (4, 22, 9, 17)):
+                cv.create_line(x0, y0, x1, y1, fill=fill, width=1)
         elif sw == "arrow":
             cv.create_rectangle(0, 0, S - 1, S - 1, fill="#2b333d", outline="")
             for x0, y0, x1, y1 in ((4, 13, 21, 13), (21, 13, 16, 8), (21, 13, 16, 18)):

@@ -375,3 +375,61 @@ Changes to `python_installer_updater.bat` unless noted.
   showed side-on trunks). Model surfaces with such a shader are now left out of the page
   (19 shaders, used by 12 tree and palm models in the retail paks); the build log counts
   them. The shader index records the pairing (`lod`), hence the new `INDEX_VERSION`.
+- Map Viewer page rev 12 (`MAP_VIEWER_REV` 12, `MAP_VIEWER_REV_REQUIRED` 12):
+  - The flat tree pictures some maps stand beside their trees
+    (`textures/misc_outside/commontreeshadow`: `nodraw`, `alphashadow`, `nonsolid`) are
+    shadow casters: world brushes the map compiler uses to give a tree its shadow, never
+    drawn in game. Their texture is nodraw but in no editor group, so they were filed as
+    ordinary (detail) world brushes: they stayed in the In-game look, and no Show button
+    hid them. They aren't part of the trees, so hiding the trees left them too. A nodraw
+    texture outside the other editor groups now counts as Nodraw, so the Nodraw button
+    and the In-game look hide them (m4l1, m4l2, m5l1b and mohdm1 use them). The legend
+    has a row for them.
+  - Show > **Simple models** (`M`, beside Simple Sky, off by default, remembered) draws
+    each tree that has a sprite version as that sprite alone, as the game draws trees far
+    away. It replaces the Static models filter, which did what Models already does
+    (static props still hide with Models and Entities); a saved setting that hid only
+    static models is cleared on load. The sprite (the long-range card left out since rev
+    11) is back in the page, marked `TF_LOD`, and is drawn the way `deformVertexes
+    autoSprite2` draws it (`Autosprite2Deform` in `tr_shade_calc.c`): each quad turns about
+    its long axis to face the camera, so the tree stays upright. It is lit like the rest
+    of its static prop, can be clicked, and hides with its tree (Models, Entities, Hide).
+    Models with no sprite version (bushes, props) don't change.
+  - A selected model's red tint follows what is drawn of it: alpha-tested leaves and the
+    sprite are tinted, not their whole cards.
+  - The build log counts the models with a sprite version instead of the sprites left out.
+- Map Viewer page rev 13 (`MAP_VIEWER_REV` 13, `MAP_VIEWER_REV_REQUIRED` 13,
+  `INDEX_VERSION` 7): the sky's cloud layers. A sky shader's stages are drawn over its far
+  box as `R_BuildCloudData` draws them, so the clouds of `textures/sky/africanight` (m1l1,
+  m1l2a/b, m6l3b, mohdm7) drift across the night sky as in game. Texture coordinates
+  come from each pixel's direction met with a sphere 4096 units in radius whose top is
+  the `skyParms` cloud height above the eye (`R_InitSkyTexCoords`); each stage keeps its
+  blendFunc, alphaFunc, rgbGen, alphaGen (including `skyAlpha`) and tcMods (`scroll`,
+  `scale`, `rotate`, `transform`, `stretch`, `offset`, `wavetrans` / `wavetrant`), worked
+  out each frame. No new button: Simple Sky and Fog turn them off with the game's sky.
+  Moving clouds redraw the view up to 30 times a second while some sky is in view; an
+  occlusion query on the sky tells when none is, and the redrawing then stops until the
+  view changes. A sky without clouds uses the same program as before, so it costs nothing
+  extra. The shader index keeps the cloud height and stages, hence the new
+  `INDEX_VERSION`, and the build log counts the cloud layers.
+- Map Viewer page rev 14 (`MAP_VIEWER_REV` 14, `MAP_VIEWER_REV_REQUIRED` 14):
+  - The legend lists the editor surfaces it was missing: `common/rain`, the volume of a
+    `func_rain` entity (8 retail maps), and `common/caulksky`, sky with no sky box (15
+    maps; the game clears it to the fog colour, `RB_BeginDrawingView` in
+    `tr_backend.c`, or leaves the last frame there on a map without fog). It also has
+    rows for the setsize boxes (`4`) and for the flat grey of a texture the paks don't
+    have. A check of every texture in the 54 retail maps and the sample `.map` sources
+    found no other editor surface missing; `common/black` and `switchflat` are drawn
+    textures.
+  - Both legends (`L` and Help > Legend, `F2`) show one column per section (AI path
+    nodes, entities, brushes and editor surfaces), each scrolling on its own under its
+    title. The page's legend is 640 px tall (at most 86% of the view; a narrow window
+    stacks the columns). The launcher's opens 640 px tall at most, never taller than the
+    launcher window, and can be resized; the mouse wheel scrolls the column under the
+    pointer, and a column's scroll bar shows only while it has more than fits.
+  - A **Same path** button beside Same kind selects the whole path through the selected
+    entity, as Ctrl+Alt+click does. It shows when the entity's `"target"` leads
+    somewhere or something targets it (for several selected entities, the one last
+    clicked).
+  - The shortcut lists (`H`, and `F1` in the launcher) name the Same kind and Same path
+    buttons.

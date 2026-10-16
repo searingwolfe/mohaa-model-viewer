@@ -93,12 +93,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  #helpCard td:first-child{color:var(--accent);white-space:nowrap}
  #helpCard .grp td{color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.1em;padding-top:9px}
  #helpCard .cols{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start}
- /* The legend (L): sections flow through up to three columns. */
- #legCard{width:1180px;max-height:94%}
- #legBody{columns:3 330px;column-gap:28px}
- #legBody .sec{margin-bottom:14px;font-size:12px}
- #legBody .blk{break-inside:avoid}
- #legBody h4{margin:0 0 4px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+ /* The legend (L): one column per section (path nodes, entities, brushes), each scrolling
+    on its own under its heading. A narrow window stacks them. */
+ #legCard{width:1180px;height:min(640px,86%);display:flex;flex-direction:column;overflow:hidden}
+ #legBody{flex:1 1 auto;min-height:0;display:flex}
+ #legBody .sec{flex:1 1 0;min-width:0;overflow-y:auto;font-size:12px;padding:0 10px 0 14px;border-left:1px solid var(--line)}
+ #legBody .sec:first-child{border-left:none;padding-left:0}
+ #legBody h4{position:sticky;top:0;z-index:1;background:var(--panel);margin:0;padding:0 0 5px;
+   font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+ #legClose{flex:none;align-self:flex-start}
+ @media (max-width:820px){#legCard{height:auto}#legBody{flex-direction:column;overflow-y:auto}
+   #legBody .sec{flex:none;overflow:visible;border-left:none;padding:0 0 12px}}
  #legBody .note{color:var(--dim);font-size:11px;margin:0 0 6px}
  #legBody .sub{color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.1em;padding:8px 0 2px}
  #legBody .lrow{display:flex;gap:9px;align-items:flex-start;padding:3px 0}
@@ -217,8 +222,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
      <tr><td>click</td><td>select a brush / entity</td></tr>
      <tr><td>Shift+click</td><td>add to / remove from the selection</td></tr>
      <tr><td>Ctrl+click</td><td>select and show more info</td></tr>
-     <tr><td>Alt+click</td><td>select everything of the same kind</td></tr>
-     <tr><td>Ctrl+Alt+click</td><td>select the whole path through an entity: its "target" chain, before and after it</td></tr>
+     <tr><td>Alt+click</td><td>select everything of the same kind (Same kind button)</td></tr>
+     <tr><td>Ctrl+Alt+click</td><td>select the whole path through an entity: its "target" chain, before and after it (Same path button)</td></tr>
      <tr><td>Ctrl+Shift+click</td><td>the clicked face's texture info (middle-click too)</td></tr>
      <tr><td>N</td><td>more info on the selection</td></tr>
      <tr><td>Backspace</td><td>hide the selection</td></tr>
@@ -231,6 +236,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
      <tr><td>Ctrl+R / T / P / K</td><td>terrain &middot; triggers &middot; areaportals &middot; sky</td></tr>
      <tr><td>B</td><td>Full Brightness on / off (off = the game's own lighting)</td></tr>
      <tr><td>K</td><td>Simple Sky on / off (on = MOHRadiant's tiled sky brushes, off = the game's sky)</td></tr>
+     <tr><td>M</td><td>Simple models on / off (on = trees drawn as the sprite the game shows far away)</td></tr>
      <tr class="grp"><td colspan="2">Display</td></tr>
      <tr><td>1&ndash;9</td><td>Texture &middot; Shade &middot; Wire &middot; Setsizes &middot; Arrows &middot; Labels &middot; Links &middot; Fog &middot; X-ray</td></tr>
      <tr><td>L</td><td>legend: what the colours, markers and editor surfaces mean</td></tr>
@@ -245,7 +251,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
    <div class="card" id="legCard">
     <h3>Legend</h3>
     <div id="legBody"></div>
-    <button id="legClose" style="margin-top:4px" title="Close the legend (Esc or L)">Close</button>
+    <button id="legClose" style="margin-top:10px" title="Close the legend (Esc or L)">Close</button>
    </div>
   </div>
  </div>
@@ -266,6 +272,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
        <button class="sm" id="bInfo" title="Everything about the selection: keys, origin, setsize, targets, textures (N, or Ctrl+click)">&#9432; More info</button>
        <button class="sm" id="bFocus" title="Fly the camera to the selection (F, or double-click)">Fly to</button>
        <button class="sm" id="bSame" title="Select everything of the same kind: same class for entities, same texture for brushes (Alt+click)">Same kind</button>
+       <button class="sm" id="bPath" style="display:none" title="Select the whole path through this entity: everything its &quot;target&quot; leads to and everything that leads to it (Ctrl+Alt+click)">Same path</button>
        <button class="sm" id="bHide" title="Hide the selection (Backspace). Shift+H shows everything again.">Hide</button>
        <button class="sm" id="bClear" title="Clear the selection (Esc)">Clear</button>
      </div>
@@ -316,7 +323,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
    </div>
    <div class="sect">
      <h2>Show</h2>
-     <div class="tg" style="margin-bottom:7px"><button id="bFull" title="Full Brightness (B). Off: the map lit the way the game lights it (lightmaps, vertex light). On: every texture at full brightness, as MOHRadiant shows it.">Full Brightness<span class="k">B</span></button><button id="bSimpleSky" title="Simple Sky (K). On: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off: the game's sky box, drawn behind everything, so whatever is behind a sky brush shows through it as in game.">Simple Sky<span class="k">K</span></button></div>
+     <div class="tg" style="margin-bottom:7px"><button id="bFull" title="Full Brightness (B). Off: the map lit the way the game lights it (lightmaps, vertex light). On: every texture at full brightness, as MOHRadiant shows it.">Full Brightness<span class="k">B</span></button><button id="bSimpleSky" title="Simple Sky (K). On: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off: the game's sky box and its moving clouds, drawn behind everything, so whatever is behind a sky brush shows through it as in game.">Simple Sky<span class="k">K</span></button><button id="bSimpleMod" title="Simple models (M). On: each tree that has a sprite version is drawn as that sprite alone, the way the game draws trees far away; it turns about its upright axis to face the camera. Off: the whole tree. Models with no sprite version (bushes, props) don't change.">Simple models<span class="k">M</span></button></div>
      <div class="tg" id="filtBtns"></div>
      <div class="row" style="margin-top:7px">
        <button class="sm" id="bShowAll" title="Show every group">All</button>
@@ -355,13 +362,16 @@ const CONTENTS_DETAIL=0x8000000, CONTENTS_ORIGIN=0x1000000, CONTENTS_TRANSLUCENT
       CONTENTS_TRIGGER=0x40000000, CONTENTS_AREAPORTAL=0x8000, CONTENTS_FOG=0x40,
       CONTENTS_LIQUID=0x8|0x10|0x20, CONTENTS_CLIPS=0x10000|0x20000|0x40000|0x80000;
 // Texture render hints from the build (keep in step with TF_* in mohaa_map_view.py)
-const TF_SKY=1, TF_NODRAW=2, TF_ALPHATEST=4, TF_BLEND=8, TF_ADD=16, TF_TWOSIDED=32, TF_MISSING=64, TF_SPRITE=128, TF_FILTER=256;
+const TF_SKY=1, TF_NODRAW=2, TF_ALPHATEST=4, TF_BLEND=8, TF_ADD=16, TF_TWOSIDED=32, TF_MISSING=64, TF_SPRITE=128, TF_FILTER=256,
+      TF_LOD=512;
 // What a face or marker is, for the Show filters (one bit per filter group)
 const C_WORLD=1<<0, C_DETAIL=1<<1, C_ENTBRUSH=1<<2, C_PATCH=1<<3, C_TERRAIN=1<<4, C_CAULK=1<<5,
       C_CLIP=1<<6, C_TRIGGER=1<<7, C_HINT=1<<8, C_SKY=1<<9, C_LIQUID=1<<10, C_TRANS=1<<11,
       C_ORIGIN=1<<12, C_PORTAL=1<<13, C_NODRAW=1<<14, C_POINT=1<<15, C_LIGHT=1<<16, C_AINODE=1<<17,
       C_PATH=1<<18, C_MODEL=1<<19, C_STATIC=1<<20, C_VIS=1<<21;
 const C_ENTITIES=C_ENTBRUSH|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_MODEL|C_STATIC|C_VIS;
+// C_STATIC has no Show button of its own: it marks the static props, which get no label
+// unless selected; Models and Entities hide them.
 
 // ---- tokenizer -------------------------------------------------------------
 // Tokens: { } ( ) "quoted text" and bare words. // starts a comment that runs to
@@ -722,6 +732,9 @@ function buildScene(map,texFor,progress){
     if(cont&CONTENTS_AREAPORTAL)c|=C_PORTAL;
     if(cont&CONTENTS_LIQUID)c|=C_LIQUID;
     if(/(^|\/)vis/.test(te.n||'')&&te.g==='hint')c|=C_VIS;
+    // Any other surface the game never draws is editor-only too, such as the flat tree
+    // pictures (misc_outside/commontreeshadow) that only cast a tree's shadow.
+    if((te.f&TF_NODRAW)&&!(c&~C_TRANS))c=C_NODRAW;
     return c;
   }
   let lastTick=0, done=0;
@@ -972,6 +985,10 @@ function litOn(){return !!LIT&&!fullBright;}
 // Simple Sky on: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off:
 // the game's sky box behind everything (drawGameSky).
 let simpleSky=false;
+// Simple models on: a tree that has a sprite version (its long-range stand-in, TF_LOD) is
+// drawn as that sprite alone, the way the game draws it far away. Off: the whole tree, with
+// the sprite left out (the game fades it in only as the tree fades out). See surfOn.
+let simpleModels=false;
 
 function texKey(name){let k=String(name||'').toLowerCase().replace(/\\/g,'/');if(!k.startsWith('textures/'))k='textures/'+k;return k;}
 function hashCol(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}
@@ -1145,13 +1162,23 @@ void main(){vUV=aUV;vPos=aPos;vCol=vec4(1.0);vPick=aPick;
 // Models. With the game's lighting on (uLit), a static prop takes its baked vertex light
 // from uStatic (one texel per engine vertex, from the instance's first one in aILight.w);
 // other models take the light grid's colour for their position (aILight.rgb).
+// uAuto2 draws a tree's sprite version the way deformVertexes autoSprite2 does
+// (tr_shade_calc.c Autosprite2Deform): each quad turns about its long axis to face the
+// camera's forward direction (uFwd), so a tree's sprite stays upright. aA2 is the middle of
+// the vertex's end of the quad and half that end's length, signed for its side; aA2M the
+// quad's long axis (see auto2Data).
 const VS_MODEL=`#version 300 es
 layout(location=0) in vec3 aPos; layout(location=1) in vec2 aUV;
 layout(location=3) in vec4 aR0; layout(location=4) in vec4 aR1; layout(location=5) in vec4 aR2; layout(location=6) in float aIPick;
 layout(location=9) in float aEng; layout(location=10) in vec4 aILight;
-uniform mat4 uVP; uniform int uLit; uniform highp sampler2D uStatic;
+layout(location=11) in vec4 aA2; layout(location=12) in vec3 aA2M;
+uniform mat4 uVP; uniform int uLit; uniform highp sampler2D uStatic; uniform int uAuto2; uniform vec3 uFwd;
 out vec2 vUV; out vec3 vPos; out vec4 vCol; flat out float vPick;
 void main(){vec4 p=vec4(aPos,1.0);vec3 w=vec3(dot(aR0,p),dot(aR1,p),dot(aR2,p));
+  if(uAuto2==1){vec4 m=vec4(aA2.xyz,1.0);
+    vec3 ax=vec3(dot(aR0.xyz,aA2M),dot(aR1.xyz,aA2M),dot(aR2.xyz,aA2M)), mn=cross(ax,uFwd);
+    float l=length(mn), sc=length(vec3(aR0.x,aR1.x,aR2.x));
+    w=vec3(dot(aR0,m),dot(aR1,m),dot(aR2,m))+(l>1e-6?mn*(aA2.w*sc/l):vec3(0.0));}
   vec4 c=vec4(1.0);
   if(uLit==2&&aILight.w>=0.0){int k=int(aILight.w+aEng+0.5);c=vec4(texelFetch(uStatic,ivec2(k%4096,k/4096),0).rgb,1.0);}
   else if(uLit>0)c=vec4(aILight.rgb,1.0);
@@ -1192,15 +1219,40 @@ void main(){
 // end (RB_StageIteratorSky: qglDepthRange(1, 1)), so the sky is behind everything and
 // whatever is behind a sky brush shows through it, as in game. Paired with VS_LIT for a
 // .bsp's own sky polygons and with VS_WORLD for a .map's sky faces.
-const FS_SKY=`#version 300 es
+// Then the shader's cloud layers (R_BuildCloudData), each blended over what is there with
+// its own blendFunc; skyFS(n) is the program for n of them (0 to 4, compiled when first
+// needed, so a sky without clouds costs nothing extra). A layer's texture coordinates come
+// from where the pixel's direction meets a sphere 4096 units in radius whose top is the
+// cloud height (uCH) above the eye: the arc cosines of that point's x and y
+// (R_InitSkyTexCoords), then the stage's tcMods as one affine map (uCA / uCB rows, worked
+// out each frame in cloudStage). uCC is its rgbGen x alphaGen colour; uCF its source and
+// destination factor (0 zero, 1 one, 2 / 3 (one minus) source colour, 4 / 5 destination
+// colour, 6 / 7 source alpha, 8 / 9 destination alpha, which is always 1 here, 10
+// saturate) and alphaFunc. The bottom face of the box gets no clouds, as in FillCloudBox.
+function skyFS(n){
+  let s=`#version 300 es
 precision highp float;
 in vec3 vPos;
 uniform highp sampler2DArray uSky; uniform int uHasBox; uniform vec3 uSkyCol; uniform vec3 uEye; uniform float uClip;
 out vec4 o;
-void main(){
+`;
+  if(n)s+=`uniform float uCH; uniform sampler2D uC0,uC1,uC2,uC3;
+uniform vec3 uCA[4]; uniform vec3 uCB[4]; uniform vec4 uCC[4]; uniform ivec3 uCF[4];
+vec3 factor(int f,vec4 s,vec3 d){
+  if(f==0)return vec3(0.0); if(f==1||f==8)return vec3(1.0); if(f==2)return s.rgb; if(f==3)return 1.0-s.rgb;
+  if(f==4)return d; if(f==5)return 1.0-d; if(f==6)return vec3(s.a); if(f==7)return vec3(1.0-s.a);
+  return vec3(0.0);}
+vec3 cloud(sampler2D tex,vec3 A,vec3 B,vec4 C,ivec3 F,vec2 st,vec3 d){
+  vec4 s=texture(tex,vec2(dot(A.xy,st)+A.z,dot(B.xy,st)+B.z))*C;
+  if((F.z==1&&s.a<=0.0)||(F.z==2&&s.a<0.5)||(F.z==3&&s.a>=0.5))return d;
+  return clamp(s.rgb*factor(F.x,s,d)+d*factor(F.y,s,d),0.0,1.0);}
+`;
+  s+=`void main(){
   if(uClip>0.0){vec3 d=abs(vPos-uEye);if(max(d.x,max(d.y,d.z))>uClip)discard;}
-  if(uHasBox==0){o=vec4(uSkyCol,1.0);return;}
-  vec3 v=vPos-uEye, a=abs(v); float s,t,dv; float layer;
+`;
+  if(!n)s+=`  if(uHasBox==0){o=vec4(uSkyCol,1.0);return;}
+`;
+  s+=`  vec3 v=vPos-uEye, a=abs(v); float s,t,dv; float layer;
   // which face (AddSkyPolygon) and where on it (vec_to_st); faces in rt bk lf ft up dn order
   if(a.x>a.y&&a.x>a.z){
     if(v.x<0.0){dv=-v.x;s=v.y/dv;t=v.z/dv;layer=2.0;}else{dv=v.x;s=-v.y/dv;t=v.z/dv;layer=0.0;}}
@@ -1209,8 +1261,22 @@ void main(){
   else{
     if(v.z<0.0){dv=-v.z;s=-v.y/dv;t=v.x/dv;layer=5.0;}else{dv=v.z;s=-v.y/dv;t=-v.x/dv;layer=4.0;}}
   vec2 st=vec2((s+1.0)*0.5,(1.0-t)*0.5);
-  o=vec4(texture(uSky,vec3(clamp(st,0.0,1.0),layer)).rgb,1.0);
+`;
+  if(!n)return s+`  o=vec4(texture(uSky,vec3(clamp(st,0.0,1.0),layer)).rgb,1.0);
 }`;
+  s+=`  vec3 c=uHasBox==1?texture(uSky,vec3(clamp(st,0.0,1.0),layer)).rgb:uSkyCol;
+  vec3 d=normalize(v); float R=4096.0;
+  float p=-d.z*R+sqrt(d.z*d.z*R*R+2.0*R*uCH+uCH*uCH);
+  vec3 q=(d*p+vec3(0.0,0.0,R))/(R+uCH);
+  vec2 cs=vec2(acos(clamp(q.x,-1.0,1.0)),acos(clamp(q.y,-1.0,1.0)));
+  vec3 k=c;
+`;
+  for(let i=0;i<n;i++)s+=`  k=cloud(uC${i},uCA[${i}],uCB[${i}],uCC[${i}],uCF[${i}],cs,k);
+`;
+  return s+`  if(layer!=5.0)c=k;
+  o=vec4(c,1.0);
+}`;
+}
 const VS_COL=`#version 300 es
 layout(location=0) in vec3 aPos; layout(location=7) in vec4 aCol; layout(location=2) in float aPick;
 uniform mat4 uVP;
@@ -1277,7 +1343,8 @@ void main(){o=vec4(vC.rgb,vC.a*uAlpha);}`;
 
 let PW=null,PM=null,PC=null,PL=null;   // programs: world, model, coloured, lines
 let PMK=null;                          // entity markers
-let PLIT=null,PSKY=null,PSKYW=null;    // the game's lighting: lit polygons, sky (.bsp / .map faces)
+let PLIT=null;                         // the game's lighting: lit polygons
+const PSKY={};                         // the game's sky, by polygons (L .bsp, W .map faces) and cloud layers
 const GLT=[];                          // GL texture per TEX entry
 const GLTG=[];                         // the game's own picture where it differs (water)
 let whiteTex=null;
@@ -1296,6 +1363,10 @@ function compile(vs,fs){
   for(let i=0;i<n;i++){const a=gl.getActiveUniform(p,i);p.u[a.name]=gl.getUniformLocation(p,a.name);}
   return p;
 }
+// the sky program for this page's sky polygons (a .bsp's own, else the .map's sky faces)
+// with n cloud layers
+function skyProgram(n){const key=(LIT?'L':'W')+n;
+  return PSKY[key]||(PSKY[key]=compile(LIT?VS_LIT:VS_WORLD,skyFS(n)));}
 function makeBuf(target,data,usage){const b=gl.createBuffer();gl.bindBuffer(target,b);gl.bufferData(target,data,usage||gl.STATIC_DRAW);return b;}
 function attr(loc,buf,size,stride,off,div){gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.enableVertexAttribArray(loc);
   gl.vertexAttribPointer(loc,size,gl.FLOAT,false,stride||0,off||0);if(div)gl.vertexAttribDivisor(loc,div);}
@@ -1307,8 +1378,8 @@ function initGL(){
   if(!gl)throw new Error('WebGL 2 is not available in this browser, and the map viewer needs it.\n(Try a current Edge, Chrome or Firefox, and check that hardware acceleration is on.)');
   PW=compile(VS_WORLD,FS_MAIN);PM=compile(VS_MODEL,FS_MAIN);PC=compile(VS_COL,FS_MAIN);PL=compile(VS_LINE,FS_LINE);
   PMK=compile(VS_MARK,FS_MARK);
-  PSKYW=compile(VS_WORLD,FS_SKY);
-  if(LIT){PLIT=compile(VS_LIT,FS_LIT);PSKY=compile(VS_LIT,FS_SKY);}
+  skyProgram(0);
+  if(LIT)PLIT=compile(VS_LIT,FS_LIT);
   B.aniso=gl.getExtension('EXT_texture_filter_anisotropic');
   whiteTex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,whiteTex);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([255,255,255,255]));
@@ -1351,18 +1422,19 @@ function colourTex(c){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t)
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([c[0]*255|0,c[1]*255|0,c[2]*255|0,255]));return t;}
 // Pictures arrive as blobs; decode them in the background and swap them in as they load.
 const TEXURL=[];
+function blobTexture(blob,mime,done){
+  const url=URL.createObjectURL(new Blob([D.bytes(blob)],{type:mime||'image/jpeg'}));
+  const im=new Image();
+  im.onload=()=>{const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,im);gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);
+    if(B.aniso)gl.texParameterf(gl.TEXTURE_2D,B.aniso.TEXTURE_MAX_ANISOTROPY_EXT,4);
+    done(t);requestDraw();};
+  im.src=url;return url;}
 function loadTextures(){
-  const load=(blob,mime,done)=>{
-    const url=URL.createObjectURL(new Blob([D.bytes(blob)],{type:mime||'image/jpeg'}));
-    const im=new Image();
-    im.onload=()=>{const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
-      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,im);gl.generateMipmap(gl.TEXTURE_2D);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);
-      if(B.aniso)gl.texParameterf(gl.TEXTURE_2D,B.aniso.TEXTURE_MAX_ANISOTROPY_EXT,4);
-      done(t);requestDraw();};
-    im.src=url;return url;};
+  const load=blobTexture;
   for(let i=0;i<TEX.length;i++){
     const te=TEX[i];
     if(te.b!=null)TEXURL[i]=load(te.b,te.m,t=>{GLT[i]=t;});
@@ -1519,22 +1591,28 @@ function instData(ei){
 function initModels(){
   (D.models||[]).forEach((M,mi)=>{
     const R={M:M,pos:D.f32(M.v),uv:D.f32(M.t),idx:D.u32(M.i),inst:[],n:0,nsel:0,sprites:[]};
+    // A tree's sprite version (TF_LOD) is drawn only with Simple models on (surfOn); other
+    // camera-facing sprite surfaces (coronas) are drawn as billboards (drawSprites).
+    R.surfs=M.s.map(s=>{const f=(TEX[s[2]]||{}).f|0, lod=!!(f&TF_LOD);
+      return {first:s[0],count:s[1],ti:s[2],name:s[3],v0:s[4]|0,vn:s[5]|0,lod:lod,sprite:!lod&&!!(f&TF_SPRITE)};});
+    R.hasLod=R.surfs.some(s=>s.lod);
     R.vbP=makeBuf(gl.ARRAY_BUFFER,R.pos);R.vbT=makeBuf(gl.ARRAY_BUFFER,R.uv);R.ib=makeBuf(gl.ELEMENT_ARRAY_BUFFER,R.idx);
     // each vertex's number in the engine's own order, to find its baked light
     const eng=new Float32Array(R.pos.length/3);
     for(const s of M.s)if(s.length>=7)for(let k=0;k<s[5];k++)eng[s[4]+k]=s[6]+k;
     R.vbE=makeBuf(gl.ARRAY_BUFFER,eng);
+    const a2=R.hasLod?auto2Data(R):null;
+    if(a2){R.vbA2=makeBuf(gl.ARRAY_BUFFER,a2.mid);R.vbA2M=makeBuf(gl.ARRAY_BUFFER,a2.axis);}
     R.instBuf=gl.createBuffer();R.selBuf=gl.createBuffer();
     const st=INST_FLOATS*4;
     const mk=buf=>{const v=gl.createVertexArray();gl.bindVertexArray(v);attr(0,R.vbP,3);attr(1,R.vbT,2);attr(9,R.vbE,1);
+      if(a2){attr(11,R.vbA2,4);attr(12,R.vbA2M,3);}
       gl.bindBuffer(gl.ARRAY_BUFFER,buf);
       for(let k=0;k<3;k++){gl.enableVertexAttribArray(3+k);gl.vertexAttribPointer(3+k,4,gl.FLOAT,false,st,k*16);gl.vertexAttribDivisor(3+k,1);}
       gl.enableVertexAttribArray(6);gl.vertexAttribPointer(6,1,gl.FLOAT,false,st,48);gl.vertexAttribDivisor(6,1);
       gl.enableVertexAttribArray(10);gl.vertexAttribPointer(10,4,gl.FLOAT,false,st,52);gl.vertexAttribDivisor(10,1);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,R.ib);gl.bindVertexArray(null);return v;};
     R.vao=mk(R.instBuf);R.vaoSel=mk(R.selBuf);
-    // camera-facing sprite surfaces (coronas) are drawn as billboards instead
-    R.surfs=M.s.map(s=>({first:s[0],count:s[1],ti:s[2],name:s[3],sprite:!!((TEX[s[2]]||{}).f&TF_SPRITE)}));
     for(const s of R.surfs)if(s.sprite){let c=[0,0,0],n=0,r=0;
       for(let k=s.first;k<s.first+s.count;k++){const v=R.idx[k];c[0]+=R.pos[v*3];c[1]+=R.pos[v*3+1];c[2]+=R.pos[v*3+2];n++;}
       c=c.map(x=>x/Math.max(1,n));
@@ -1543,6 +1621,36 @@ function initModels(){
     MODELS.push(R);
   });
   for(const X of ENTS)if(X.model>=0)MODELS[X.model].inst.push(X.ei);
+}
+// Which of a model's surfaces are drawn: never its camera-facing sprites (drawSprites
+// draws those); a tree that has a sprite version shows the sprite alone with Simple models
+// on, and everything but the sprite with it off.
+function surfOn(R,s){return !s.sprite&&((simpleModels&&R.hasLod)?s.lod:!s.lod);}
+// Autosprite2Deform's set-up for each quad of a sprite version, four vertices in a row as
+// the engine takes them: the two shortest of the six vertex pairs are the quad's ends and
+// the line between their middles its long axis. Each vertex keeps its end's middle and
+// half that end's length, signed for the side it goes to (the engine's v1 / v3 one way,
+// v2 / v4 the other), so the quad is rebuilt about its axis without being mirrored.
+const A2_EDGES=[[0,1],[0,3],[0,2],[1,3],[1,2],[3,2]];
+function auto2Data(R){
+  const P=R.pos, nv=P.length/3, mid=new Float32Array(nv*4), axis=new Float32Array(nv*3), E=A2_EDGES;
+  for(const s of R.surfs){if(!s.lod)continue;
+    for(let q=s.v0;q+4<=s.v0+s.vn&&q+4<=nv;q+=4){
+      const at=k=>[P[(q+k)*3],P[(q+k)*3+1],P[(q+k)*3+2]];
+      const sl=[1e9,1e9],sn=[0,0],ll=[0,0],ln=[0,0];
+      for(let j=0;j<6;j++){const a=at(E[j][0]),b=at(E[j][1]);
+        const l=(a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2;
+        if(l<sl[0]){sn[1]=sn[0];sl[1]=sl[0];sn[0]=j;sl[0]=l;}else if(l<sl[1]){sn[1]=j;sl[1]=l;}
+        if(l>ll[0]){ln[1]=ln[0];ll[1]=ll[0];ln[0]=j;ll[0]=l;}else if(l>ll[1]){ln[1]=j;ll[1]=l;}}
+      const md=[0,1].map(j=>{const a=at(E[sn[j]][0]),b=at(E[sn[j]][1]);return[(a[0]+b[0])/2,(a[1]+b[1])/2,(a[2]+b[2])/2];});
+      const ax=[md[1][0]-md[0][0],md[1][1]-md[0][1],md[1][2]-md[0][2]];
+      const onEdge=(k,j)=>k===E[j][0]||k===E[j][1];
+      const same=onEdge(E[sn[0]][0],ln[0])===onEdge(E[sn[1]][0],ln[1]);
+      const h0=Math.sqrt(sl[0])*0.5, h1=Math.sqrt(sl[1])*0.5;
+      const put=[[E[sn[0]][0],0,-h0],[E[sn[0]][1],0,h0],[E[sn[1]][same?0:1],1,-h1],[E[sn[1]][same?1:0],1,h1]];
+      for(const[k,j,h]of put){mid.set([md[j][0],md[j][1],md[j][2],h],(q+k)*4);axis.set(ax,(q+k)*3);}
+    }}
+  return {mid:mid,axis:axis};
 }
 function rebuildModels(){
   for(const R of MODELS){
@@ -1684,6 +1792,102 @@ function initSkyGL(){
         gl.texParameteri(gl.TEXTURE_2D_ARRAY,p,v);
       B.skyTex[si]=t;requestDraw();});
   });
+  // the cloud layers: one picture per stage, tiled
+  CLOUDS=(D.clouds||[]).map(c=>({h:c.h,s:c.s.map(st=>{const L=Object.assign({tex:null},st);
+    blobTexture(st.b,st.m,t=>{L.tex=t;});return L;})}));
+  const moving=L=>L.tm.some(m=>(m[0]==='scroll'&&(m[1]||m[2]))||(m[0]==='rotate'&&m[1]&&m[3])||
+    ((m[0]==='stretch'||m[0]==='wavetrans'||m[0]==='wavetrant')&&m[3]&&m[5]))||
+    ((L.rg[0]==='w'&&L.rg[3]&&L.rg[5])||(L.rg[0]==='cw'&&L.rg[6]&&L.rg[8]))||(L.ag[0]==='w'&&L.ag[3]&&L.ag[5]);
+  for(const c of CLOUDS)c.mv=c.s.some(moving);
+  CLOUDS_MOVE=CLOUDS.some(c=>c.mv);
+  const sa=parseFloat((MAP.ents[0]||{kvl:{}}).kvl.skyalpha);
+  SKY_ALPHA=isFinite(sa)?sa:1;
+}
+// ---- the sky's cloud layers ----------------------------------------------------------
+// Each stage's tcMods, rgbGen and alphaGen are worked out once a frame from the time since
+// the page opened (the game's shaderTime counts from the level's start), the tcMods folded
+// into one affine map for skyFS. Waves read the engine's tables (tr_init.c, 1024 steps).
+let CLOUDS=[], CLOUDS_MOVE=false, SKY_ALPHA=1;
+const T0=performance.now(), FUNC_N=1024;
+const FUNC={sin:new Float32Array(FUNC_N),square:new Float32Array(FUNC_N),triangle:new Float32Array(FUNC_N),
+  sawtooth:new Float32Array(FUNC_N),inversesawtooth:new Float32Array(FUNC_N)};
+for(let i=0;i<FUNC_N;i++){
+  FUNC.sin[i]=Math.sin(i*2*Math.PI/(FUNC_N-1));FUNC.square[i]=i<FUNC_N/2?1:-1;
+  FUNC.sawtooth[i]=i/FUNC_N;FUNC.inversesawtooth[i]=1-i/FUNC_N;
+  FUNC.triangle[i]=i<FUNC_N/2?(i<FUNC_N/4?i/(FUNC_N/4):1-FUNC.triangle[i-FUNC_N/4]):-FUNC.triangle[i-FUNC_N/2];}
+// smooth noise in -1..1 for the "noise" waveform (the engine's R_NoiseGet4f is a lattice
+// noise of the same kind; its exact values aren't reproduced)
+function noise1(x){const i=Math.floor(x),f=x-i,u=f*f*(3-2*f),
+  h=n=>{const v=Math.sin(n*127.1+311.7)*43758.5453;return(v-Math.floor(v))*2-1;};return h(i)*(1-u)+h(i+1)*u;}
+// [function, base, amplitude, phase, frequency] at time T (EvalWaveForm)
+function waveAt(w,T){
+  if(w[0]==='noise')return w[1]+noise1((T+w[3])*w[4])*w[2];
+  return w[1]+(FUNC[w[0]]||FUNC.sin)[Math.trunc((w[3]+T*w[4])*FUNC_N)&(FUNC_N-1)]*w[2];}
+const clamp01=x=>Math.max(0,Math.min(1,x));
+// one stage at time T: the rows of its affine texture-coordinate map and its colour
+function cloudStage(L,T){
+  let a=1,b=0,c=0,d=0,e=1,f=0;
+  const then=(A,B2,C,D2,E,F)=>{const na=A*a+B2*d,nb=A*b+B2*e,nc=A*c+B2*f+C,nd=D2*a+E*d,ne=D2*b+E*e,nf=D2*c+E*f+F;
+    a=na;b=nb;c=nc;d=nd;e=ne;f=nf;};
+  for(const m of L.tm){
+    if(m[0]==='scroll'){let s=m[1]*T,t=m[2]*T;s-=Math.floor(s);t-=Math.floor(t);then(1,0,s,0,1,t);}
+    else if(m[0]==='scale')then(m[1],0,0,0,m[2],0);
+    else if(m[0]==='offset')then(1,0,m[1],0,1,m[2]);
+    else if(m[0]==='transform')then(m[1],m[3],m[5],m[2],m[4],m[6]);
+    else if(m[0]==='rotate'){const i=Math.trunc((-m[1]*m[3]*T-m[2])*(FUNC_N/360)),
+      sn=FUNC.sin[i&(FUNC_N-1)],cs=FUNC.sin[(i+FUNC_N/4)&(FUNC_N-1)];
+      then(cs,-sn,0.5-0.5*cs+0.5*sn,sn,cs,0.5-0.5*sn-0.5*cs);}
+    else if(m[0]==='stretch'){const w=waveAt(m.slice(1),T),p=w?1/w:1;then(p,0,0.5-0.5*p,0,p,0.5-0.5*p);}
+    else if(m[0]==='wavetrans')then(1,0,waveAt(m.slice(1),T),0,1,0);
+    else if(m[0]==='wavetrant')then(1,0,0,0,1,waveAt(m.slice(1),T));
+  }
+  const rg=L.rg, ag=L.ag;let r=1,g=1,bl=1,al=1;
+  if(rg[0]==='c'){r=rg[1];g=rg[2];bl=rg[3];}
+  else if(rg[0]==='w')r=g=bl=clamp01(waveAt(rg.slice(1),T));
+  else if(rg[0]==='cw'){const v=clamp01(waveAt(rg.slice(4),T));r=rg[1]*v;g=rg[2]*v;bl=rg[3]*v;}
+  if(ag[0]==='c')al=ag[1];else if(ag[0]==='w')al=clamp01(waveAt(ag.slice(1),T));
+  else if(ag[0]==='sky')al=SKY_ALPHA;else if(ag[0]==='1sky')al=1-SKY_ALPHA;
+  return{A:[a,b,c],B:[d,e,f],C:[r,g,bl,al]};
+}
+// The stages of one sky's cloud layers drawn now: a stage whose picture hasn't loaded yet
+// waits, and a skyAlpha stage is skipped at no sky alpha, as in RB_IterateStagesGeneric.
+function cloudLayers(C){
+  const out=[];
+  if(C)for(const L of C.s){if(out.length>=4)break;if(!L.tex)continue;
+    if((L.ag[0]==='sky'&&SKY_ALPHA<0.01)||(L.ag[0]==='1sky'&&SKY_ALPHA>0.99))continue;out.push(L);}
+  return out;
+}
+// their pictures (texture units 4 to 7) and uniforms at time T
+function setClouds(P,C,list,T){
+  const A=new Float32Array(12),Bv=new Float32Array(12),Cc=new Float32Array(16),F=new Int32Array(12);
+  list.forEach((L,n)=>{const r=cloudStage(L,T);A.set(r.A,n*3);Bv.set(r.B,n*3);Cc.set(r.C,n*4);F.set(L.f,n*3);
+    gl.activeTexture(gl.TEXTURE4+n);gl.bindTexture(gl.TEXTURE_2D,L.tex);});
+  gl.activeTexture(gl.TEXTURE0);
+  gl.uniform1f(P.u.uCH,C.h);gl.uniform3fv(P.u['uCA[0]'],A);gl.uniform3fv(P.u['uCB[0]'],Bv);
+  gl.uniform4fv(P.u['uCC[0]'],Cc);gl.uniform3iv(P.u['uCF[0]'],F);
+}
+// Moving clouds keep the view redrawing while the game's sky is on screen. An occlusion
+// query on each frame's sky (drawGameSky) tells whether any of it was seen; after a frame,
+// cloudStep waits for that answer and draws the next frame only if some sky showed, so
+// the loop runs at up to 30 frames a second while the sky is in view and stops when it
+// isn't. Any other redraw (the camera moving, a click) asks again. An answer about an
+// older view than the last frame drawn is asked again too. Without queries (an old
+// driver) the clouds just keep moving.
+const SKYQ={q:null,wait:false,seen:true,at:0};   // at: the frame the last question was asked in
+let cloudTimer=0, FRAMES=0;
+function skyQueryPoll(){
+  if(!SKYQ.wait)return;
+  try{if(gl.getQueryParameter(SKYQ.q,gl.QUERY_RESULT_AVAILABLE)){SKYQ.seen=!!gl.getQueryParameter(SKYQ.q,gl.QUERY_RESULT);SKYQ.wait=false;}}
+  catch(_e){SKYQ.wait=false;SKYQ.seen=true;}
+}
+function cloudsMoving(){return CLOUDS_MOVE&&!simpleSky&&!(hiddenMask&C_SKY)&&!(view.fog&&FOG.far>0);}
+function cloudTick(){if(!cloudTimer&&cloudsMoving())cloudTimer=setTimeout(cloudStep,33);}
+function cloudStep(){
+  cloudTimer=0;
+  if(!cloudsMoving())return;
+  skyQueryPoll();
+  if(SKYQ.wait){cloudTimer=setTimeout(cloudStep,33);return;}
+  if(SKYQ.seen||SKYQ.at<FRAMES)requestDraw();
 }
 function arrayTex(w,h,n,data){
   const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D_ARRAY,t);
@@ -1814,6 +2018,7 @@ function setModelCommon(vp,mode,lit){
   setCommon(PM,vp,mode);
   gl.activeTexture(gl.TEXTURE3);gl.bindTexture(gl.TEXTURE_2D,B.smTex||whiteTex);gl.activeTexture(gl.TEXTURE0);
   gl.uniform1i(PM.u.uStatic,3);gl.uniform1i(PM.u.uLit,0);
+  gl.uniform1i(PM.u.uAuto2,0);gl.uniform3fv(PM.u.uFwd,camAxes().f);
   if(lit)gl.uniform1f(PM.u.uShade,0);
 }
 function drawScene(vp,mode){
@@ -1841,9 +2046,11 @@ function drawScene(vp,mode){
   // models (solid surfaces)
   setModelCommon(vp,mode,lit);
   for(const R of MODELS){if(!R.n)continue;gl.bindVertexArray(R.vao);
-    for(const s of R.surfs){if(s.sprite)continue;const k=(MAT[s.ti]||{}).kind||0;if(mode===0&&k>=2)continue;
+    for(const s of R.surfs){if(!surfOn(R,s))continue;const k=(MAT[s.ti]||{}).kind||0;if(mode===0&&k>=2)continue;
       if(lit)gl.uniform1i(PM.u.uLit,modelLitMode(s.ti));
+      gl.uniform1i(PM.u.uAuto2,s.lod?1:0);
       bindMat(PM,s.ti,mode);gl.drawElementsInstanced(gl.TRIANGLES,s.count,gl.UNSIGNED_INT,s.first*4,R.n);}}
+  gl.uniform1i(PM.u.uAuto2,0);
   // entity markers
   if(boxCount){setCommon(PMK,vp,mode);gl.uniform1f(PMK.u.uOlW,3*DPR);
     gl.enable(gl.CULL_FACE);gl.bindVertexArray(B.vMark);gl.drawElements(gl.TRIANGLES,boxCount,gl.UNSIGNED_INT,0);}
@@ -1872,9 +2079,11 @@ function drawScene(vp,mode){
   for(const op of drawTransG){if(lit&&op.rep)continue;blendFor(op.m.kind);bindMat(PW,op.ti,0);gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
   setModelCommon(vp,0,lit);
   for(const R of MODELS){if(!R.n)continue;gl.bindVertexArray(R.vao);
-    for(const s of R.surfs){if(s.sprite)continue;const k=(MAT[s.ti]||{}).kind||0;if(k<2)continue;
+    for(const s of R.surfs){if(!surfOn(R,s))continue;const k=(MAT[s.ti]||{}).kind||0;if(k<2)continue;
       if(lit)gl.uniform1i(PM.u.uLit,modelLitMode(s.ti));
+      gl.uniform1i(PM.u.uAuto2,s.lod?1:0);
       blendFor(k);bindMat(PM,s.ti,0);gl.drawElementsInstanced(gl.TRIANGLES,s.count,gl.UNSIGNED_INT,s.first*4,R.n);}}
+  gl.uniform1i(PM.u.uAuto2,0);
   setCommon(PW,vp,0);gl.bindVertexArray(B.vTri);
   for(const op of drawTransE){if(lit&&op.rep)continue;blendFor(op.m.kind);bindMat(PW,op.ti,0);gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
   // the inner sides of see-through brushes the camera is inside
@@ -1886,25 +2095,41 @@ function drawScene(vp,mode){
   gl.depthMask(true);gl.disable(gl.BLEND);gl.bindVertexArray(null);
 }
 // The game's sky (Simple Sky off): the sky box in the direction of each pixel of the
-// sky polygons (a .bsp's own, else the .map's sky faces), or the fog / backdrop colour.
-// Drawn at the far end of the depth range as RB_StageIteratorSky does, so it only shows
-// where nothing else was drawn: a building behind a sky brush is seen through it.
+// sky polygons (a .bsp's own, else the .map's sky faces), or the fog / backdrop colour,
+// with the shader's cloud layers over it. Drawn at the far end of the depth range as
+// RB_StageIteratorSky does, so it only shows where nothing else was drawn: a building
+// behind a sky brush is seen through it. With the map's fog on there are no clouds: the
+// fog covers the whole sky.
 function drawGameSky(vp){
-  const ops=LIT?LIT.sky:drawOps.filter(op=>op.sky), P=LIT?PSKY:PSKYW;
+  const ops=LIT?LIT.sky:drawOps.filter(op=>op.sky);
+  const fogged=view.fog&&FOG.far>0, flat=fogged?FOG.col:skyColour(), T=(performance.now()-T0)/1000;
+  const cloudsOf=op=>{const te=TEX[op.ti]||{};return(!fogged&&te.cl!=null)?CLOUDS[te.cl]:null;};
+  // the skies with moving clouds go last, inside an occlusion query: is any of them seen?
+  // (see cloudStep). A sky with still clouds, or none, doesn't keep the view redrawing.
+  const still=[], moving=[];
+  for(const op of ops){const C=cloudsOf(op);(C&&C.mv?moving:still).push(op);}
+  if(!moving.length&&!SKYQ.wait){SKYQ.seen=false;SKYQ.at=FRAMES;}
   if(!ops.length)return;
-  gl.useProgram(P);gl.uniformMatrix4fv(P.u.uVP,false,vp);gl.uniform3fv(P.u.uEye,cam.pos);
-  gl.uniform1f(P.u.uClip,clipOn?clipDist:0);gl.uniform1i(P.u.uSky,2);
-  if(P.u.uPush)gl.uniform1f(P.u.uPush,0);
   gl.bindVertexArray(LIT?B.vLit:B.vTri);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);
-  const fogged=view.fog&&FOG.far>0, flat=fogged?FOG.col:skyColour();
-  gl.uniform3fv(P.u.uSkyCol,flat);
   gl.depthRange(1,1);
-  for(const op of ops){
-    const sb=(TEX[op.ti]||{}).sb, t=(!fogged&&sb!=null)?B.skyTex[sb]:null;
+  let P=null;
+  const drawOne=op=>{
+    const te=TEX[op.ti]||{}, sb=te.sb, t=(!fogged&&sb!=null)?B.skyTex[sb]:null;
+    const C=cloudsOf(op), list=cloudLayers(C), Q=skyProgram(list.length);
+    if(Q!==P){P=Q;gl.useProgram(P);gl.uniformMatrix4fv(P.u.uVP,false,vp);gl.uniform3fv(P.u.uEye,cam.pos);
+      gl.uniform1f(P.u.uClip,clipOn?clipDist:0);gl.uniform1i(P.u.uSky,2);gl.uniform3fv(P.u.uSkyCol,flat);
+      for(let k=0;k<4;k++)if(P.u['uC'+k])gl.uniform1i(P.u['uC'+k],4+k);
+      if(P.u.uPush)gl.uniform1f(P.u.uPush,0);}
     gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D_ARRAY,t||B.skyNone);gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(P.u.uHasBox,t?1:0);
-    gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);
-  }
+    if(list.length)setClouds(P,C,list,T);
+    gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);};
+  still.forEach(drawOne);
+  let query=false;
+  if(moving.length&&!SKYQ.wait){
+    try{if(!SKYQ.q)SKYQ.q=gl.createQuery();gl.beginQuery(gl.ANY_SAMPLES_PASSED,SKYQ.q);query=true;SKYQ.at=FRAMES;}catch(_e){}}
+  moving.forEach(drawOne);
+  if(query){gl.endQuery(gl.ANY_SAMPLES_PASSED);SKYQ.wait=true;}
   gl.depthRange(0,1);
 }
 function drawSprites(vp){
@@ -1927,6 +2152,7 @@ function drawSprites(vp){
 }
 function draw(){
   if(!gl||!SC)return;
+  FRAMES++;skyQueryPoll();
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
   gl.viewport(0,0,glcv.width,glcv.height);
   // with the map's fog on, everything past the fog's far end is fog colour, as in game
@@ -1939,6 +2165,7 @@ function draw(){
   drawLines(VP);
   draw2D();
   updateHint();
+  cloudTick();
 }
 // The selection: tinted red like MOHRadiant, plus an outline that shows through walls.
 function drawSelection(vp){
@@ -1950,9 +2177,12 @@ function drawSelection(vp){
     gl.drawElements(gl.TRIANGLES,selTriCount,gl.UNSIGNED_INT,0);}
   if(markSelCount){setCommon(PC,vp,2);gl.uniform4f(PC.u.uTint,sc[0],sc[1],sc[2],0.5);gl.bindVertexArray(B.vMarkSel);
     gl.drawElements(gl.TRIANGLES,markSelCount,gl.UNSIGNED_INT,0);}
-  setCommon(PM,vp,2);gl.uniform4f(PM.u.uTint,sc[0],sc[1],sc[2],0.45);
+  // a model's tint follows what is drawn of it: its alpha-tested leaves, its sprite version
+  setCommon(PM,vp,2);gl.uniform4f(PM.u.uTint,sc[0],sc[1],sc[2],0.45);gl.uniform1i(PM.u.uLit,0);gl.uniform3fv(PM.u.uFwd,camAxes().f);
   for(const R of MODELS){if(!R.nsel)continue;gl.bindVertexArray(R.vaoSel);
-    for(const s of R.surfs){if(s.sprite)continue;gl.drawElementsInstanced(gl.TRIANGLES,s.count,gl.UNSIGNED_INT,s.first*4,R.nsel);}}
+    for(const s of R.surfs){if(!surfOn(R,s))continue;gl.uniform1i(PM.u.uAuto2,s.lod?1:0);bindMat(PM,s.ti,2);
+      gl.drawElementsInstanced(gl.TRIANGLES,s.count,gl.UNSIGNED_INT,s.first*4,R.nsel);}}
+  gl.uniform1i(PM.u.uAuto2,0);gl.disable(gl.CULL_FACE);
   gl.disable(gl.POLYGON_OFFSET_FILL);
   gl.useProgram(PL);gl.uniformMatrix4fv(PL.u.uVP,false,vp);
   if(selEdgeCount){
@@ -2500,6 +2730,7 @@ window.addEventListener('keydown',e=>{
     case 'n':showInfo('sel');break;
     case 'b':toggleFullBright();break;
     case 'k':toggleSimpleSky();break;
+    case 'm':toggleSimpleModels();break;
     case 'f':focusSelection();break;
     case 'v':setCamMode(camMode==='free'?'rad':'free');break;
     case 'r':resetCam();break;
@@ -2565,9 +2796,8 @@ const FILTERS=[
  {m:C_TRIGGER,l:'Triggers',key:'Ctrl+T',t:'trigger_* entities and common/trigger brushes'},
  {m:C_PORTAL,l:'Areaportals',key:'Ctrl+P',t:'Areaportal brushes'},
  {m:C_SKY,l:'Sky',key:'Ctrl+K',t:'Sky brushes: show or hide them completely (with them hidden, whatever is behind shows, else the backdrop)'},
- {m:C_STATIC,l:'Static models',key:'',t:'static_* props (compiled into the map)'},
  {m:C_ORIGIN,l:'Origin',key:'',t:'common/origin brushes (the pivot of doors and movers)'},
- {m:C_NODRAW,l:'Nodraw',key:'',t:'Other editor-only surfaces (nodraw, ladders, rain...)'},
+ {m:C_NODRAW,l:'Nodraw',key:'',t:'Other editor-only surfaces: nodraw, ladders, rain, and the flat tree pictures that only cast a tree\'s shadow (misc_outside/commontreeshadow)'},
  {m:C_POINT,l:'Point ents',key:'',t:'Other point entities: player starts, script origins, info_* ...'}];
 function buildPanel(){
   const db=$('dispBtns');
@@ -2581,6 +2811,7 @@ function buildPanel(){
     $('bFull').title=D.kind==='bsp'?'This .bsp has no lightmaps, so the game draws it at full brightness too.'
       :'A .map has no lighting yet: the game\'s light is baked when the map is compiled. Open the compiled .bsp to see it.';}
   $('bSimpleSky').onclick=toggleSimpleSky;
+  $('bSimpleMod').onclick=toggleSimpleModels;
   $('bShowAll').onclick=()=>{hiddenMask=0;filtersChanged();};
   // the two looks also set the light and the sky: MOHRadiant is always full bright
   $('bGameView').onclick=()=>{hiddenMask=C_CAULK|C_CLIP|C_TRIGGER|C_HINT|C_ORIGIN|C_PORTAL|C_NODRAW|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_VIS;
@@ -2598,6 +2829,7 @@ function buildPanel(){
   $('bInfo').onclick=()=>showInfo('sel');$('bFocus').onclick=focusSelection;$('bHide').onclick=hideSelection;
   $('bClear').onclick=()=>{SEL.clear();selectionChanged();};$('bUnhide').onclick=unhideAll;
   $('bSame').onclick=()=>{if(lastHit)selectSameKind(lastHit,false);};
+  $('bPath').onclick=()=>{const ei=+$('bPath').dataset.ei;if(ei>0)selectPath({ent:ei,face:-1,prim:-1,point:null},false);};
   $('infoClose').onclick=hideInfo;$('infoCopy').onclick=()=>copyText($('infoBody').innerText);
   $('tabFind').onclick=()=>setTab('find');$('tabCls').onclick=()=>setTab('cls');$('tabTex').onclick=()=>setTab('tex');
   const fi=$('findIn');let ft=null;
@@ -2609,6 +2841,7 @@ function syncButtons(){
   for(const f of FILTERS)f.el.classList.toggle('on',!(hiddenMask&f.m));
   $('bFull').classList.toggle('on',fullBright||!LIT);
   $('bSimpleSky').classList.toggle('on',simpleSky);
+  $('bSimpleMod').classList.toggle('on',simpleModels);
   $('bFree').classList.toggle('on',camMode==='free');$('bRad').classList.toggle('on',camMode==='rad');
   $('camHelpFree').style.display=camMode==='free'?'':'none';$('camHelpRad').style.display=camMode==='rad'?'':'none';
 }
@@ -2620,6 +2853,11 @@ function toggleFilter(m){if((hiddenMask&m)===m)hiddenMask&=~m;else hiddenMask|=m
 function toggleSimpleSky(){
   simpleSky=!simpleSky;syncButtons();saveOpts();requestDraw();
   flash(simpleSky?'Simple Sky: the sky brushes tiled and solid (as MOHRadiant)':'The game\'s sky, behind everything');}
+function toggleSimpleModels(){
+  simpleModels=!simpleModels;syncButtons();saveOpts();requestDraw();
+  const n=MODELS.filter(R=>R.hasLod&&R.inst.length).length;
+  flash(simpleModels?(n?'Simple models: trees drawn as their sprite version, as the game draws them far away'
+    :'Simple models on: no model in this map has a sprite version'):'Simple models off: the whole trees');}
 function toggleFullBright(){
   if(!LIT){flash(D.kind==='bsp'?'This .bsp has no lightmaps':'A .map has no compiled lighting - open the .bsp');return;}
   fullBright=!fullBright;syncButtons();saveOpts();requestDraw();
@@ -2628,11 +2866,13 @@ function filtersChanged(){syncButtons();saveOpts();rebuildWorld();updateSelPanel
 function setCamMode(m){camMode=m;keys.clear();radFly=null;syncButtons();saveOpts();requestDraw();}
 function setClipDist(v){clipDist=Math.max(128,Math.min(32768,v));$('clipD').value=clipDist;$('clipV').textContent=clipDist;saveOpts();requestDraw();}
 function toggleClip(){clipOn=!clipOn;$('bClip').classList.toggle('on',clipOn);saveOpts();requestDraw();}
-function saveOpts(){LS.set('mohaaMapViewerOpts',JSON.stringify({view:view,hidden:hiddenMask,mode:camMode,speed:moveSpeed,fov:fovX,clip:clipOn,clipD:clipDist,fb:fullBright,ss:simpleSky}));}
+function saveOpts(){LS.set('mohaaMapViewerOpts',JSON.stringify({view:view,hidden:hiddenMask,mode:camMode,speed:moveSpeed,fov:fovX,clip:clipOn,clipD:clipDist,fb:fullBright,ss:simpleSky,sm:simpleModels}));}
 function loadOpts(){try{const o=JSON.parse(LS.get('mohaaMapViewerOpts')||'null');if(!o)return;
   for(const k in view)if(k in (o.view||{}))view[k]=!!o.view[k];
-  fullBright=!!o.fb;simpleSky=!!o.ss;
+  fullBright=!!o.fb;simpleSky=!!o.ss;simpleModels=!!o.sm;
   if(typeof o.hidden==='number')hiddenMask=o.hidden;if(o.mode==='rad'||o.mode==='free')camMode=o.mode;
+  // static models have no Show button of their own any more (Models and Entities hide them)
+  if((hiddenMask&C_ENTITIES)!==C_ENTITIES)hiddenMask&=~C_STATIC;
   if(o.speed>0)moveSpeed=o.speed;if(o.fov>0)fovX=Math.max(60,Math.min(150,o.fov));clipOn=!!o.clip;if(o.clipD>0)clipDist=o.clipD;}catch(_e){}}
 
 function updateSelPanel(){
@@ -2642,6 +2882,11 @@ function updateSelPanel(){
   if(!n){el.textContent='Click anything in the map to select it.';el.className='co';return;}
   el.className='';
   const ents=[...selectedEnts()], prims=selectedPrims();
+  // Same path: the path through the one selected entity (else the last one clicked), when
+  // its "target" leads somewhere or something targets it (as Ctrl+Alt+click)
+  const pe=ents.length===1?ents[0]:(lastHit&&lastHit.ent>0&&SEL.has('e'+lastHit.ent))?lastHit.ent:-1;
+  const pp=(pe>0&&!isWorldlike(pe))?pathOf(pe):null;
+  $('bPath').style.display=(pp&&(pp.before.size||pp.after.size))?'':'none';$('bPath').dataset.ei=pe;
   let s='';
   if(n===1&&ents.length===1){const ei=ents[0],e=MAP.ents[ei],X=ENTS[ei];
     s=e.kvl.classname+(e.kvl.targetname?'  $'+e.kvl.targetname:'')+'\nentity '+ei;
@@ -2903,6 +3148,7 @@ function legendSwatch(r,thumbs){
   switch(r.sw){
     case 'node':return '<span class="lsw" style="background:'+rgb(r.fill)+(r.line?';box-shadow:inset 0 0 0 3px '+rgb(r.line):'')+'"></span>';
     case 'diamond':return '<span class="lsw lnone"><i class="dia" style="background:'+rgb(r.fill)+'"></i></span>';
+    case 'wire':return '<svg class="lsw ldark" viewBox="0 0 24 24"><path d="M3.5 8.5H15.5V20.5H3.5ZM8.5 3.5H20.5V15.5H8.5ZM3.5 8.5L8.5 3.5M15.5 8.5L20.5 3.5M15.5 20.5L20.5 15.5M3.5 20.5L8.5 15.5" stroke="'+rgb(r.fill)+'" stroke-width="1.5" fill="none"/></svg>';
     case 'arrow':return '<svg class="lsw ldark" viewBox="0 0 24 24"><path d="M3 12H19M19 12L14.5 7.5M19 12L14.5 16.5" stroke="#fff" stroke-width="2.6" fill="none"/></svg>';
     case 'link':return '<svg class="lsw ldark" viewBox="0 0 24 24"><path d="M4 19L20 5" stroke="'+rgb(r.fill)+'" stroke-width="1.5"/><path d="M15.5 6.8L20 5L18.2 9.5Z" fill="'+rgb(r.fill)+'"/></svg>';
     case 'label':return '<span class="lsw llab">Aa</span>';
@@ -2916,16 +3162,14 @@ function legendSwatch(r,thumbs){
 function buildLegend(){
   const L=D.legend||{s:[],t:{}}, thumbs={};
   for(const k in (L.t||{})){const v=L.t[k];thumbs[k]=URL.createObjectURL(new Blob([D.bytes(v[0])],{type:v[1]||'image/png'}));}
-  // a heading never ends a column: it shares an unbreakable block with the row after it
+  // one column per section, each scrolling on its own under its heading (see #legBody)
   let h='';
   for(const sec of L.s||[]){
-    let head='<h4>'+esc(sec.title)+'</h4>'+(sec.note?'<div class="note">'+esc(sec.note)+'</div>':'');
-    h+='<div class="sec">';
+    h+='<div class="sec"><h4>'+esc(sec.title)+'</h4>'+(sec.note?'<div class="note">'+esc(sec.note)+'</div>':'');
     for(const r of sec.rows){
-      if(r.sub){head+='<div class="sub">'+esc(r.sub)+'</div>';continue;}
-      h+='<div class="blk">'+head+'<div class="lrow"><span class="s">'+legendSwatch(r,thumbs)+'</span><div><span class="nm">'+esc(r.name)+'</span>'+
-         (r.key?'<span class="k">'+esc(r.key)+'</span>':'')+'<div class="ds">'+esc(r.desc||'')+'</div></div></div></div>';
-      head='';
+      if(r.sub){h+='<div class="sub">'+esc(r.sub)+'</div>';continue;}
+      h+='<div class="lrow"><span class="s">'+legendSwatch(r,thumbs)+'</span><div><span class="nm">'+esc(r.name)+'</span>'+
+         (r.key?'<span class="k">'+esc(r.key)+'</span>':'')+'<div class="ds">'+esc(r.desc||'')+'</div></div></div>';
     }
     h+='</div>';
   }
