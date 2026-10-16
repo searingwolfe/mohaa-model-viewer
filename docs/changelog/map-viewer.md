@@ -78,6 +78,16 @@ run at once.
   text, textures, model meshes), gzip-compressed, base64 in a
   `<script type="application/octet-stream">` block. The page unpacks it with
   `DecompressionStream` and serves textures as blob URLs. The CSP is the Model Viewer's.
+- **Reading the `.map`.** A texture name is one word, as q3map and MOHRadiant read it,
+  whatever it starts with: a brush in Spearhead's `t1l1` (`script_object`, entity 1072)
+  has the shader `textures/(0`, which the compiler took from EA's source as it was. A
+  block the reader can't make sense of (a brush, patch or terrain block) is skipped and
+  the rest of the map is drawn. The red "unreadable blocks skipped" line under the map's
+  stats opens a card that lists each one: its entity (a link, unless it is part of the
+  world), the primitive, its line in the `.map` and the reason, with the line itself. In
+  the launcher's pane the same list goes to the Output console, in red. After a bad
+  block the reader carries on past the `}` that closes it, so a damaged patch or terrain
+  block doesn't cut its entity short.
 - **Drawing.** WebGL2. One index buffer holds every face, grouped per material and
   rebuilt when the filters change. Models are instanced; point entities without a model
   are boxes coloured as MOHRadiant colours them (below). With Full Brightness on (and
@@ -93,9 +103,10 @@ run at once.
   every depth tie against the walls it touches (no sparkles along corners).
 - **Nodraw.** A texture the game never draws that is in no other editor group (caulk,
   clips, triggers, hints...) goes with the Nodraw button and the In-game look: rain (the
-  volume of a `func_rain` entity), patharea, ladders, and the flat tree pictures some maps stand beside their trees
-  (`misc_outside/commontreeshadow`), which only give the tree its shadow when the map is
-  lit. Those are world brushes, not part of the tree, so hiding a tree leaves them.
+  volume of a `func_rain` entity), patharea, ladders, and the flat tree pictures some
+  maps stand beside their trees (`misc_outside/commontreeshadow`), which only give the
+  tree its shadow when the map is lit. Those are world brushes, not part of the tree, so
+  hiding a tree leaves them.
 - **Trees.** A tree model carries a sprite version: a card of the whole tree
   (`deformVertexes autoSprite2`, `alphaGen oneMinusDistFade`) that the game fades in far
   away as the tree's own surfaces fade out (`alphaGen distFade`; `R_AddStaticModelSurfaces`

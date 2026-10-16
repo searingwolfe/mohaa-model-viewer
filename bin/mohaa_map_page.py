@@ -48,6 +48,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  :root.embed #modelSect{display:none}
  .sect h2{margin:0 0 8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
  h1{margin:0;font-size:14px;color:var(--accent);word-break:break-all} .sub{color:var(--dim);font-size:11px}
+ /* "N unreadable blocks skipped" under the map's stats: opens the list of them */
+ a.errlink{color:var(--err);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
+ a.errlink:hover{text-decoration-style:solid}
  .row{display:flex;align-items:center;gap:8px;margin:5px 0;flex-wrap:wrap}
  button,select{background:var(--btn);color:var(--txt);border:1px solid var(--line);
    border-radius:6px;padding:5px 9px;font:inherit;cursor:pointer;
@@ -403,17 +406,28 @@ function readMap(text){
   const ents=[], errors=[];
   const num=()=>{const v=parseFloat(tokStr(t[p++])); return isFinite(v)?v:0;};
   const isNum=k=>{if(k>=N)return false;const s=t[k];return typeof s==='string'&&/^[-+]?(\d|\.\d)/.test(s);};
-  const expect=ch=>{if(t[p]!==ch){throw new Error('expected '+ch+' at offset '+(T.s[p]||text.length));} p++;};
+  // An error keeps where in the text it happened (off), for the list of skipped blocks.
+  const fail=msg=>{const err=new Error(msg);err.off=(p<N)?T.s[p]:text.length;throw err;};
+  const expect=ch=>{if(t[p]!==ch)fail('expected "'+ch+'" but found '+(p<N?'"'+tokStr(t[p]).slice(0,24)+'"':'the end of the file'));p++;};
+  // A texture name is one word, as q3map and Radiant read it (GetToken stops only at white
+  // space), even one that starts with a bracket: a brush in Spearhead's t1l1 has the
+  // shader "textures/(0", which the tokenizer splits into "(" and "0".
+  const word=()=>{
+    if(p>=N)return '';
+    if(typeof t[p]!=='string')return tokStr(t[p++]);
+    const s=T.s[p];let e=s;while(e<text.length&&text.charCodeAt(e)>32)e++;
+    while(p<N&&T.s[p]<e)p++;
+    return text.slice(s,e);};
   const skipBlock=()=>{let d=0;do{if(t[p]==='{')d++;else if(t[p]==='}')d--;p++;}while(p<N&&d>0);};
   function vec3(){expect('(');const v=[num(),num(),num()];expect(')');return v;}
   function face(){
     const a=vec3(),b=vec3(),c=vec3();
     const f={p:[a[0],a[1],a[2],b[0],b[1],b[2],c[0],c[1],c[2]],tex:'',sh:[0,0],rot:0,sc:[0.5,0.5],cont:0,flags:0,val:0,extra:'',tm:null};
-    if(t[p]==='('){                                   // brush primitives: ( ( a b c ) ( d e f ) )
+    if(t[p]==='('&&t[p+1]==='('){                    // brush primitives: ( ( a b c ) ( d e f ) )
       expect('(');expect('(');const r0=[num(),num(),num()];expect(')');expect('(');const r1=[num(),num(),num()];expect(')');expect(')');
       f.tm=[r0,r1];
     }
-    f.tex=tokStr(t[p++]);
+    f.tex=word();
     const nums=[];
     if(!f.tm){while(nums.length<5&&isNum(p))nums.push(num());
       if(nums.length>=5){f.sh=[nums[0],nums[1]];f.rot=nums[2];f.sc=[nums[3]||0.5,nums[4]||0.5];}}
@@ -429,8 +443,9 @@ function readMap(text){
   }
   function patch(def3){
     expect('{');
-    const P={tex:tokStr(t[p++]),w:0,h:0,cont:0,flags:0,val:0,sub:0,pts:null,def:def3?3:2};
+    const P={tex:word(),w:0,h:0,cont:0,flags:0,val:0,sub:0,pts:null,def:def3?3:2};
     expect('(');
+    const at=T.s[p-1];                                // the header, for a size error below
     const hdr=[];while(p<N&&t[p]!==')')hdr.push(tokStr(t[p++]));expect(')');
     const hn=[];for(let i=0;i<hdr.length;i++){if(/^subdivisions$/i.test(hdr[i])){P.sub=parseFloat(hdr[i+1])||0;i++;continue;}const v=parseFloat(hdr[i]);if(isFinite(v))hn.push(v);}
     P.w=hn[0]|0;P.h=hn[1]|0;
@@ -445,7 +460,7 @@ function readMap(text){
     expect(')');expect('}');
     const w=rows.length,h=w?rows[0].length:0;
     // the engine refuses a control grid over MAX_GRID_SIZE (129) points a side (cm_patch.c)
-    if(w>129||h>129)throw new Error('patchDef of '+w+' x '+h+' points');
+    if(w>129||h>129){const err=new Error('a patchDef of '+w+' x '+h+' points (the engine stops at 129)');err.off=at;throw err;}
     P.w=w;P.h=h;
     const pts=new Float64Array(w*h*5);
     for(let j=0;j<w;j++)for(let i=0;i<h;i++){const v=rows[j][i]||rows[j][rows[j].length-1];for(let k=0;k<5;k++)pts[(j*h+i)*5+k]=v[k];}
@@ -454,13 +469,14 @@ function readMap(text){
   }
   function terrain(){
     expect('{');
+    const at=(p<N)?T.s[p]:text.length;                // its size, for an error below
     const T2={W:num()|0,H:num()|0,fl:num()|0,org:[num(),num(),num()],corners:[],heights:null,hole1:null,hole2:null};
     // MOHAA writes 9 x 9; a size far past that is a damaged file, not a bigger block
-    if(T2.W<2||T2.H<2||T2.W>257||T2.H>257)throw new Error('terrainDef of '+T2.W+' x '+T2.H+' points');
+    if(T2.W<2||T2.H<2||T2.W>257||T2.H>257){const err=new Error('a terrainDef of '+T2.W+' x '+T2.H+' points (MOHAA writes 9 x 9)');err.off=at;throw err;}
     expect('{');
     while(p<N&&t[p]!=='}'){
       const miss=num(),b2=num(); expect('(');
-      const tx=tokStr(t[p++]); const v=[];while(p<N&&t[p]!==')')v.push(parseFloat(tokStr(t[p++]))||0); expect(')');
+      const tx=word(); const v=[];while(p<N&&t[p]!==')')v.push(parseFloat(tokStr(t[p++]))||0); expect(')');
       T2.corners.push({miss:miss|0,b:b2,tex:tx,sh:[v[0]||0,v[1]||0],rot:v[2]||0,tw:v[3]||0,sc:[v[4]||1,v[5]||1],cont:(v[6]||0)|0,flags:(v[7]||0)|0});
     }
     expect('}');
@@ -484,7 +500,7 @@ function readMap(text){
     try{
       while(p<N&&t[p]!=='}'){
         if(t[p]==='{'){
-          const ps=T.s[p]; p++;
+          const ps=T.s[p], pi=p; p++;
           const kw=(typeof t[p]==='string')?t[p].toLowerCase():'';
           let prim=null;
           try{
@@ -493,9 +509,12 @@ function readMap(text){
             else if(kw==='brushdef'){p++;expect('{');const faces=[];while(p<N&&t[p]==='(')faces.push(face());expect('}');expect('}');prim={kind:0,d:{faces:faces}};}
             else{const faces=[];while(p<N&&t[p]==='(')faces.push(face());expect('}');prim={kind:0,d:{faces:faces}};}
           }catch(err){
-            errors.push('entity '+ents.length+', brush '+e.prims.length+': '+err.message);
-            // resync: skip to the end of this primitive block
-            let d=1;while(p<N&&d>0){if(t[p]==='{')d++;else if(t[p]==='}')d--;p++;}
+            // which entity and primitive, where it starts and where it went wrong, and why
+            errors.push({ent:ents.length,prim:e.prims.length,kind:kw==='terraindef'?'terrain block':(kw==='patchdef2'||kw==='patchdef3')?'patch':'brush',
+              start:ps,off:(err.off!=null)?err.off:ps,msg:err.message});
+            // resync: back to the primitive's "{" and past the "}" that closes it, so an
+            // error inside a patch's or terrain block's inner { } doesn't end the entity
+            p=pi;skipBlock();
             prim=null;
           }
           if(prim){prim.ts=ps;prim.te=T.e[p-1];prim.bn=e.prims.length;e.prims.push(prim);
@@ -506,7 +525,7 @@ function readMap(text){
           e.kv.push([k,v]); const kl=k.toLowerCase(); if(!(kl in e.kvl))e.kvl[kl]=v;
         }
       }
-    }catch(err){errors.push('entity '+ents.length+': '+err.message);}
+    }catch(err){errors.push({ent:ents.length,prim:-1,kind:'entity',start:e.ts,off:(err.off!=null)?err.off:e.ts,msg:err.message});}
     e.te=(p<N)?T.e[p]:text.length; p++;
     e.cls=(e.kvl.classname||'').toLowerCase();
     ents.push(e);
@@ -2454,7 +2473,7 @@ function setHover(h){
 setHover.key=null;setHover.h=null;
 // a click that selects what is under the mouse takes its hover outline away
 function refreshHover(){if(!gl)return;setHover.key=undefined;setHover(setHover.h);}
-function selectionChanged(){rebuildSelection();refreshHover();updateSelPanel();if($('info').classList.contains('on'))showInfo(infoMode);requestDraw();}
+function selectionChanged(){rebuildSelection();refreshHover();updateSelPanel();if($('info').classList.contains('on'))showInfo(infoMode==='errs'?'sel':infoMode);requestDraw();}
 function clickSelect(h,mods){
   if(mods.ctrl&&mods.shift&&!mods.alt){faceInfoAt(h);return;}
   if(mods.ctrl&&mods.alt){selectPath(h,mods.shift);return;}
@@ -2983,8 +3002,50 @@ function srcText(a,b){return D.srcText.slice(a,b);}
 function card(title,body){$('infoTitle').textContent=title;$('infoBody').innerHTML=body;$('info').classList.add('on');$('infoBody').scrollTop=0;}
 function kvTable(rows){return '<table>'+rows.map(r=>'<tr><td class="k">'+esc(r[0])+'</td><td>'+r[1]+'</td></tr>').join('')+'</table>';}
 function copyBtn(text,label){return ' <button class="sm" data-copy="'+esc(text)+'">'+(label||'Copy')+'</button>';}
+// ---- blocks of the .map the reader skipped (readMap's errors) ----------------------
+// Each is listed with its entity and primitive, its line in the .map and why it was
+// skipped; the rest of the map is drawn without it. The red line under the map's stats
+// opens the list, and in the launcher's pane it goes to the Output console too.
+function errorLines(){                 // [{line, text}] for MAP.errors, in one pass over the text
+  if(MAP.errLines)return MAP.errLines;
+  const s=D.srcText, out=new Array(MAP.errors.length);
+  const order=MAP.errors.map((x,i)=>i).sort((a,b)=>MAP.errors[a].off-MAP.errors[b].off);
+  let line=1,pos=0;
+  for(const i of order){
+    const off=MAP.errors[i].off;let j;
+    while((j=s.indexOf('\n',pos))>=0&&j<off){line++;pos=j+1;}
+    let e=s.indexOf('\n',pos);if(e<0)e=s.length;
+    const tx=s.slice(pos,e).trim();
+    out[i]={line:line,text:tx.length>160?tx.slice(0,160)+'…':tx};
+  }
+  return MAP.errLines=out;
+}
+function errText(x,l){
+  return 'entity '+x.ent+' ('+(MAP.ents[x.ent]?entName(x.ent):'?')+')'+(x.prim>=0?', '+x.kind+' '+x.prim:'')+', line '+l.line+': '+x.msg;
+}
+function infoErrors(){
+  const L=errorLines(), n=MAP.errors.length, shown=Math.min(n,300);
+  let h='<div class="note">The .map reader skipped '+(n===1?'this block':'these '+n+' blocks')+' and drew the rest of the map without '+(n===1?'it':'them')+
+    '. Line numbers are in '+(D.kind==='bsp'?'the .map decompiled from the .bsp (written next to this page; the launcher\'s .map button opens it)':'the .map')+'.</div>';
+  for(let i=0;i<shown;i++){const x=MAP.errors[i],l=L[i],e=MAP.ents[x.ent];
+    // the entity links to it (select, fly to, its card); the world isn't one thing to fly to
+    const who=!e?'entity '+x.ent:(x.ent>0&&!isWorldlike(x.ent))?linkEnt(x.ent):esc(entName(x.ent))+' <span class="co">(entity '+x.ent+')</span>';
+    h+='<h4>'+(x.prim>=0?esc(x.kind)+' '+x.prim+' of ':'')+'entity '+x.ent+'<span class="sp"></span>line '+l.line+'</h4>'+
+      '<div>'+who+'</div><div class="warn">'+esc(x.msg)+'</div><pre>'+esc(l.text)+'</pre>';}
+  if(n>shown)h+='<div class="note">… and '+(n-shown)+' more.</div>';
+  card(n+' unreadable block'+(n===1?'':'s')+' skipped',h);
+}
+function reportMapErrors(){
+  const n=MAP.errors.length;
+  if(!n)return;
+  console.warn('map blocks skipped',MAP.errors);
+  try{if(window.chrome&&window.chrome.webview){const L=errorLines();
+    window.chrome.webview.postMessage('mohaa-map-errors\n'+TITLE+'\n'+n+'\n'+MAP.errors.slice(0,100).map((x,i)=>errText(x,L[i])).join('\n'));}}catch(_e){}
+}
+$('stats').addEventListener('click',e=>{if(e.target.closest('[data-errs]'))showInfo('errs');});
 function showInfo(mode){
   infoMode=mode||'sel';
+  if(infoMode==='errs')return infoErrors();
   if(infoMode==='face'){if(lastHit&&lastHit.face>=0)return infoFace(lastHit);}
   if(!SEL.size){if(lastHit&&lastHit.face>=0&&infoMode!=='sel')return infoFace(lastHit);card('Nothing selected','<div class="note">Click a brush or entity first (Ctrl+click opens this card straight away).</div>');return;}
   const ents=[...selectedEnts()], prims=selectedPrims();
@@ -3191,7 +3252,6 @@ async function main(){
     setLoad('Reading the .map…',0.15);await tick();
     D.srcText=new TextDecoder('windows-1252').decode(D.bytes(D.src));
     MAP=readMap(D.srcText);
-    if(MAP.errors.length)console.warn('map errors',MAP.errors);
     TEX=(D.tex||[]).map((t,i)=>Object.assign({},t,{i:i}));
     for(const t of TEX)TEXI.set(t.n,t);
     setLoad('Building brushes, patches and terrain…',0.3);await tick();
@@ -3217,10 +3277,12 @@ async function main(){
     $('ttl').textContent=TITLE;
     const nb=MAP.ents.reduce((a,e)=>a+e.brushes.length,0),np=MAP.ents.reduce((a,e)=>a+e.patches.length,0),nt=MAP.ents.reduce((a,e)=>a+e.terrains.length,0);
     $('stats').innerHTML=nb+' brushes · '+np+' patches · '+nt+' terrain<br>'+MAP.ents.length+' entities · '+(D.models||[]).length+' models · '+TEX.length+' textures'+
-      (D.kind==='bsp'?'<br>decompiled from the .bsp (v'+(D.bsp&&D.bsp.version)+')':'')+(MAP.errors.length?'<br><span style="color:var(--err)">'+MAP.errors.length+' unreadable block(s) skipped</span>':'');
+      (D.kind==='bsp'?'<br>decompiled from the .bsp (v'+(D.bsp&&D.bsp.version)+')':'')+
+      (MAP.errors.length?'<br><a class="errlink" data-errs title="Which blocks, where they are in the .map, and why">'+MAP.errors.length+' unreadable block'+(MAP.errors.length===1?'':'s')+' skipped</a>':'');
     $('msgLine').textContent=wk.message?'"'+wk.message+'"':'';
     setTab('cls');
     $('loading').style.display='none';
+    reportMapErrors();
     updateSelPanel();
     requestAnimationFrame(loop);
     draw();

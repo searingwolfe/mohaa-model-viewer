@@ -433,3 +433,24 @@ Changes to `python_installer_updater.bat` unless noted.
     clicked).
   - The shortcut lists (`H`, and `F1` in the launcher) name the Same kind and Same path
     buttons.
+- Map Viewer page rev 15 (`MAP_VIEWER_REV` 15, `MAP_VIEWER_REV_REQUIRED` 15): blocks the
+  page can't read.
+  - Spearhead's `t1l1` and `t1l1_sml` showed "1 unreadable block(s) skipped". The block is
+    the one brush of entity 1072 (`script_object`, `$targetname` `tracer_1`): its shader in
+    the `.bsp` is `textures/(0`, a texture name q3map took from EA's map source. The
+    decompiler writes it back as it is; the page's tokenizer split it into `(` and `0` and
+    gave up on the brush. A texture name is now one word, as q3map and MOHRadiant read it
+    (`GetToken` stops only at white space), so the brush loads (drawn flat grey: no such
+    texture). Every other map checked reads exactly as before: the 54 retail Allied
+    Assault maps, the other 34 Spearhead maps and the 17 sample `.map` sources.
+  - The red line now says which blocks: it opens a card listing each skipped block with
+    its entity (linked, unless it is part of the world), the brush, patch or terrain
+    block, its line in the `.map` (the decompiled one for a `.bsp`), the reason and the
+    line itself. In the launcher's pane the page also sends the list to the Output
+    console, in red.
+  - After a block it can't read, the reader carries on past the `}` that closes that
+    block. It used to stop at the first `}` it met, which inside a patch or terrain block
+    is the inner one: the entity then ended early, and everything after it was read as
+    new entities (a test copy of m1l1 with a damaged patch listed 616 errors and 613
+    entities too many; now the patch is one error and the entity count is right).
+  - Messages say what was found instead of a text offset (`expected "(" but found "0"`).

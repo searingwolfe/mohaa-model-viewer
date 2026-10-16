@@ -41,7 +41,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 14
+MAP_VIEWER_REV_REQUIRED = 15
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".cfg": "scr"}
@@ -1203,6 +1203,21 @@ class MapApp(ML.App):
                     elif m == "mohaa-close":
                         # runs on the WebView2 thread: hand it to the Tk main thread
                         self._log_q.put(("closeview", None))
+                    elif m.startswith("mohaa-map-errors\n"):
+                        # blocks of the .map the page's reader skipped: title, count, then
+                        # one line each (entity, primitive, line in the .map, why); in red
+                        # (a warning: the rest of the map is shown)
+                        rows = m.split("\n")[1:]
+                        title = rows[0] if rows else "?"
+                        try: total = int(rows[1])
+                        except Exception: total = 0
+                        rows = [r for r in rows[2:] if r]
+                        total = max(total, len(rows))
+                        self._log_q.put(("warn", f"  {title}: the viewer skipped {total} unreadable block{'' if total == 1 else 's'} of the .map:"))
+                        for r in rows:
+                            self._log_q.put(("warn", "    " + r))
+                        if total > len(rows):
+                            self._log_q.put(("warn", f"    ... and {total - len(rows)} more (the red line in the viewer's panel opens the list)"))
                 except Exception as e:
                     self._log_q.put(("dim", f"(viewer message: {e})"))
             wv.core.WebMessageReceived += _msg
