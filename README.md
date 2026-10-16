@@ -275,8 +275,10 @@ shown in the map.
 ![Map Viewer: full launcher view of a map and its right-side panel](screenshots/map5.jpg)
 ![Map Viewer: another full launcher view of a map](screenshots/map6.jpg)
 ![Map Viewer: a path node's info card in the Editor look](screenshots/map2.jpg)
-![Map Viewer: the legend](screenshots/map3.jpg)
 ![Map Viewer: a landing craft in the In-game look, with entity labels](screenshots/map4.jpg)
+![Map Viewer: the legend of brushes/entities 1](screenshots/legend1.jpg)
+![Map Viewer: the legend of brushes/entities 2](screenshots/legend2.jpg)
+![Map Viewer: the legend of brushes/entities 3](screenshots/legend3.jpg)
 
 # Updating
 
