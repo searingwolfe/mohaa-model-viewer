@@ -29,14 +29,14 @@ self-contained HTML pages that open in the launcher's embedded 3D pane or in any
 **Requirements** (the same for both viewers):
 
 * **Python 3.8 or newer** (3.11+ recommended), with the `tkinter` GUI module.
-* **Pillow 10.3 or newer**: required. MOHAA textures are `.tga` and nothing else decodes
+* **Pillow 10.3 or newer**: required. MOHAA textures are `.tga` files, and nothing else decodes
   them. (Pillow 10.3 is also why Python 3.8 is the minimum.)
-* Your own legally obtained copy of the game, for its `.pk3` files.
-* Optional, Windows 8.1 and newer: an embedded 3D pane instead of a browser tab
+* A full copy of the game (and/or SH and BT expansions), for its `.pk3` files.
+* Optional, Windows 8.1 and newer: allows for an embedded 3D pane instead of a browser tab
   (`pythonnet`, `pywebview==4.4.1`, `tkwebview2` and the Microsoft Edge WebView2 Runtime,
   which ships with Windows 10 and 11).
-* Without the pane, pages open in your browser. The Map Viewer needs WebGL 2, which every
-  current browser has; the Model Viewer falls back to a 2D renderer without WebGL.
+* Without the embedded pane, HTML pages auto-open in your browser. The Map Viewer needs WebGL 2 to work,
+  which every current browser has, but the Model Viewer falls back to a 2D renderer without WebGL.
 
 The packages are listed in [`docs/requirements.txt`](docs/requirements.txt). On Windows,
 the RUN `.bat` files check for all of these and install what's missing.
