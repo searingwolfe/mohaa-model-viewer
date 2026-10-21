@@ -41,68 +41,49 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 15
+MAP_VIEWER_REV_REQUIRED = 17
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".cfg": "scr"}
 TEXT_KINDS = ("scr",)
 
-HOTKEYS_LAUNCHER = [
-    ("", "--- Launcher ---"),
-    ("Ctrl+O", "Add .pk3 pak(s)"),
-    ("Ctrl+Shift+O", "Open a loose .bsp / .map file"),
-    ("Ctrl+F", "Focus the search box"),
-    ("Esc", "Clear search / close a menu / cancel loading"),
-    ("F5", "Reload all loaded paks"),
-    ("Ctrl+T", "Toggle Dark / Light theme"),
-    ("Ctrl+Shift+T", "Use old (OS-default) popup windows on/off"),
-    ("F1", "Show this shortcut list"),
-    ("F2", "Show the legend: colours, markers and editor surfaces"),
-    ("", "--- Pak tree ---"),
-    ("Enter", "Open file / descend into folder"),
-    ("Backspace", "Go up one folder"),
-    ("Right / Left", "Expand / collapse folder"),
-    ("Up / Down", "Move selection"),
-    ("Double-click", ".bsp / .map opens in the viewer, .scr in your text editor"),
-    ("Ctrl+Click / Shift+Click", "Select multiple maps (Enter or right-click batch-builds them)"),
-    ("Right-click", "File / folder / pak menu (decompile only, text editor...)"),
-    ("Drag a file off the window", "Open it in its own browser window"),
-]
-HOTKEYS_VIEWER = [
-    ("", "--- 3D viewer - Free-look camera (click inside the map first) ---"),
-    ("drag / wheel", "Look around / move forward & back"),
-    ("W / S / A / D", "Move forward / back, strafe (hold Shift = faster)"),
-    ("Space / C,  Q / E", "Move up / down,  tilt left / right"),
-    ("Arrows", "Move forward / back, turn left / right"),
-    ("", "--- 3D viewer - Radiant-look camera (MOHRadiant's keys) ---"),
-    ("right-drag", "Fly: push up = forward, left / right = turn"),
-    ("Arrows,  , / .", "Move forward / back, turn,  strafe left / right"),
-    ("D / C,  A / Z", "Move up / down,  look up / down"),
-    ("End,  PgUp / PgDn", "Level the view,  up / down one floor"),
-    ("Shift,  Ctrl", "Faster,  one grid step (with the arrows or , / .)"),
-    ("[ / ]", "Cubic clip nearer / further"),
-    ("", "--- 3D viewer - both cameras ---"),
-    ("V,  R", "Switch Free-look / Radiant-look,  back to the player start"),
-    ("F / double-click", "Fly to the selection"),
-    ("middle-drag", "Slide (strafe / rise)"),
-    ("", "--- 3D viewer - selecting ---"),
-    ("click,  Shift+click", "Select a brush or entity,  add to / remove from the selection"),
-    ("Ctrl+click or N", "More info: keys, origin, setsize, targets, script lines"),
-    ("Alt+click", "Select all of the same kind (Same kind button)"),
-    ("Ctrl+Alt+click", "Select the whole path through an entity, before and after it (Same path button)"),
-    ("Ctrl+Shift+click", "The clicked face's texture (middle-click too)"),
-    ("Backspace / Shift+H", "Hide the selection / show everything"),
-    ("Ctrl+F or /", "Find (class, targetname, key, texture)"),
-    ("", "--- 3D viewer - show / hide and display ---"),
-    ("Alt+1 ... Alt+0", "World, entities, patches, translucent, liquids, caulk, clips, paths, AI nodes, lights"),
-    ("Ctrl+D / H / M / R / T / P / K", "Details, hints, models, terrain, triggers, areaportals, sky"),
-    ("B,  K", "Full Brightness / the game's own lighting,  Simple Sky / the game's sky"),
-    ("M", "Simple models: trees drawn as the sprite the game shows far away"),
-    ("1 - 9", "Texture, Shade, Wire, Setsizes, Arrows, Labels, Links, Fog, X-ray"),
-    ("H or ?,  L", "The viewer's shortcut overlay,  the legend"),
-    ("T,  \\", "Theme,  collapse the panel"),
-    ("Esc", "Close a card / clear the selection / close the map"),
-]
+# The launcher's own shortcuts: the "Launcher" tab of the F1 window (its "3D viewer" tab
+# shows MAP_VIEWER_KEYS from mohaa_map_view.py). The Model Viewer's KEYS_LAUNCHER with the
+# map launcher's differences; same format (VIEWER_KEYS in mohaa_view.py).
+MAP_KEYS_LAUNCHER = {
+    "title": "Launcher keyboard shortcuts",
+    "cols": [
+        {"title": "Launcher", "rows": [
+            ML._kx_sub("Anywhere in the launcher", "app"),
+            ML._kx("Ctrl+O", "add .pk3 pak(s)", ("Ctrl+O", "add paks")),
+            ML._kx("Ctrl+Shift+O", "open a loose .bsp / .map file", ("Ctrl+Shift+O", "open file")),
+            ML._kx("Ctrl+F", "focus the search box", ("Ctrl+F", "search")),
+            ML._kx("Esc", "clear the search / close a menu / cancel loading", ("Esc", "cancel")),
+            ML._kx("F5", "reload all loaded paks", ("F5", "reload")),
+            ML._kx("Ctrl+T", "dark / light theme", ("Ctrl+T", "theme")),
+            ML._kx("Ctrl+Shift+T", "old (OS-default) popup windows on / off", ("Ctrl+Shift+T", "old pop")),
+            ML._kx("F1", "this window", ("F1", "keys", "the keyboard shortcuts (this window)")),
+            ML._kx("F2", "the legend: colours, markers and editor surfaces", ("F2", "legend")),
+            ML._kx("right-click", "on the Output console or the details panel: copy menu",
+                   ("RClick", "copy", "copy menu (Output console, details panel)")),
+        ]},
+        {"title": "Pak tree", "rows": [
+            ML._kx_sub("In the pak tree", "tree"),
+            ML._kx("Enter", "open the file / go into the folder", ("Enter", "open")),
+            ML._kx("Backspace", "go up one folder", ("Backspace", "up")),
+            ML._kx("Right|Left", "expand / collapse the folder", ("Right", "expand", "expand the folder"),
+                   ("Left", "collapse", "collapse the folder")),
+            ML._kx("Up|Down", "move the selection", ("Up", "up", "select the row above"),
+                   ("Down", "down", "select the row below")),
+            ML._kx("double-click", ".bsp / .map opens in the viewer, .scr in your text editor", ("DblClick", "open")),
+            ML._kx("Ctrl+click|Shift+click", "select several maps (Enter or right-click builds them all)",
+                   ("Ctrl+Click", "select +", "add a map to the selection"), ("Shift+Click", "range", "select a range of maps")),
+            ML._kx("right-click", "file / folder / pak menu (decompile only, text editor ...)",
+                   ("RClick", "menu", "file / folder / pak menu")),
+            ML._kx("drag", "a file off the window: open it in its own browser window",
+                   ("Drag", "drag out", "drag a file off the window: open it in its own browser window")),
+        ]},
+    ]}
 
 
 # The Model Viewer's privacy notice (PRIVACY_TEXT in mohaa_launcher.py), reworded for this
@@ -231,6 +212,9 @@ class MapApp(ML.App):
         self.bind_all("<ButtonPress-3>", self._popup_dismiss_check, add="+")
         self.bind_all("<ButtonPress-1>", self._reclaim_focus, add="+")
         self.bind_all("<ButtonPress-3>", self._reclaim_focus, add="+")
+        self.bind_all("<ButtonPress-1>", self._stop_view_camera, add="+")
+        self.bind_all("<ButtonPress-3>", self._stop_view_camera, add="+")
+        self._page_requests = []       # from the page's messages, run on the Tk thread (_poll_log)
         self.bind("<Configure>", self._dismiss_transients, add="+")
         self.bind("<Unmap>", self._dismiss_transients, add="+")
         self.bind("<FocusOut>", self._popup_focus_out, add="+")
@@ -1018,7 +1002,8 @@ class MapApp(ML.App):
                     line = line.rstrip("\n")
                     out_lines.append(line)
                     if bgen is not None and bgen != self._build_gen: break
-                    self._log_q.put(("err" if line.lstrip().startswith("!") else "dim", "  " + line))
+                    # "!" lines in red, as warnings: the build carries on ("err" would end it)
+                    self._log_q.put(("warn" if line.lstrip().startswith("!") else "dim", "  " + line))
                 err = p.stderr.read()
                 p.wait(timeout=900)
             finally:
@@ -1129,6 +1114,12 @@ class MapApp(ML.App):
         if info:
             t.insert("end", "Total brushes    %d\n" % info.get("brushes", 0), "tname")
             t.insert("end", "Total entities   %d\n" % info.get("entities", 0), "tname")
+            if "real" in info:
+                # real: an entity number in game (1024 slots); simple: path nodes, player
+                # starts, lights...; static props: drawn without an entity
+                t.insert("end", "  real           %d\n" % info.get("real", 0), "terr" if info.get("real", 0) > 1024 else "tdim")
+                t.insert("end", "  simple         %d\n" % info.get("simple", 0), "tdim")
+                t.insert("end", "  static props   %d\n" % info.get("static", 0), "tdim")
             t.insert("end", "Net brush count  %d\n" % info.get("netBrushes", 0), "tname")
             t.insert("end", "  (brushes not in an entity)\n", "tdim")
             t.insert("end", "\nEntity breakdown\n", "thead")
@@ -1151,6 +1142,69 @@ class MapApp(ML.App):
                             tip="Open the map's .map source in your Text Editor\n" + mp).pack(side="left", padx=(4, 0))
 
     # ------------------------------------------------ embedded pane hooks ---
+    def _poll_log(self):
+        """The base class's log poll, after running what the page asked for (its messages
+        arrive on the WebView2 thread; these must run on the Tk thread)."""
+        reqs = getattr(self, "_page_requests", None)
+        while reqs:
+            fn = reqs.pop(0)
+            try: fn()
+            except Exception as e: self._log_line(f"(viewer request: {e})", "err")
+        super()._poll_log()
+
+    def _stop_view_camera(self, e):
+        """A click on the launcher stops the embedded viewer's camera: the key or mouse button
+        moving it is let go here, where the page never hears it, so it would keep moving
+        (the page's X does the same by hand)."""
+        if self._webview is None: return
+        try:
+            w = e.widget
+            if isinstance(w, str): w = self.nametowidget(w)
+            if w is self._webview or str(w).startswith(str(self._webview)): return
+        except Exception: pass
+        self._embed_js("try{if(typeof stopCamera==='function')stopCamera();}catch(e){}")
+
+    # Text editors that open a file at a line, and how: {program name: args(file, line)}.
+    _EDITOR_LINE = {
+        "notepad++": lambda f, n: ["-n%d" % n, f],
+        "code": lambda f, n: ["-g", "%s:%d" % (f, n)],
+        "code - insiders": lambda f, n: ["-g", "%s:%d" % (f, n)],
+        "codium": lambda f, n: ["-g", "%s:%d" % (f, n)],
+        "sublime_text": lambda f, n: ["%s:%d" % (f, n)],
+        "subl": lambda f, n: ["%s:%d" % (f, n)],
+        "notepad2": lambda f, n: ["/g", str(n), f],
+        "notepad3": lambda f, n: ["/g", str(n), f],
+        "emeditor": lambda f, n: ["/l", str(n), f],
+        "gedit": lambda f, n: ["+%d" % n, f],
+        "kate": lambda f, n: ["-l", str(n), f],
+        "gvim": lambda f, n: ["+%d" % n, f],
+    }
+
+    def _open_map_at(self, line, page_map=""):
+        """An info card's Open (the page's "mohaa-open-map" message): the viewed map's .map in
+        the Text Editor, at the line of that entity or brush when the editor takes a line
+        (Notepad++, VS Code, Sublime Text, Notepad2/3, EmEditor...; Notepad opens it at the
+        top). The .map is the one the page was built from (a .bsp's decompiled .map), else
+        the last map shown here."""
+        mp = page_map if (page_map and page_map.lower().endswith(".map") and os.path.isfile(page_map)) else None
+        if mp is None and self._last_info:
+            path, _out, html_path = self._last_info
+            info = self._read_page_info(html_path)
+            mp = info.get("mapFile") or (path if path.lower().endswith(".map") else None)
+        if not mp or not os.path.isfile(mp):
+            self._log_line("(the .map for this page wasn't found - rebuild the map to write it again)", "err"); return
+        prog = (self._cfg.get("text_editor") or "").strip()
+        name = os.path.splitext(os.path.basename(prog))[0].lower()
+        args = self._EDITOR_LINE.get(name)
+        if not args or line <= 0 or not (os.path.isabs(prog) and os.path.isfile(prog)):
+            # no line to go to, or the editor needs the usual checks: open the file as the .map button does
+            self._launch_with("text_editor", "text editor", "Text Editor", mp); return
+        try:
+            subprocess.Popen([prog] + args(mp, line))
+            self._log_line(f"opened with {os.path.basename(prog)}: {os.path.basename(mp)} at line {line}", "dim")
+        except Exception:
+            self._launch_with("text_editor", "text editor", "Text Editor", mp)
+
     def _hook_embed_drop(self, _tries=0):
         """As the Model Viewer's (refuse file drops on the pane, catch them ourselves, and
         listen for the page's messages), for .bsp / .map files."""
@@ -1203,6 +1257,12 @@ class MapApp(ML.App):
                     elif m == "mohaa-close":
                         # runs on the WebView2 thread: hand it to the Tk main thread
                         self._log_q.put(("closeview", None))
+                    elif m.startswith("mohaa-open-map\n"):
+                        # an info card's Open: the .map at a line (and the .map the page was built from)
+                        parts = (m.split("\n") + ["", ""])[1:3]
+                        try: line = int(parts[0])
+                        except Exception: line = 0
+                        self._page_requests.append(lambda l=line, f=parts[1]: self._open_map_at(l, f))
                     elif m.startswith("mohaa-map-errors\n"):
                         # blocks of the .map the page's reader skipped: title, count, then
                         # one line each (entity, primitive, line in the .map, why); in red
@@ -1275,22 +1335,10 @@ class MapApp(ML.App):
             self._log_line(f"(drag-drop unavailable: {e}; use Browse)", "dim")
 
     # ------------------------------------------------------------ dialogs ---
-    def _show_hotkeys(self):
-        """Help > Keyboard shortcuts (F1): the launcher's keys and the viewer's."""
-        old = ML.OLD_POPUPS
-        w = tk.Toplevel(self); w.title("All Keyboard shortcuts")
-        w.transient(self); w.resizable(False, False)
-        if not old: w.configure(bg=ML.BG)
-        frm = tk.Frame(w) if old else ttk.Frame(w, style="Panel.TFrame")
-        frm.pack(fill="both", expand=True, padx=10, pady=10)
-        self._fill_hotkeys(frm, HOTKEYS_LAUNCHER, 0, old)
-        self._fill_hotkeys(frm, HOTKEYS_VIEWER, 2, old)
-        btn = tk.Button(w, text="Close", command=w.destroy) if old else ttk.Button(w, text="Close", command=w.destroy, cursor="hand2")
-        btn.pack(pady=(0, 10))
-        w.bind("<Escape>", lambda e: w.destroy()); w.bind("<F1>", lambda e: w.destroy())
-        self._center(w)
-        if not old: self._apply_titlebar(w)
-        w.grab_set(); btn.focus_set()
+    def _keymap_tabs(self):
+        """The F1 window's tabs (the window itself is the Model Viewer's KeyMapWindow)."""
+        import mohaa_map_view as MMV
+        return [("3D viewer", MMV.MAP_VIEWER_KEYS, self.KEYMAP_VIEWER_HINT), ("Launcher", MAP_KEYS_LAUNCHER)]
 
     def _show_legend(self):
         """Help > Legend (F2): what the viewer's colours, markers and editor surfaces mean.

@@ -51,6 +51,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  /* "N unreadable blocks skipped" under the map's stats: opens the list of them */
  a.errlink{color:var(--err);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
  a.errlink:hover{text-decoration-style:solid}
+ /* the real / simple / static-prop entity counts (each explains itself in its tooltip) */
+ #stats .ek{cursor:help;border-bottom:1px dotted var(--line)} #stats .ek.over{color:var(--err)}
  .row{display:flex;align-items:center;gap:8px;margin:5px 0;flex-wrap:wrap}
  button,select{background:var(--btn);color:var(--txt);border:1px solid var(--line);
    border-radius:6px;padding:5px 9px;font:inherit;cursor:pointer;
@@ -70,6 +72,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  .tg{display:flex;flex-wrap:wrap;gap:5px}
  .tg button{padding:3px 7px;font-size:11px}
  .tg button .k{color:var(--dim);font-size:10px;margin-left:4px}
+ /* Entities with only some of its kinds hidden by their own buttons */
+ .tg button.part{border-style:dashed}
  .tg button.on .k{color:inherit;opacity:.75}
  #hint{position:absolute;left:10px;bottom:8px;right:10px;color:var(--dim);font-size:11px;pointer-events:none;
    display:flex;gap:10px;flex-wrap:wrap}
@@ -91,11 +95,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
    padding:16px 20px 14px;max-height:86%;max-width:92%;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.5)}
  .card h3{margin:0 0 10px;color:var(--accent);font-size:13px}
- #helpCard table{border-collapse:collapse;font-size:12px}
- #helpCard td{padding:2px 12px 2px 0;vertical-align:top}
- #helpCard td:first-child{color:var(--accent);white-space:nowrap}
- #helpCard .grp td{color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.1em;padding-top:9px}
- #helpCard .cols{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start}
  /* The legend (L): one column per section (path nodes, entities, brushes), each scrolling
     on its own under its heading. A narrow window stacks them. */
  #legCard{width:1180px;height:min(640px,86%);display:flex;flex-direction:column;overflow:hidden}
@@ -159,11 +158,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  .li img{width:18px;height:18px;object-fit:cover;border-radius:2px;flex:none;image-rendering:auto}
  .li.sub{padding-left:22px;font-size:12px}
  .li.sel .nm{color:var(--accent)}
+ /* hidden (Hide, or a Show button off) in red; a class with some of its entities hidden in yellow */
+ .li.hid .nm,.li.hid .ct{color:var(--err)} .li.part .nm,.li.part .ct{color:var(--warn)}
  #findIn{width:100%}
  ::-webkit-scrollbar{width:10px;height:10px}
  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
  ::-webkit-scrollbar-thumb:hover{background:var(--btnhover)}
  ::-webkit-scrollbar-track{background:transparent}
+ /* the hotkey on the All / In-game look / Editor look buttons */
+ .row button .k{color:var(--dim);font-size:10px;margin-left:4px} .row button.on .k{color:inherit;opacity:.75}
+__KEYS_CSS__
 </style>
 <script>
 /* Boot flags from the URL hash the launcher opens us with (#embed&theme=dark), applied
@@ -190,66 +194,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="sm" id="infoClose" title="Close (Esc)">&#10005;</button></div>
     <div id="infoBody"></div></div>
   <div id="loading"><div id="loadMsg">Loading map&hellip;</div><div class="bar"><i id="loadBar"></i></div></div>
-  <div id="helpOv" class="ov" style="display:none">
-   <div class="card" id="helpCard">
-    <h3>Map viewer keyboard shortcuts</h3>
-    <div class="cols"><table>
-     <tr class="grp"><td colspan="2">Free-look camera</td></tr>
-     <tr><td>drag / wheel</td><td>look around / move forward &amp; back</td></tr>
-     <tr><td>W / S</td><td>move forward / back</td></tr>
-     <tr><td>A / D</td><td>strafe left / right</td></tr>
-     <tr><td>Space / C</td><td>move up / down</td></tr>
-     <tr><td>Q / E</td><td>tilt (roll) left / right</td></tr>
-     <tr><td>Up / Down</td><td>move forward / back</td></tr>
-     <tr><td>Left / Right</td><td>turn left / right</td></tr>
-     <tr><td>Shift</td><td>move faster</td></tr>
-     <tr class="grp"><td colspan="2">Radiant-look camera (MOHRadiant keys)</td></tr>
-     <tr><td>right-drag</td><td>fly: up/down = forward/back, left/right = turn</td></tr>
-     <tr><td>Up / Down</td><td>move forward / back</td></tr>
-     <tr><td>Left / Right</td><td>turn left / right</td></tr>
-     <tr><td>, / .</td><td>strafe left / right</td></tr>
-     <tr><td>D / C</td><td>move up / down</td></tr>
-     <tr><td>A / Z</td><td>look up / down</td></tr>
-     <tr><td>End</td><td>level the view</td></tr>
-     <tr><td>Shift / Ctrl</td><td>fast / one grid step</td></tr>
-     <tr><td>PgUp / PgDn</td><td>up / down one floor</td></tr>
-     <tr><td>[ / ]</td><td>cubic clip nearer / further</td></tr>
-     <tr class="grp"><td colspan="2">Both cameras</td></tr>
-     <tr><td>middle-drag</td><td>slide (strafe / rise)</td></tr>
-     <tr><td>V</td><td>switch Free-look / Radiant-look</td></tr>
-     <tr><td>R</td><td>back to the player start</td></tr>
-     <tr><td>F / double-click</td><td>fly to the selection</td></tr>
-     <tr><td>Ctrl+\</td><td>cubic clipping on / off</td></tr>
-    </table><table>
-     <tr class="grp"><td colspan="2">Selecting</td></tr>
-     <tr><td>click</td><td>select a brush / entity</td></tr>
-     <tr><td>Shift+click</td><td>add to / remove from the selection</td></tr>
-     <tr><td>Ctrl+click</td><td>select and show more info</td></tr>
-     <tr><td>Alt+click</td><td>select everything of the same kind (Same kind button)</td></tr>
-     <tr><td>Ctrl+Alt+click</td><td>select the whole path through an entity: its "target" chain, before and after it (Same path button)</td></tr>
-     <tr><td>Ctrl+Shift+click</td><td>the clicked face's texture info (middle-click too)</td></tr>
-     <tr><td>N</td><td>more info on the selection</td></tr>
-     <tr><td>Backspace</td><td>hide the selection</td></tr>
-     <tr><td>Shift+H</td><td>show everything hidden</td></tr>
-     <tr><td>Ctrl+F or /</td><td>find (class, targetname, key, texture)</td></tr>
-     <tr><td>Esc</td><td>close a card / clear the selection / close the map</td></tr>
-     <tr class="grp"><td colspan="2">Show / hide (as in MOHRadiant)</td></tr>
-     <tr><td>Alt+1 &hellip; Alt+0</td><td>world &middot; entities &middot; patches &middot; translucent &middot; liquids &middot; caulk &middot; clips &middot; paths &middot; AI nodes &middot; lights</td></tr>
-     <tr><td>Ctrl+D / H / M</td><td>details &middot; hints &amp; skips &middot; models</td></tr>
-     <tr><td>Ctrl+R / T / P / K</td><td>terrain &middot; triggers &middot; areaportals &middot; sky</td></tr>
-     <tr><td>B</td><td>Full Brightness on / off (off = the game's own lighting)</td></tr>
-     <tr><td>K</td><td>Simple Sky on / off (on = MOHRadiant's tiled sky brushes, off = the game's sky)</td></tr>
-     <tr><td>M</td><td>Simple models on / off (on = trees drawn as the sprite the game shows far away)</td></tr>
-     <tr class="grp"><td colspan="2">Display</td></tr>
-     <tr><td>1&ndash;9</td><td>Texture &middot; Shade &middot; Wire &middot; Setsizes &middot; Arrows &middot; Labels &middot; Links &middot; Fog &middot; X-ray</td></tr>
-     <tr><td>L</td><td>legend: what the colours, markers and editor surfaces mean</td></tr>
-     <tr><td>T</td><td>light / dark theme</td></tr>
-     <tr><td>\</td><td>collapse / expand the control panel</td></tr>
-     <tr><td>H or ?</td><td>show / hide this panel</td></tr>
-    </table></div>
-    <button id="helpClose" style="margin-top:12px" title="Close this panel (Esc)">Close</button>
-   </div>
-  </div>
+  <!-- keyboard shortcuts (H): the keyboard map, built from MAP_VIEWER_KEYS on first open -->
+  <div id="helpOv" class="kx-ov" style="display:none"><div class="kx-card" id="helpCard"></div></div>
   <div id="legOv" class="ov" style="display:none">
    <div class="card" id="legCard">
     <h3>Legend</h3>
@@ -279,7 +225,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
        <button class="sm" id="bHide" title="Hide the selection (Backspace). Shift+H shows everything again.">Hide</button>
        <button class="sm" id="bClear" title="Clear the selection (Esc)">Clear</button>
      </div>
-     <div class="row co" id="hidLine" style="display:none"><span id="hidCount"></span><button class="sm" id="bUnhide" title="Show everything you hid (Shift+H)">Show all</button></div>
+     <div class="row co" id="hidLine" style="display:none"><span id="hidCount"></span><button class="sm" id="bUndoHide" title="Undo the last Hide or Show all (Ctrl+Z); press again for the one before">Undo</button><button class="sm" id="bUnhide" title="Show everything you hid (Shift+H); Ctrl+Z hides it again">Show all</button></div>
    </div>
    <div class="sect">
      <h2>Camera</h2>
@@ -289,12 +235,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
      </div>
      <div id="camHelpFree">
        <div class="row co">mouse drag = look</div>
-       <div class="row co">wheel = move</div>
+       <div class="row co">mouse wheel = move</div>
        <div class="row co"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</div>
        <div class="row co"><kbd>Q</kbd>/<kbd>E</kbd> tilt</div>
        <div class="row co"><kbd>Space</kbd>/<kbd>C</kbd> up/down</div>
        <div class="row co"><kbd>End</kbd> level camera</div>
        <div class="row co"><kbd>Shift</kbd> fast camera</div>
+       <div class="row co"><kbd>X</kbd> stop camera</div>
      </div>
      <div id="camHelpRad" style="display:none">
        <div class="row co">right-drag = fly (push up to go forward)</div>
@@ -306,8 +253,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
        <div class="row co"><kbd>End</kbd> level camera</div>
        <div class="row co"><kbd>Shift</kbd> fast camera</div>
        <div class="row co"><kbd>Ctrl</kbd> grid step</div>
+       <div class="row co"><kbd>X</kbd> stop camera</div>
      </div>
-     <div class="row co">&nbsp;</div>
      <div class="row co">speed <input type="range" id="speed" min="50" max="3000" step="50" value="500" title="Camera speed in units per second (hold Shift for 4x)"><span id="speedV" style="min-width:34px;text-align:right">500</span></div>
      <div class="row co">fov <input type="range" id="fov" min="60" max="150" step="1" value="90" title="Horizontal field of view in degrees (the game's default is 80)"><span id="fovV" style="min-width:34px;text-align:right">90</span></div>
      <div class="row co"><button class="sm" id="bClip" title="Cubic clipping: hide everything further than the distance on the right, as MOHRadiant does (Ctrl+\). [ and ] change the distance.">Cubic clip</button><input type="range" id="clipD" min="256" max="16384" step="128" value="4096" style="max-width:110px"><span id="clipV">4096</span></div>
@@ -329,9 +276,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
      <div class="tg" style="margin-bottom:7px"><button id="bFull" title="Full Brightness (B). Off: the map lit the way the game lights it (lightmaps, vertex light). On: every texture at full brightness, as MOHRadiant shows it.">Full Brightness<span class="k">B</span></button><button id="bSimpleSky" title="Simple Sky (K). On: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off: the game's sky box and its moving clouds, drawn behind everything, so whatever is behind a sky brush shows through it as in game.">Simple Sky<span class="k">K</span></button><button id="bSimpleMod" title="Simple models (M). On: each tree that has a sprite version is drawn as that sprite alone, the way the game draws trees far away; it turns about its upright axis to face the camera. Off: the whole tree. Models with no sprite version (bushes, props) don't change.">Simple models<span class="k">M</span></button></div>
      <div class="tg" id="filtBtns"></div>
      <div class="row" style="margin-top:7px">
-       <button class="sm" id="bShowAll" title="Show every group">All</button>
-       <button class="sm" id="bGameView" title="Hide what the game never draws (caulk, clips, triggers, hints, origin brushes, areaportals) and the entity markers, with the game's lighting and sky (Full Brightness and Simple Sky off)">In-game look</button>
-       <button class="sm" id="bEditView" title="MOHRadiant's view: everything except hints and areaportals, at full brightness with Simple Sky on">Editor look</button>
+       <button class="sm" id="bShowAll" title="Show every group (Ctrl+A)">All<span class="k">Ctrl+A</span></button>
+       <button class="sm" id="bGameView" title="Hide what the game never draws (caulk, clips, triggers, hints, origin brushes, areaportals) and the entity markers, with the game's lighting and sky: Full Brightness and Simple Sky off (G)">In-game look<span class="k">G</span></button>
+       <button class="sm" id="bEditView" title="MOHRadiant's view: everything except hints, areaportals and rain, at full brightness with Simple Sky on (Shift+G)">Editor look<span class="k">Shift+G</span></button>
      </div>
    </div>
    <div class="sect">
@@ -347,6 +294,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  </div>
 </div>
 <script id="mapdata" type="application/octet-stream">__DATA__</script>
+<script type="application/json" id="mohaa-keys">__KEYS__</script>
+<script>
+__KEYS_JS__
+</script>
 <script>
 'use strict';
 /*CORE-BEGIN*/
@@ -371,10 +322,12 @@ const TF_SKY=1, TF_NODRAW=2, TF_ALPHATEST=4, TF_BLEND=8, TF_ADD=16, TF_TWOSIDED=
 const C_WORLD=1<<0, C_DETAIL=1<<1, C_ENTBRUSH=1<<2, C_PATCH=1<<3, C_TERRAIN=1<<4, C_CAULK=1<<5,
       C_CLIP=1<<6, C_TRIGGER=1<<7, C_HINT=1<<8, C_SKY=1<<9, C_LIQUID=1<<10, C_TRANS=1<<11,
       C_ORIGIN=1<<12, C_PORTAL=1<<13, C_NODRAW=1<<14, C_POINT=1<<15, C_LIGHT=1<<16, C_AINODE=1<<17,
-      C_PATH=1<<18, C_MODEL=1<<19, C_STATIC=1<<20, C_VIS=1<<21;
+      C_PATH=1<<18, C_MODEL=1<<19, C_STATIC=1<<20, C_VIS=1<<21, C_RAIN=1<<22, C_FOLIAGE=1<<23;
 const C_ENTITIES=C_ENTBRUSH|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_MODEL|C_STATIC|C_VIS;
 // C_STATIC has no Show button of its own: it marks the static props, which get no label
-// unless selected; Models and Entities hide them.
+// unless selected; Models and Entities hide them. C_RAIN (common/rain, the volumes of
+// func_rain entities) and C_FOLIAGE (common/foliageclip) have their own Show buttons,
+// apart from Nodraw and Clips.
 
 // ---- tokenizer -------------------------------------------------------------
 // Tokens: { } ( ) "quoted text" and bare words. // starts a comment that runs to
@@ -754,6 +707,9 @@ function buildScene(map,texFor,progress){
     // Any other surface the game never draws is editor-only too, such as the flat tree
     // pictures (misc_outside/commontreeshadow) that only cast a tree's shadow.
     if((te.f&TF_NODRAW)&&!(c&~C_TRANS))c=C_NODRAW;
+    // rain volumes and foliage clips are shown and hidden on their own
+    if((c&C_NODRAW)&&/(^|\/)common\/rain$/i.test(te.n||''))c=(c&~C_NODRAW)|C_RAIN;
+    if((c&C_CLIP)&&/(^|\/)common\/foliageclip$/i.test(te.n||''))c=(c&~C_CLIP)|C_FOLIAGE;
     return c;
   }
   let lastTick=0, done=0;
@@ -937,11 +893,20 @@ function applyBackdrop(col,save){
 bgIn.oninput=()=>applyBackdrop(bgIn.value,true);bgIn.onchange=bgIn.oninput;
 $('bgReset').onclick=()=>applyBackdrop(null,true);
 
-// ---- help overlay ----------------------------------------------------------------
+// ---- keyboard shortcuts window (H) ---------------------------------------------------
+// The keyboard map (kxBuild, KEYS_JS in mohaa_view.py) is built the first time it opens.
+// While it is open it takes the keys itself: a key pressed there is looked up, not acted
+// on, and Esc or H closes it.
 const helpOv=$('helpOv');
-function toggleHelp(force){const show=(force!==undefined)?force:(helpOv.style.display==='none');helpOv.style.display=show?'flex':'none';
-  if(show)legOv.style.display='none';}
-$('bHelp').onclick=()=>toggleHelp();$('helpClose').onclick=()=>toggleHelp(false);
+let KX=null;
+function toggleHelp(force){const show=(force!==undefined)?force:(helpOv.style.display==='none');
+  if(show&&!KX){
+    try{KX=kxBuild($('helpCard'),JSON.parse($('mohaa-keys').textContent),{onClose:()=>toggleHelp(false)});}
+    catch(e){$('helpCard').textContent='The keyboard shortcuts could not be shown: '+e;}}
+  helpOv.style.display=show?'flex':'none';
+  if(show){legOv.style.display='none';stopCamera();}
+  if(KX){if(show)KX.show(camMode==='rad'?'rad':'free');else KX.hide();}}
+$('bHelp').onclick=()=>toggleHelp();
 helpOv.addEventListener('click',e=>{if(e.target===helpOv)toggleHelp(false);});
 function closeViewer(){
   // In the launcher's pane the host returns to its start page; in a browser tab, just close.
@@ -990,7 +955,7 @@ const glcv=$('gl'), cv2=$('c'), ctx=cv2.getContext('2d');
 let gl=null;
 let W=1,H=1,DPR=Math.min(2,window.devicePixelRatio||1);
 const view={tex:true,shade:true,wire:false,ss:false,arrows:true,labels:true,links:true,fog:false,xray:true};
-let hiddenMask=C_HINT|C_PORTAL;
+let hiddenMask=C_HINT|C_PORTAL|C_RAIN;
 const hidEnt=new Set(), hidPrim=new Set();
 const SEL=new Set();            // 'e<entity>' (whole entity) or 'p<primitive>' (one world brush/patch/terrain)
 let lastHit=null;               // the last thing clicked: {id, face, ent, prim, point}
@@ -1077,7 +1042,7 @@ function buildEntities(){
     else X.anchor=o;
     if(ei>0&&!WORLDLIKE[e.cls]&&!hasGeo&&o){
       const mi=(D.modelOf||{})[ei];
-      if(mi!=null&&D.models[mi]){X.model=mi;X.cat=C_MODEL|(e.cls.startsWith('static_')?C_STATIC:0);}
+      if(mi!=null&&D.models[mi]){X.model=mi;X.cat=C_MODEL|(isStaticProp(ei)?C_STATIC:0);}
       else{
         X.marker=(e.cls==='light'||e.cls.startsWith('light_'))?2:1;
         if(X.marker===2)X.cat=C_LIGHT;
@@ -1485,6 +1450,7 @@ function rebuildWorld(){
   if(!faceVis||faceVis.length!==SC.nf)faceVis=new Uint8Array(SC.nf);
   for(let f=0;f<SC.nf;f++)faceVis[f]=faceShown(f)?1:0;
   ENTVIS=new Uint8Array(MAP.ents.length);for(let f=0;f<SC.nf;f++)if(faceVis[f])ENTVIS[SC.faceEnt[f]]=1;
+  renderList();                         // the lists colour what is hidden
   const tri=new Uint32Array(Math.max(3,SC.tri.length));let n=0;
   drawOps=[];drawTrans=[];
   // Every shown face goes into the pick pass. With the game's lighting on, the faces the
@@ -2547,12 +2513,29 @@ function selBounds(){
     else if(X.anchor)grow(X.anchor,X.anchor);}
   return isFinite(mn[0])?{mins:mn,maxs:mx}:null;
 }
+// Every Hide and Show all goes on a stack that Ctrl+Z (or the Undo button) unwinds one step
+// at a time: a Hide shows those things again, a Show all hides again what it showed.
+const HIDE_UNDO=[];
 function hideSelection(){
   if(!SEL.size)return;
-  for(const k of SEL){if(k[0]==='e')hidEnt.add(+k.slice(1));else hidPrim.add(+k.slice(1));}
-  const n=SEL.size;SEL.clear();rebuildWorld();updateSelPanel();flash(n+' hidden - Shift+H shows them again');
+  const step={e:[],p:[]};
+  for(const k of SEL){const n=+k.slice(1);
+    if(k[0]==='e'){if(!hidEnt.has(n)){hidEnt.add(n);step.e.push(n);}}else if(!hidPrim.has(n)){hidPrim.add(n);step.p.push(n);}}
+  if(step.e.length||step.p.length){HIDE_UNDO.push(step);if(HIDE_UNDO.length>500)HIDE_UNDO.shift();}
+  const n=SEL.size;SEL.clear();rebuildWorld();updateSelPanel();flash(n+' hidden - Ctrl+Z undoes, Shift+H shows everything');
 }
-function unhideAll(){hidEnt.clear();hidPrim.clear();rebuildWorld();updateSelPanel();}
+function unhideAll(){
+  if(hidEnt.size||hidPrim.size)HIDE_UNDO.push({all:true,e:[...hidEnt],p:[...hidPrim]});
+  hidEnt.clear();hidPrim.clear();rebuildWorld();updateSelPanel();}
+function undoHide(){
+  const step=HIDE_UNDO.pop();
+  if(!step){flash('Nothing to undo: Ctrl+Z undoes a Hide or Show all');return;}
+  const n=step.e.length+step.p.length;
+  if(step.all){for(const i of step.e)hidEnt.add(i);for(const i of step.p)hidPrim.add(i);}
+  else{for(const i of step.e)hidEnt.delete(i);for(const i of step.p)hidPrim.delete(i);}
+  rebuildWorld();updateSelPanel();
+  flash((step.all?'Undo Show all: '+n+' hidden again':'Undo Hide: '+n+' shown again')+(HIDE_UNDO.length?' (Ctrl+Z again for the step before)':''));
+}
 
 // ============================================================================
 //  Camera movement
@@ -2566,6 +2549,7 @@ function loop(t){
   requestAnimationFrame(loop);
   const dt=Math.min(0.1,(t-_lastT)/1000);_lastT=t;
   if(!SC)return;
+  if((keys.size||radFly)&&!document.hasFocus())stopCamera();
   let moved=false;
   if(flyAnim){const k=Math.min(1,(t-flyAnim.t0)/flyAnim.dur),s=k*k*(3-2*k);
     for(let i=0;i<3;i++)cam.pos[i]=flyAnim.from[i]+(flyAnim.to[i]-flyAnim.from[i])*s;
@@ -2679,6 +2663,8 @@ glcv.addEventListener('mousedown',e=>{
 });
 window.addEventListener('mousemove',e=>{
   const r=glcv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
+  // the button was let go outside the page: the drag (or Radiant-look's flight) is over
+  if(drag&&!(e.buttons&[1,4,2][drag.b])){if(drag.b===2)radFly=null;drag=null;requestDraw();}
   if(drag){
     const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;
     // a wheel pressed down often nudges the mouse, so a middle click gets more slack
@@ -2729,12 +2715,14 @@ const CAM_KEYS_FREE=new Set(['w','a','s','d','q','e','c',' ','arrowup','arrowdow
 const CAM_KEYS_RAD=new Set(['arrowup','arrowdown','arrowleft','arrowright',',','.','d','c','a','z']);
 const FILTER_KEYS={'alt+1':C_WORLD,'alt+2':C_ENTITIES,'alt+3':C_PATCH,'alt+4':C_TRANS,'alt+5':C_LIQUID,'alt+6':C_CAULK,
   'alt+7':C_CLIP,'alt+8':C_PATH,'alt+9':C_AINODE,'alt+0':C_LIGHT,'ctrl+d':C_DETAIL,'ctrl+h':C_HINT,'ctrl+m':C_MODEL,
-  'ctrl+r':C_TERRAIN,'ctrl+t':C_TRIGGER,'ctrl+p':C_PORTAL,'ctrl+k':C_SKY};
+  'ctrl+r':C_TERRAIN,'ctrl+t':C_TRIGGER,'ctrl+p':C_PORTAL,'ctrl+k':C_SKY,'ctrl+o':C_NODRAW,'ctrl+i':C_RAIN,'ctrl+g':C_FOLIAGE};
 window.addEventListener('keydown',e=>{
   if(typing()){if(e.key==='Escape'){document.activeElement.blur();e.preventDefault();}return;}
   const kl=e.key.length===1?e.key.toLowerCase():e.key.toLowerCase();
   const combo=(e.ctrlKey||e.metaKey?'ctrl+':'')+(e.altKey?'alt+':'')+(/^digit\d$/i.test(e.code)?e.code.slice(5):kl);
   if(FILTER_KEYS[combo]!=null){toggleFilter(FILTER_KEYS[combo]);e.preventDefault();return;}
+  if(combo==='ctrl+z'){undoHide();e.preventDefault();return;}     // before Radiant-look's Z
+  if(combo==='ctrl+a'){showAllGroups();flash('Every group is shown');e.preventDefault();return;}   // and A
   if((e.ctrlKey||e.metaKey)&&kl==='f'){$('findIn').focus();$('findIn').select();e.preventDefault();return;}
   if((e.ctrlKey||e.metaKey)&&(kl==='\\'||e.code==='Backslash')){toggleClip();e.preventDefault();return;}
   // camera keys (held)
@@ -2745,14 +2733,17 @@ window.addEventListener('keydown',e=>{
     keys.add(kl);e.preventDefault();return;}
   if(e.ctrlKey||e.metaKey||e.altKey)return;
   switch(kl){
-    case 'h':case '?':if(e.shiftKey&&kl==='h'){unhideAll();flash('Everything is shown again');}else toggleHelp();break;
+    case 'h':case '?':if(e.shiftKey&&kl==='h'){const had=hidEnt.size+hidPrim.size;unhideAll();
+      flash(had?'Everything is shown again (Ctrl+Z hides it again)':'Nothing is hidden');}else toggleHelp();break;
     case 'n':showInfo('sel');break;
+    case 'g':if(e.shiftKey){editorLook();flash('Editor look');}else{gameLook();flash('In-game look');}break;
     case 'b':toggleFullBright();break;
     case 'k':toggleSimpleSky();break;
     case 'm':toggleSimpleModels();break;
     case 'f':focusSelection();break;
     case 'v':setCamMode(camMode==='free'?'rad':'free');break;
     case 'r':resetCam();break;
+    case 'x':stopCamera();flash('Camera stopped');break;
     case 'l':toggleLegend();break;
     case 't':themeBtn.click();break;
     case 'end':cam.pitch=0;cam.roll=0;camChanged();requestDraw();break;
@@ -2769,7 +2760,14 @@ window.addEventListener('keydown',e=>{
 });
 window.addEventListener('keyup',e=>{const kl=e.key.length===1?e.key.toLowerCase():e.key;keys.delete(kl);keys.delete(kl.toLowerCase());
   if(e.key==='Shift'||e.key==='Control')keys.delete(e.key);});
-window.addEventListener('blur',()=>{keys.clear();radFly=null;});
+// Stop every movement: held keys, a drag, Radiant-look's right-button flight, a fly-to.
+// X does it by hand. It also happens when the page loses the keyboard or the window, since
+// a key or button let go elsewhere never reaches the page (in the launcher's pane a click
+// on the launcher itself also calls this), and each frame while the page doesn't have the
+// focus (see loop).
+function stopCamera(){keys.clear();radFly=null;drag=null;flyAnim=null;requestDraw();}
+window.addEventListener('blur',stopCamera);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopCamera();});
 // Ctrl + arrows / comma / period in Radiant-look: one grid step (MOHRadiant's CameraGrid* commands).
 function gridStep(kl){const a=camAxes(),g=64;const flat=vnorm([a.f[0],a.f[1],0])||[1,0,0];
   if(kl==='arrowup')moveBy(flat,g);else if(kl==='arrowdown')moveBy(flat,-g);
@@ -2815,9 +2813,15 @@ const FILTERS=[
  {m:C_TRIGGER,l:'Triggers',key:'Ctrl+T',t:'trigger_* entities and common/trigger brushes'},
  {m:C_PORTAL,l:'Areaportals',key:'Ctrl+P',t:'Areaportal brushes'},
  {m:C_SKY,l:'Sky',key:'Ctrl+K',t:'Sky brushes: show or hide them completely (with them hidden, whatever is behind shows, else the backdrop)'},
+ {m:C_NODRAW,l:'Nodraw',key:'Ctrl+O',t:'Other editor-only surfaces: nodraw, ladders, patharea, and the flat tree pictures that only cast a tree\'s shadow (misc_outside/commontreeshadow)'},
+ {m:C_RAIN,l:'Rain',key:'Ctrl+I',t:'common/rain: the volumes of func_rain entities, where rain or snow falls in game. Hidden until you show them'},
+ {m:C_FOLIAGE,l:'Foliage clips',key:'Ctrl+G',t:'common/foliageclip: walk-through brushes around trees and bushes that make foliage effects when shot'},
  {m:C_ORIGIN,l:'Origin',key:'',t:'common/origin brushes (the pivot of doors and movers)'},
- {m:C_NODRAW,l:'Nodraw',key:'',t:'Other editor-only surfaces: nodraw, ladders, rain, and the flat tree pictures that only cast a tree\'s shadow (misc_outside/commontreeshadow)'},
  {m:C_POINT,l:'Point ents',key:'',t:'Other point entities: player starts, script origins, info_* ...'}];
+// The entity kinds the Entities button (Alt+2) covers, named for its tooltip when only
+// some of them are hidden (by their own buttons).
+const ENT_PARTS=[[C_ENTBRUSH,'brush entities'],[C_POINT,'point ents'],[C_LIGHT,'lights'],[C_AINODE,'AI nodes'],
+  [C_PATH,'paths'],[C_MODEL,'models'],[C_STATIC,'static props'],[C_VIS,'vis']];
 function buildPanel(){
   const db=$('dispBtns');
   for(const d of DISPLAY){const b=document.createElement('button');b.id='d_'+d.k;b.innerHTML=esc(d.l)+'<span class="k">'+d.key+'</span>';
@@ -2831,11 +2835,7 @@ function buildPanel(){
       :'A .map has no lighting yet: the game\'s light is baked when the map is compiled. Open the compiled .bsp to see it.';}
   $('bSimpleSky').onclick=toggleSimpleSky;
   $('bSimpleMod').onclick=toggleSimpleModels;
-  $('bShowAll').onclick=()=>{hiddenMask=0;filtersChanged();};
-  // the two looks also set the light and the sky: MOHRadiant is always full bright
-  $('bGameView').onclick=()=>{hiddenMask=C_CAULK|C_CLIP|C_TRIGGER|C_HINT|C_ORIGIN|C_PORTAL|C_NODRAW|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_VIS;
-    simpleSky=false;fullBright=false;filtersChanged();requestDraw();};
-  $('bEditView').onclick=()=>{hiddenMask=C_HINT|C_PORTAL;simpleSky=true;fullBright=true;filtersChanged();requestDraw();};
+  $('bShowAll').onclick=showAllGroups;$('bGameView').onclick=gameLook;$('bEditView').onclick=editorLook;
   syncButtons();
   $('bFree').onclick=()=>setCamMode('free');$('bRad').onclick=()=>setCamMode('rad');
   const sp=$('speed');sp.value=moveSpeed;$('speedV').textContent=moveSpeed;sp.oninput=()=>{moveSpeed=+sp.value;$('speedV').textContent=moveSpeed;saveOpts();};
@@ -2846,7 +2846,7 @@ function buildPanel(){
     if(v.length>=3){flyTo([v[0],v[1],v[2]],null,null);$('gotoIn').blur();}else flash('Type three numbers: x y z');});
   $('bCopyCam').onclick=()=>copyText(fvec(cam.pos));
   $('bInfo').onclick=()=>showInfo('sel');$('bFocus').onclick=focusSelection;$('bHide').onclick=hideSelection;
-  $('bClear').onclick=()=>{SEL.clear();selectionChanged();};$('bUnhide').onclick=unhideAll;
+  $('bClear').onclick=()=>{SEL.clear();selectionChanged();};$('bUnhide').onclick=unhideAll;$('bUndoHide').onclick=undoHide;
   $('bSame').onclick=()=>{if(lastHit)selectSameKind(lastHit,false);};
   $('bPath').onclick=()=>{const ei=+$('bPath').dataset.ei;if(ei>0)selectPath({ent:ei,face:-1,prim:-1,point:null},false);};
   $('infoClose').onclick=hideInfo;$('infoCopy').onclick=()=>copyText($('infoBody').innerText);
@@ -2855,9 +2855,21 @@ function buildPanel(){
   fi.addEventListener('input',()=>{clearTimeout(ft);ft=setTimeout(()=>{setTab('find');},150);});
   fi.addEventListener('keydown',e=>{if(e.key==='Enter'){setTab('find');selectFindResults();e.preventDefault();}});
 }
+// All (Ctrl+A), In-game look (G) and Editor look (Shift+G). The two looks also set the light
+// and the sky: MOHRadiant is always full bright.
+function showAllGroups(){hiddenMask=0;filtersChanged();}
+function gameLook(){hiddenMask=C_CAULK|C_CLIP|C_TRIGGER|C_HINT|C_ORIGIN|C_PORTAL|C_NODRAW|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_VIS|C_RAIN|C_FOLIAGE;
+  simpleSky=false;fullBright=false;filtersChanged();requestDraw();}
+function editorLook(){hiddenMask=C_HINT|C_PORTAL|C_RAIN;simpleSky=true;fullBright=true;filtersChanged();requestDraw();}
 function syncButtons(){
   for(const d of DISPLAY){const b=$('d_'+d.k);if(b)b.classList.toggle('on',!!view[d.k]);}
-  for(const f of FILTERS)f.el.classList.toggle('on',!(hiddenMask&f.m));
+  // A button is on while what it covers is shown. Entities covers several kinds that have
+  // buttons of their own (AI nodes, Lights, Models, Paths, Point ents): with only some of
+  // them hidden it stays on, dashed, and its tooltip says which are hidden.
+  for(const f of FILTERS){const hid=hiddenMask&f.m, part=!!hid&&hid!==f.m;
+    f.el.classList.toggle('on',!hid||part);f.el.classList.toggle('part',part);
+    f.el.title=f.t+(f.key?' ('+f.key+')':'')+' - click to show / hide'+
+      (part?'\nSome hidden: '+ENT_PARTS.filter(x=>hid&x[0]).map(x=>x[1]).join(', ')+' (a click hides the rest, a second shows all)':'');}
   $('bFull').classList.toggle('on',fullBright||!LIT);
   $('bSimpleSky').classList.toggle('on',simpleSky);
   $('bSimpleMod').classList.toggle('on',simpleModels);
@@ -2885,18 +2897,21 @@ function filtersChanged(){syncButtons();saveOpts();rebuildWorld();updateSelPanel
 function setCamMode(m){camMode=m;keys.clear();radFly=null;syncButtons();saveOpts();requestDraw();}
 function setClipDist(v){clipDist=Math.max(128,Math.min(32768,v));$('clipD').value=clipDist;$('clipV').textContent=clipDist;saveOpts();requestDraw();}
 function toggleClip(){clipOn=!clipOn;$('bClip').classList.toggle('on',clipOn);saveOpts();requestDraw();}
-function saveOpts(){LS.set('mohaaMapViewerOpts',JSON.stringify({view:view,hidden:hiddenMask,mode:camMode,speed:moveSpeed,fov:fovX,clip:clipOn,clipD:clipDist,fb:fullBright,ss:simpleSky,sm:simpleModels}));}
+function saveOpts(){LS.set('mohaaMapViewerOpts',JSON.stringify({ov:2,view:view,hidden:hiddenMask,mode:camMode,speed:moveSpeed,fov:fovX,clip:clipOn,clipD:clipDist,fb:fullBright,ss:simpleSky,sm:simpleModels}));}
 function loadOpts(){try{const o=JSON.parse(LS.get('mohaaMapViewerOpts')||'null');if(!o)return;
   for(const k in view)if(k in (o.view||{}))view[k]=!!o.view[k];
   fullBright=!!o.fb;simpleSky=!!o.ss;simpleModels=!!o.sm;
   if(typeof o.hidden==='number')hiddenMask=o.hidden;if(o.mode==='rad'||o.mode==='free')camMode=o.mode;
+  // options saved before Rain had a button of its own: it starts hidden, as on a first visit
+  if(!(o.ov>=2))hiddenMask|=C_RAIN;
   // static models have no Show button of their own any more (Models and Entities hide them)
   if((hiddenMask&C_ENTITIES)!==C_ENTITIES)hiddenMask&=~C_STATIC;
   if(o.speed>0)moveSpeed=o.speed;if(o.fov>0)fovX=Math.max(60,Math.min(150,o.fov));clipOn=!!o.clip;if(o.clipD>0)clipDist=o.clipD;}catch(_e){}}
 
 function updateSelPanel(){
   const n=SEL.size;$('selBtns').style.display=n?'':'none';
-  const hid=hidEnt.size+hidPrim.size;$('hidLine').style.display=hid?'':'none';$('hidCount').textContent=hid+' hidden';
+  const hid=hidEnt.size+hidPrim.size;$('hidLine').style.display=(hid||HIDE_UNDO.length)?'':'none';
+  $('hidCount').textContent=hid+' hidden';$('bUndoHide').disabled=!HIDE_UNDO.length;$('bUnhide').disabled=!hid;
   const el=$('selSum');
   if(!n){el.textContent='Click anything in the map to select it.';el.className='co';return;}
   el.className='';
@@ -2938,9 +2953,12 @@ function texCounts(){if(_texCounts)return _texCounts;const m=new Map();for(let f
 const openCls=new Set();
 function renderList(){
   const box=$('listBox');const rows=[];
-  const entRow=(ei,sub)=>{const e=MAP.ents[ei],X=ENTS[ei],sel=SEL.has('e'+ei)||(ei===0);
+  // hidden (by Hide or a Show button) in red; a class with only some of its entities
+  // hidden in yellow
+  const shown=ei=>ei===0||entVisible(ei);
+  const entRow=(ei,sub)=>{const e=MAP.ents[ei],X=ENTS[ei],sel=SEL.has('e'+ei)||(ei===0),hid=!shown(ei);
     const where=X.anchor?fvec(X.anchor):'';
-    return '<div class="li'+(sub?' sub':'')+(sel?' sel':'')+'" data-e="'+ei+'"><span class="sw" style="background:rgb('+X.col.map(v=>Math.round(v*255)).join(',')+')"></span><span class="nm">'+
+    return '<div class="li'+(sub?' sub':'')+(sel?' sel':'')+(hid?' hid':'')+'" data-e="'+ei+'"'+(hid?' title="hidden"':'')+'><span class="sw" style="background:rgb('+X.col.map(v=>Math.round(v*255)).join(',')+')"></span><span class="nm">'+
       esc(sub?(e.kvl.targetname?'$'+e.kvl.targetname:'entity '+ei):(e.kvl.classname||'?')+(e.kvl.targetname?'  $'+e.kvl.targetname:''))+'</span><span class="ct">'+esc(where)+'</span></div>';};
   if(curTab==='find'){
     runFind($('findIn').value);
@@ -2952,9 +2970,10 @@ function renderList(){
   }else if(curTab==='cls'){
     const cnt=new Map();for(let ei=0;ei<MAP.ents.length;ei++){const c=MAP.ents[ei].kvl.classname||'?';if(!cnt.has(c))cnt.set(c,[]);cnt.get(c).push(ei);}
     const names=[...cnt.keys()].sort((a,b)=>a.toLowerCase()<b.toLowerCase()?-1:1);
-    rows.push('<div class="co" style="margin-bottom:4px">'+MAP.ents.length+' entities · '+names.length+' classes · click a class to select them all, the arrow to list them</div>');
+    rows.push('<div class="co" style="margin-bottom:4px">'+MAP.ents.length+' entities · '+names.length+' classes · click a class to select them all and list them</div>');
     for(const c of names){const l=cnt.get(c),open=openCls.has(c),X=ENTS[l[0]];
-      rows.push('<div class="li" data-c="'+esc(c)+'"><span class="ar" data-o="'+esc(c)+'">'+(open?'▾':'▸')+'</span><span class="sw" style="background:rgb('+(X.ccol||X.col).map(v=>Math.round(v*255)).join(',')+')"></span><span class="nm">'+esc(c)+'</span><span class="ct">'+l.length+'</span></div>');
+      const nh=l.reduce((s,ei)=>s+(shown(ei)?0:1),0), st=!nh?'':nh===l.length?' hid':' part';
+      rows.push('<div class="li'+st+'" data-c="'+esc(c)+'"'+(nh?' title="'+(nh===l.length?'all hidden':nh+' of '+l.length+' hidden')+'"':'')+'><span class="ar" data-o="'+esc(c)+'">'+(open?'▾':'▸')+'</span><span class="sw" style="background:rgb('+(X.ccol||X.col).map(v=>Math.round(v*255)).join(',')+')"></span><span class="nm">'+esc(c)+'</span><span class="ct">'+(nh?nh+' / ':'')+l.length+'</span></div>');
       if(open)for(const ei of l.slice(0,500))rows.push(entRow(ei,true));}
   }else{
     const used=texCounts();
@@ -2970,7 +2989,10 @@ $('listBox').addEventListener('click',e=>{
   const o=e.target.closest('[data-o]');if(o){const c=o.getAttribute('data-o');if(openCls.has(c))openCls.delete(c);else openCls.add(c);renderList();return;}
   const r=e.target.closest('.li');if(!r)return;
   if(r.hasAttribute('data-e')){const ei=+r.getAttribute('data-e');SEL.clear();if(ei)SEL.add('e'+ei);selectionChanged();if(ei)focusSelection();renderList();}
-  else if(r.hasAttribute('data-c')){selectClass(r.getAttribute('data-c'),e.shiftKey);renderList();}
+  // a class row selects the class and opens (or closes) its list of entities
+  // (not on the second click of a double-click, which flies to the class)
+  else if(r.hasAttribute('data-c')){const c=r.getAttribute('data-c');selectClass(c,e.shiftKey);
+    if(e.detail<2){if(openCls.has(c))openCls.delete(c);else openCls.add(c);}renderList();}
   else if(r.hasAttribute('data-t')){selectByTexture(+r.getAttribute('data-t'),e.shiftKey);selectionChanged();renderList();}
 });
 $('listBox').addEventListener('dblclick',e=>{const r=e.target.closest('.li');if(r&&(r.hasAttribute('data-c')||r.hasAttribute('data-t')))focusSelection();});
@@ -3002,6 +3024,24 @@ function srcText(a,b){return D.srcText.slice(a,b);}
 function card(title,body){$('infoTitle').textContent=title;$('infoBody').innerHTML=body;$('info').classList.add('on');$('infoBody').scrollTop=0;}
 function kvTable(rows){return '<table>'+rows.map(r=>'<tr><td class="k">'+esc(r[0])+'</td><td>'+r[1]+'</td></tr>').join('')+'</table>';}
 function copyBtn(text,label){return ' <button class="sm" data-copy="'+esc(text)+'">'+(label||'Copy')+'</button>';}
+// Open (beside Copy on a card's .map source): in the launcher's pane, the launcher opens the
+// .map in the Text Editor at this block's line (where the editor takes a line: Notepad++,
+// VS Code, Sublime Text...); in a browser, the whole .map opens as text in a new tab.
+function openBtn(off){return ' <button class="sm" data-openmap="'+off+'" title="Open the .map: in the launcher, in your Text Editor at this line; in a browser, as text in a new tab">Open</button>';}
+let LINE_STARTS=null;
+function lineOf(off){                    // the 1-based line of a text offset in the .map
+  if(!LINE_STARTS){const s=D.srcText,a=[0];let i=-1;while((i=s.indexOf('\n',i+1))>=0)a.push(i+1);LINE_STARTS=Int32Array.from(a);}
+  let lo=0,hi=LINE_STARTS.length-1;while(lo<hi){const m=(lo+hi+1)>>1;if(LINE_STARTS[m]<=off)lo=m;else hi=m-1;}
+  return lo+1;
+}
+function openMapAt(off){
+  const line=lineOf(off);
+  try{if(window.chrome&&window.chrome.webview){
+    window.chrome.webview.postMessage('mohaa-open-map\n'+line+'\n'+((D.bsp&&D.bsp.mapFile)||''));
+    flash('Opening the .map in your Text Editor (line '+line+')');return;}}catch(_e){}
+  window.open(URL.createObjectURL(new Blob([D.srcText],{type:'text/plain;charset=utf-8'})),'_blank');
+  flash('The .map opened as text in a new tab (this block starts on line '+line+')');
+}
 // ---- blocks of the .map the reader skipped (readMap's errors) ----------------------
 // Each is listed with its entity and primitive, its line in the .map and why it was
 // skipped; the rest of the map is drawn without it. The red line under the map's stats
@@ -3020,6 +3060,22 @@ function errorLines(){                 // [{line, text}] for MAP.errors, in one 
   }
   return MAP.errLines=out;
 }
+// How many of the map's entities the game makes real entities (each with an entity
+// number; the game has 1024 slots), how many it keeps as simple ones without a number
+// (path nodes, player starts, waypoints..., and the lights and info_nulls it drops once the
+// map is loaded), and how many are static props. The class lists come from the build
+// (SIMPLE_CLASSES / DROPPED_CLASSES in mohaa_entdefs.py).
+function entityKinds(){
+  const ek=D.ek||{}, simple=new Set([...(ek.simple||[]),...(ek.dropped||[])]);
+  let real=0,smp=0,stat=0;
+  MAP.ents.forEach((e,ei)=>{if(isStaticProp(ei))stat++;else if(simple.has(e.cls))smp++;else real++;});
+  return {real:real,simple:smp,stat:stat};
+}
+// A static prop: in a .map, a static_* class (the compiler makes those into static models);
+// decompiled from a .bsp, every entity from the static model lump, written after the
+// others (some take a .tik class name without the prefix).
+function isStaticProp(ei){const fs=D.bsp&&D.bsp.firstStatic;
+  return (fs>0)?ei>=fs:MAP.ents[ei].cls.startsWith('static_');}
 function errText(x,l){
   return 'entity '+x.ent+' ('+(MAP.ents[x.ent]?entName(x.ent):'?')+')'+(x.prim>=0?', '+x.kind+' '+x.prim:'')+', line '+l.line+': '+x.msg;
 }
@@ -3103,7 +3159,7 @@ function infoEntity(ei){
     if(cnt.size){h+='<h4>Textures</h4>'+kvTable([...cnt.entries()].map(([t,c])=>[c+'x','<a data-tex="'+t+'">'+esc(TEX[t].n.replace(/^textures\//,''))+'</a>']));}}
   if(lastHit&&lastHit.ent===ei&&lastHit.face>=0)h+=faceHtml(lastHit.face,true);
   if(def&&def.d)h+='<h4>About '+esc(def.n)+'</h4><div class="desc">'+esc(def.d)+'</div>'+(def.s?'<div class="note">from '+esc(def.s)+'</div>':'');
-  h+='<h4>.map source<span class="sp"></span>'+copyBtn(srcText(e.ts,e.te),'Copy')+'</h4><pre>'+esc(clipText(srcText(e.ts,e.te)))+'</pre>';
+  h+='<h4>.map source<span class="sp"></span>'+copyBtn(srcText(e.ts,e.te),'Copy')+openBtn(e.ts)+'</h4><pre>'+esc(clipText(srcText(e.ts,e.te)))+'</pre>';
   card(entName(ei),h);
 }
 // What a marker's colour (and a path node's outline) means, since MOHRadiant shows no legend.
@@ -3139,7 +3195,7 @@ function infoPrim(pi){
   else{
     for(let f=p.f0;f<p.f1;f++)h+=faceHtml(f,lastHit&&lastHit.face===f);
   }
-  h+='<h4>.map source<span class="sp"></span>'+copyBtn(srcText(pr.ts,pr.te),'Copy')+'</h4><pre>'+esc(clipText(srcText(pr.ts,pr.te)))+'</pre>';
+  h+='<h4>.map source<span class="sp"></span>'+copyBtn(srcText(pr.ts,pr.te),'Copy')+openBtn(pr.ts)+'</h4><pre>'+esc(clipText(srcText(pr.ts,pr.te)))+'</pre>';
   card(kind+' '+p.bn+(p.ent?' · entity '+p.ent:' · world'),h);
 }
 function faceHtml(f,hit){
@@ -3186,6 +3242,7 @@ function infoMulti(ents,prims){
 }
 $('infoBody').addEventListener('click',e=>{
   const c=e.target.closest('[data-copy]');if(c){copyText(c.getAttribute('data-copy'));return;}
+  const om=e.target.closest('[data-openmap]');if(om){openMapAt(+om.getAttribute('data-openmap'));return;}
   const s=e.target.closest('[data-sel]');if(s){const ei=+s.getAttribute('data-sel');SEL.clear();SEL.add('e'+ei);lastHit=null;selectionChanged();focusSelection();showInfo('sel');return;}
   const t=e.target.closest('[data-tex]');if(t){selectByTexture(+t.getAttribute('data-tex'),false);selectionChanged();return;}
   const pa=e.target.closest('[data-path]');if(pa){const ei=+pa.getAttribute('data-path');selectPath({ent:ei,face:-1,prim:-1,point:null},false);return;}
@@ -3276,7 +3333,11 @@ async function main(){
     cam.pos=s.p.slice();cam.yaw=s.y||0;cam.pitch=s.pi||0;
     $('ttl').textContent=TITLE;
     const nb=MAP.ents.reduce((a,e)=>a+e.brushes.length,0),np=MAP.ents.reduce((a,e)=>a+e.patches.length,0),nt=MAP.ents.reduce((a,e)=>a+e.terrains.length,0);
-    $('stats').innerHTML=nb+' brushes · '+np+' patches · '+nt+' terrain<br>'+MAP.ents.length+' entities · '+(D.models||[]).length+' models · '+TEX.length+' textures'+
+    const K=entityKinds();
+    $('stats').innerHTML=nb+' brushes · '+np+' patches · '+nt+' terrain<br>'+MAP.ents.length+' entities · '+(D.models||[]).length+' models · '+TEX.length+' textures<br>'+
+      '<span class="ek'+(K.real>1024?' over':'')+'" title="Real entities: the ones the game spawns as entities, each with an entity number (.entnum). MOHAA has 1024 entity slots in all; the world, the players and whatever is spawned while playing (weapons, projectiles, effects) take some of them too.'+(K.real>1024?' This map has more than the 1024.':'')+'">'+K.real+' real</span> · '+
+      '<span class="ek" title="Simple entities: path nodes, player starts, waypoints, vehicle points and grenade hints, which the game keeps without an entity number, and the lights, info_nulls and other editor-only entities it drops once the map is loaded.">'+K.simple+' simple</span> · '+
+      '<span class="ek" title="Static props (static_* classes): models the compiler turns into scenery the game draws without an entity.">'+K.stat+' static props</span>'+
       (D.kind==='bsp'?'<br>decompiled from the .bsp (v'+(D.bsp&&D.bsp.version)+')':'')+
       (MAP.errors.length?'<br><a class="errlink" data-errs title="Which blocks, where they are in the .map, and why">'+MAP.errors.length+' unreadable block'+(MAP.errors.length===1?'':'s')+' skipped</a>':'');
     $('msgLine').textContent=wk.message?'"'+wk.message+'"':'';

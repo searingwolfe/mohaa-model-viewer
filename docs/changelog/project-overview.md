@@ -18,7 +18,7 @@ Model Viewer and what both share; the Map Viewer has its own notes in
 |---|---|
 | `RUN -- Medal of Honor Model Viewer.bat` | Windows entry point. Uses the py launcher's default Python if it's 3.8+ with tkinter, else the newest suitable one on PATH or in the default install folders (Store aliases skipped); if there is none, asks Y/N to run the installer below. Then installs Pillow and the embedded-pane packages if missing, reports a missing WebView2 Runtime, and starts the launcher with the matching `pythonw.exe` so no console stays open. A `.skd` / `.tik` dropped on it is opened directly. |
 | `bin/mohaa_launcher.py` | Tkinter desktop app: pak loading and tree, build orchestration, embedded WebView2 pane, on-demand animation and attachment builds, settings, updater. |
-| `bin/mohaa_view.py` | Model builder. Parses `.skd` / `.skb` / `.skc` / `.tik` / `.map`, solves the skeleton and IK, writes an `.obj`, and fills the page template (`_HTML_TEMPLATE`, all of the viewer's HTML/CSS/JS) with the model payload. |
+| `bin/mohaa_view.py` | Model builder. Parses `.skd` / `.skb` / `.skc` / `.tik` / `.map`, solves the skeleton and IK, writes an `.obj`, and fills the page template (`_HTML_TEMPLATE`, all of the viewer's HTML/CSS/JS) with the model payload. Also holds the keyboard-shortcut window both viewers' pages use (`KEYS_JS` / `KEYS_CSS`), the keyboard it draws (`KX_LAYOUT`, `KX_CATS`) and the Model Viewer's shortcut table (`VIEWER_KEYS`). |
 | `bin/mohaa_textures.py` | Pak virtual filesystem (`Vfs`), `.shader` index and render hints, texture resolution and `data:` URL encoding, `$include` expansion, and the animation catalogue (`build_anim_catalog`). |
 | `RUN -- Medal of Honor Map Viewer.bat`, `bin/mohaa_map_*.py`, `bin/mohaa_bsp.py`, `bin/mohaa_entdefs.py` | The Map Viewer, a separate program built on the same launcher (`MapApp` subclasses `App`); see [map-viewer.md](map-viewer.md). |
 | `bin/python_installer_updater.bat` | Windows setup for both viewers: installs a per-user Python suited to the Windows version and CPU, then the packages. Run by either RUN .bat on request (`/fromrun` skips its closing pause), or on its own. |
@@ -90,8 +90,8 @@ Model Viewer and what both share; the Map Viewer has its own notes in
 
 ## Current state
 
-- Version 1.0.000 (pre-release), with both viewers. `VIEWER_REV` 69; the Map Viewer's
-  `MAP_VIEWER_REV` 15 and `INDEX_VERSION` 7.
+- Version 1.0.000 (pre-release), with both viewers. `VIEWER_REV` 70; the Map Viewer's
+  `MAP_VIEWER_REV` 17 and `INDEX_VERSION` 7.
 - Windows is the main platform (embedded pane); macOS and Linux run the launchers and open
   pages in the browser.
 

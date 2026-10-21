@@ -236,7 +236,7 @@ PAK_ENTRY_MAX=getattr(getattr(MTX,"Vfs",None),"MAX_ENTRY",192*1024*1024)
 # Source mtimes are the usual rebuild trigger, but a zip round-trip can scramble them,
 # so the baked rev is the backstop. Also gates the animation/attachment sidecar caches
 # (see _stamp_anim_cache).
-VIEWER_REV_REQUIRED=69
+VIEWER_REV_REQUIRED=70
 # Sentinel subdir for single-file builds (Browse / drag-drop / Recent / path bar). It
 # routes the output HTML to a "standalone" folder beside "models" instead of the
 # pak-mirroring tree; the null byte means it can't collide with a real folder name.
@@ -545,62 +545,877 @@ class Tooltip:
             except Exception: pass
             self.tip=None
 
-# The "All Keyboard shortcuts" window (F1) has two columns: launcher keys on the left,
-# viewer keys on the right. HOTKEYS_VIEWER mirrors the viewer's own shortcut overlay
-# (mohaa_view.py, #helpCard) row for row: same groups, order and keys, with wording
-# adjusted only where this window is read from outside the viewer. Keep them in sync.
-HOTKEYS_LAUNCHER=[
- ("","--- Launcher ---"),
- ("Ctrl+O","Add .pk3 pak(s)"),
- ("Ctrl+Shift+O","Open a loose .skd / .tik file"),
- ("Ctrl+F","Focus the search box"),
- ("Esc","Clear search / close a menu / cancel loading"),
- ("F5","Reload all loaded paks"),
- ("Ctrl+T","Toggle Dark / Light theme"),
- ("Ctrl+Shift+T","Use old (OS-default) popup windows on/off"),
- ("F1","Show this shortcut list"),
- ("","--- Pak tree ---"),
- ("Enter","Open file / descend into folder"),
- ("Backspace","Go up one folder"),
- ("Right / Left","Expand / collapse folder"),
- ("Up / Down","Move selection"),
- ("Double-click",".skd / .tik opens in the viewer"),
- ("Ctrl+Click / Shift+Click","Select multiple files / folders (Enter or right-click batch-builds them)"),
- ("Right-click","Pak context menu (view / remove loaded paks)"),
- ("Drag a file off the window","Open it in its own standalone viewer window"),
-]
-HOTKEYS_VIEWER=[
- ("","--- 3D viewer - camera (click inside the model pane first) ---"),
- ("drag / wheel","Look around / zoom"),
- ("W / S","Move forward / back"),
- ("A / D","Strafe left / right"),
- ("Q / E","Tilt (roll) left / right"),
- ("Space / C","Move up / down"),
- ("Up / Down","Move forward / back"),
- ("Left / Right","Turn (yaw) left / right"),
- ("R","Reset camera"),
- ("V","Toggle Free-look / Tag-lock camera"),
- ("","--- 3D viewer - playback ---"),
- ("P","Play / pause the model & animation"),
- ("F","Freeze / resume everything (same as Play / Pause)"),
- ("[ / ]","Step one frame back / forward"),
- ("Backspace","Reset model & effects to time 0"),
- ("","--- 3D viewer - display toggles ---"),
- ("1 - 7","Texture, Mesh, Wire, Setsizes, Nodes, Labels, Face Anims"),
- ("L","Viewer Light / Dark theme"),
- ("\\","Collapse / expand the viewer's control panel"),
- ("","--- 3D viewer - pop-up lists (animations / surfaces / attach) ---"),
- ("type","Filter the list"),
- ("Up / Down","Move the highlight"),
- ("Enter","Open the highlighted row (or take the top match)"),
- ("Right","Open the highlighted category"),
- ("Left / Backspace","Go back one level"),
- ("Home / End","Jump to the first / last row"),
- ("Esc","Close the list"),
- ("","--- 3D viewer - window ---"),
- ("H or ?","Show / hide the viewer's shortcut overlay"),
- ("Esc","Close the model (back to the start page)"),
-]
+# ------------------------------------------------------- keyboard shortcuts ---
+# Rows for the shortcut tables, in the format of VIEWER_KEYS in mohaa_view.py (see the
+# notes above it there): a heading carries its category (and view) to the rows below it.
+def _kx_sub(title,cat,view=None):
+    d={"sub":title,"c":cat}
+    if view: d["v"]=view
+    return d
+
+def _kx(keys,text,*binds):
+    """A shortcut row: the keys as the list shows them, what they do, and the
+    (chord, keycap label[, what this key does]) of each key it covers."""
+    return {"k":keys,"d":text,"b":[list(b) for b in binds]}
+
+# The launcher's own shortcuts: the "Launcher" tab of the F1 window (its "3D viewer" tab
+# shows VIEWER_KEYS from mohaa_view.py). Keep in step with _bind_hotkeys and the tree's
+# bindings in _build_ui.
+KEYS_LAUNCHER={
+ "title":"Launcher keyboard shortcuts",
+ "cols":[
+  {"title":"Launcher","rows":[
+   _kx_sub("Anywhere in the launcher","app"),
+   _kx("Ctrl+O","add .pk3 pak(s)",("Ctrl+O","add paks")),
+   _kx("Ctrl+Shift+O","open a loose .skd / .tik file",("Ctrl+Shift+O","open file")),
+   _kx("Ctrl+F","focus the search box",("Ctrl+F","search")),
+   _kx("Esc","clear the search / close a menu / cancel loading",("Esc","cancel")),
+   _kx("F5","reload all loaded paks",("F5","reload")),
+   _kx("Ctrl+T","dark / light theme",("Ctrl+T","theme")),
+   _kx("Ctrl+Shift+T","old (OS-default) popup windows on / off",("Ctrl+Shift+T","old pop")),
+   _kx("F1","this window",("F1","keys","the keyboard shortcuts (this window)")),
+   _kx("right-click","on the Output console or the details panel: copy menu",
+       ("RClick","copy","copy menu (Output console, details panel)")),
+  ]},
+  {"title":"Pak tree","rows":[
+   _kx_sub("In the pak tree","tree"),
+   _kx("Enter","open the file / go into the folder",("Enter","open")),
+   _kx("Backspace","go up one folder",("Backspace","up")),
+   _kx("Right|Left","expand / collapse the folder",("Right","expand","expand the folder"),("Left","collapse","collapse the folder")),
+   _kx("Up|Down","move the selection",("Up","up","select the row above"),("Down","down","select the row below")),
+   _kx("double-click",".skd / .tik opens in the viewer",("DblClick","open")),
+   _kx("Ctrl+click|Shift+click","select several files / folders (Enter or right-click builds them all)",
+       ("Ctrl+Click","select +","add a file / folder to the selection"),("Shift+Click","range","select a range of files / folders")),
+   _kx("right-click","pak menu: view / remove loaded paks",("RClick","menu","pak menu (view / remove loaded paks)")),
+   _kx("drag","a file off the window: open it in its own viewer window",
+       ("Drag","drag out","drag a file off the window: open it in its own viewer window")),
+  ]},
+ ]}
+
+class KeyMapWindow:
+    """Help > Keyboard shortcuts (F1): a keyboard and a mouse with every shortcut coloured
+    by what it does, and the same shortcuts as a list underneath, in columns that scroll on
+    their own. Its tabs switch between the 3D viewer's keys and the launcher's own. The
+    viewer pages' H window (KEYS_JS in mohaa_view.py) is the same thing in HTML, drawn from
+    the same tables: KX_LAYOUT and KX_CATS, VIEWER_KEYS / MAP_VIEWER_KEYS, KEYS_LAUNCHER.
+
+    Hovering a key (or pressing it) lists everything it does with every modifier; Shift,
+    Ctrl and Alt, clicked or held, show their layer of the keyboard; hovering a row of the
+    list rings its keys, and clicking a key finds its rows. Keys pressed here are only
+    looked up, never acted on; Esc or F1 closes the window."""
+    BIT = {"Shift": 1, "Ctrl": 2, "Alt": 4}
+    MPART = {"Click": "L", "DblClick": "L", "Drag": "L", "RClick": "R", "RDrag": "R",
+             "MClick": "M", "MDrag": "M", "Wheel": "M"}
+    MNAME = {"Click": "click", "DblClick": "double-click", "Drag": "drag", "RClick": "right-click",
+             "RDrag": "right-drag", "MClick": "middle-click", "MDrag": "middle-drag", "Wheel": "wheel"}
+    MORDER = ("Click", "DblClick", "Drag", "RClick", "RDrag", "MClick", "MDrag", "Wheel")
+    MWORDS = {"click", "double-click", "drag", "right-click", "right-drag", "middle-click",
+              "middle-drag", "wheel", "type"}
+    SEPS = {"…", "–", "or", "then"}
+    PART_NAME = {"L": "Left mouse button", "R": "Right mouse button", "M": "Mouse wheel and middle button"}
+    # Tk key names -> the keyboard's key ids (a shifted symbol is the key it's on)
+    KEYSYM = {"Escape": "Esc", "BackSpace": "Backspace", "Tab": "Tab", "ISO_Left_Tab": "Tab",
+              "Caps_Lock": "Caps", "Return": "Enter", "KP_Enter": "Enter", "space": "Space",
+              "Shift_L": "Shift", "Shift_R": "Shift", "Control_L": "Ctrl", "Control_R": "Ctrl",
+              "Alt_L": "Alt", "Alt_R": "Alt", "Meta_L": "Alt", "Meta_R": "Alt", "Super_L": "Win",
+              "Super_R": "Win", "Win_L": "Win", "Win_R": "Win", "App": "Menu", "Menu": "Menu",
+              "Up": "Up", "Down": "Down", "Left": "Left", "Right": "Right", "Insert": "Ins",
+              "Delete": "Del", "Home": "Home", "End": "End", "Prior": "PgUp", "Next": "PgDn",
+              "Print": "PrtSc", "Scroll_Lock": "ScrLk", "Pause": "Pause",
+              "grave": "`", "asciitilde": "`", "minus": "-", "underscore": "-", "equal": "=", "plus": "=",
+              "bracketleft": "[", "braceleft": "[", "bracketright": "]", "braceright": "]",
+              "backslash": "\\", "bar": "\\", "semicolon": ";", "colon": ";", "apostrophe": "'",
+              "quotedbl": "'", "comma": ",", "less": ",", "period": ".", "greater": ".", "slash": "/",
+              "question": "/", "exclam": "1", "at": "2", "numbersign": "3", "dollar": "4",
+              "percent": "5", "asciicircum": "6", "ampersand": "7", "asterisk": "8",
+              "parenleft": "9", "parenright": "0"}
+
+    def __init__(self, app, tabs, cats, layout, tab=0, on_tab=None):
+        import tkinter.font as _tkfont
+        self.app, self.tabs, self.layout, self.on_tab = app, tabs, layout, on_tab
+        self.catd = {c["id"]: c for c in cats}
+        self.old = OLD_POPUPS
+        self.light = self.old or getattr(app, "_theme", "dark") == "light"
+        self.latch = self.held = 0
+        self.q = ""; self.cat = None
+        self.hot = self.ring = self.ring_cat = self.tmp_l = self.tmp_v = None
+        self.view = None; self.views = []; self.pop = None; self.hot_row = None
+        self._jobs = {}; self._capfit = {}
+        if self.old:                            # "Use old popup windows": the system's colours
+            probe = tk.Frame(app); bg = probe.cget("bg"); probe.destroy()
+            self.C = dict(panel=bg, line="#a0a0a0", txt="#000000", dim="#5a5a5a", btn="#ffffff",
+                          accent="#0060c0", on="#cce4ff", tip="#ffffe1", entry="#ffffff", hov="#e5f1fb")
+        else:
+            self.C = dict(panel=PANEL, line=LINE, txt=TXT, dim=DIM, btn=BTN_BG, accent=ACCENT,
+                          on=BTN_HOV, tip=TIP_BG, entry=ENTRY_BG, hov=SEL_BG)
+        sw, sh = app.winfo_screenwidth(), app.winfo_screenheight()
+        self.U = U = max(26, min(40, (sw - 140) // 23))     # one key, in pixels
+        fam = FONT_SMALL[0]
+        px = lambda f: -max(8, int(round(U * f)))
+        self.f_name, self.f_name0 = (fam, px(0.27), "bold"), (fam, px(0.27))
+        self.f_cap, self.f_mark, self.f_ml = (fam, px(0.24)), (fam, -max(7, int(round(U * 0.19)))), (fam, px(0.25))
+        self.f_row = self.f_chip = (fam, 9)
+        self.f_chip_i = (fam, 9, "italic")
+        self.f_bold, self.f_head, self.f_head_b = (fam, 10, "bold"), (fam, 8), (fam, 9, "bold")
+        self._fm = _tkfont.Font(font=self.f_chip)
+        self._fm_i = _tkfont.Font(font=self.f_chip_i)
+        # keycap labels shrink a size or three to fit their key before they are cut short
+        self._capfonts = [((fam, -n), _tkfont.Font(font=(fam, -n))) for n in range(-self.f_cap[1], 6, -1)][:4]
+        self.W = max(23 * U + 28, min(sw - 80, 1200))         # window width
+        self.colh = max(170, min(sh - 90, 900) - int(6.25 * U) - 150)
+        self._build()
+        self._set_tab(max(0, min(tab, len(tabs) - 1)))
+        self._place(sw, sh)
+
+    # ---- colours and small helpers ------------------------------------------------------
+    def _mix(self, c1, c2, a):
+        try:
+            r1, g1, b1 = (v // 257 for v in self.app.winfo_rgb(c1))
+            r2, g2, b2 = (v // 257 for v in self.app.winfo_rgb(c2))
+        except Exception:
+            return c1
+        return "#%02x%02x%02x" % (round(r1 * a + r2 * (1 - a)), round(g1 * a + g2 * (1 - a)), round(b1 * a + b2 * (1 - a)))
+
+    def _ccol(self, c):
+        x = self.catd.get(c)
+        return (x["light"] if self.light else x["dark"]) if x else self.C["dim"]
+
+    def _vname(self, v):
+        return next((x["name"] for x in self.views if x["id"] == v), v)
+
+    def _only(self, v):
+        return any(x["id"] == v and x.get("only") for x in self.views)
+
+    def _applies(self, b, v):
+        return v is None or (b["v"] == v if b["v"] else not self._only(v))
+
+    def _layer(self):
+        return self.tmp_l if self.tmp_l is not None else (self.latch | self.held)
+
+    def _cur_view(self):
+        return self.tmp_v or self.view
+
+    def _row_ok(self, R):
+        return (not self.cat or R["c"] == self.cat) and (not self.q or self.q in R["text"])
+
+    @staticmethod
+    def _mabbr(m):
+        return ("C" if m & 2 else "") + ("A" if m & 4 else "") + ("S" if m & 1 else "")
+
+    def _after(self, name, ms, fn):
+        j = self._jobs.pop(name, None)
+        if j:
+            try: self.w.after_cancel(j)
+            except Exception: pass
+        if fn is not None:
+            def run():
+                self._jobs.pop(name, None)
+                try: fn()
+                except tk.TclError: pass        # the window was closed meanwhile
+            self._jobs[name] = self.w.after(ms, run)
+
+    def _rr(self, x0, y0, x1, y1, r, **kw):
+        """A rounded rectangle on the keyboard canvas."""
+        p = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1,
+             x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
+        return self.cv.create_polygon(p, smooth=True, **kw)
+
+    def _seg(self, parent, text, cmd):
+        """A flat toggle button (the tabs, views and Shift / Ctrl / Alt)."""
+        C = self.C
+        b = tk.Label(parent, text=text, bg=C["btn"], fg=C["txt"], font=self.f_chip, padx=8, pady=2, bd=0,
+                     highlightthickness=1, highlightbackground=C["line"], cursor="hand2")
+        b.pack(side="left")
+        b._on = False
+        b.bind("<Button-1>", lambda e: cmd())
+        b.bind("<Enter>", lambda e: b.configure(bg=C["on"]))
+        b.bind("<Leave>", lambda e: b.configure(bg=C["on"] if b._on else C["btn"]))
+        return b
+
+    def _seg_set(self, b, on):
+        C = self.C
+        b._on = bool(on)
+        b.configure(bg=C["on"] if on else C["btn"], fg=C["accent"] if on else C["txt"],
+                    highlightbackground=C["accent"] if on else C["line"])
+
+    def _chip(self, parent, text, col, bg=None):
+        C = self.C
+        return tk.Label(parent, text=text, bg=C["btn"], fg=C["txt"], padx=4, pady=0, bd=0,
+                        font=self.f_chip_i if text in self.MWORDS else self.f_chip,
+                        highlightthickness=1, highlightbackground=self._mix(col, C["line"], 0.6),
+                        highlightcolor=self._mix(col, C["line"], 0.6))
+
+    def _units(self, k):
+        """A row's key text as ("sep", text) and ("chord", [keys]) pieces."""
+        out = []
+        for t in k.split(" "):
+            if not t:
+                continue
+            if t in self.SEPS:
+                out.append(("sep", t)); continue
+            for j, a in enumerate(t.split("|")):
+                if j:
+                    out.append(("sep", "/"))
+                out.append(("chord", a.split("+")))
+        return out
+
+    def _chips(self, parent, units, col, width, bg):
+        """The keys of a row as chips, wrapped onto lines no wider than `width`."""
+        C = self.C
+        line, used = None, width + 1
+        for kind, val in units:
+            if kind == "sep":
+                need = self._fm.measure(val) + 6
+            else:
+                need = sum((self._fm_i if p in self.MWORDS else self._fm).measure(p) + 12 for p in val) \
+                    + (len(val) - 1) * (self._fm.measure("+") + 2)
+            if line is None or used + need > width:
+                line = tk.Frame(parent, bg=bg); line.pack(side="top", anchor="w", pady=1); used = 0
+            u = tk.Frame(line, bg=bg); u.pack(side="left", padx=(0, 3))
+            if kind == "sep":
+                tk.Label(u, text=val, bg=bg, fg=C["dim"], font=self.f_chip).pack(side="left")
+            else:
+                for j, p in enumerate(val):
+                    if j:
+                        tk.Label(u, text="+", bg=bg, fg=C["dim"], font=self.f_chip).pack(side="left")
+                    self._chip(u, self.MNAME.get(p, p), col).pack(side="left")
+            used += need + 3
+
+    # ---- the window --------------------------------------------------------------------
+    def _build(self):
+        C, U, app = self.C, self.U, self.app
+        w = self.w = tk.Toplevel(app); w.title("Keyboard shortcuts")
+        w.transient(app); w.resizable(False, False); w.configure(bg=C["panel"])
+        lab = lambda p, t: tk.Label(p, text=t, bg=C["panel"], fg=C["dim"], font=self.f_chip)
+        top = tk.Frame(w, bg=C["panel"]); top.pack(side="top", fill="x", padx=12, pady=(10, 4))
+        tf = tk.Frame(top, bg=C["panel"]); tf.pack(side="left")
+        self.tab_btns = [self._seg(tf, t[0], lambda i=i: self._set_tab(i)) for i, t in enumerate(self.tabs)]
+        self.title_l = tk.Label(top, text="", bg=C["panel"], fg=C["accent"], font=self.f_bold)
+        self.title_l.pack(side="left", padx=(12, 0))
+        tk.Frame(top, bg=C["panel"]).pack(side="left", fill="x", expand=True)
+        self.view_lab = lab(top, "keys in"); self.view_lab.pack(side="left", padx=(8, 4))
+        self.viewf = tk.Frame(top, bg=C["panel"]); self.viewf.pack(side="left")
+        self.mod_lab = lab(top, "with"); self.mod_lab.pack(side="left", padx=(10, 4))
+        mf = tk.Frame(top, bg=C["panel"]); mf.pack(side="left")
+        self.mod_btns = {n: self._seg(mf, n, lambda n=n: self._toggle_mod(self.BIT[n])) for n in ("Shift", "Ctrl", "Alt")}
+        lab(top, "search").pack(side="left", padx=(12, 4))
+        self.qvar = tk.StringVar()
+        self.search = tk.Entry(top, textvariable=self.qvar, width=18, font=self.f_chip, relief="flat",
+                               bg=C["entry"], fg=C["txt"], insertbackground=C["txt"],
+                               highlightthickness=1, highlightbackground=C["line"], highlightcolor=C["accent"])
+        self.search.pack(side="left", ipady=2)
+        self.qvar.trace_add("write", lambda *a: self._on_search())
+        # keyboard and mouse
+        self.pad = p = 6
+        self.cv = tk.Canvas(w, width=23 * U + 2 * p, height=int(6.25 * U) + 2 * p, bg=C["panel"],
+                            highlightthickness=0, bd=0)
+        self.cv.pack(side="top", pady=(4, 2))
+        self.cv.bind("<Button-1>", lambda e: self.cv.focus_set(), add="+")   # keys are looked up again
+        self._draw_keyboard()
+        # category chips, the list, Close
+        self.catf = tk.Frame(w, bg=C["panel"]); self.catf.pack(side="top", fill="x", padx=12, pady=(2, 4))
+        tk.Frame(w, bg=C["line"], height=1).pack(side="top", fill="x", padx=12)
+        bot = tk.Frame(w, bg=C["panel"]); bot.pack(side="bottom", fill="x", padx=12, pady=(6, 10))
+        if self.old:
+            self.close_btn = tk.Button(bot, text="Close", command=self.close, takefocus=0)
+        else:
+            self.close_btn = ttk.Button(bot, text="Close", command=self.close, cursor="hand2", takefocus=0)
+        self.close_btn.pack(side="left")
+        self.colsf = tk.Frame(w, bg=C["panel"], width=self.W - 24)
+        self.colsf.pack(side="top", fill="both", expand=True, padx=12, pady=(6, 0))
+        # keys pressed here are looked up (and never reach the launcher's own shortcuts)
+        w.bind("<KeyPress>", self._on_key)
+        w.bind("<KeyRelease>", self._on_key_up)
+        w.bind("<FocusOut>", self._focus_out)         # a modifier let go elsewhere never comes back
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            w.bind(seq, self._wheel)
+        w.protocol("WM_DELETE_WINDOW", self.close)
+
+    def _place(self, sw, sh):
+        w, app = self.w, self.app
+        try:
+            w.update_idletasks()
+            x = app.winfo_rootx() + (app.winfo_width() - w.winfo_reqwidth()) // 2
+            y = app.winfo_rooty() + (app.winfo_height() - w.winfo_reqheight()) // 2
+            x0, y0, x1, y1 = _virtual_screen(w)
+            x = max(x0, min(x, x1 - w.winfo_reqwidth())); y = max(y0, min(y, y1 - w.winfo_reqheight() - 40))
+            w.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+        if not self.old:
+            try: app._apply_titlebar(w)
+            except Exception: pass
+        try: w.grab_set()
+        except Exception: pass
+        self.cv.focus_set()
+
+    def close(self):
+        for n in list(self._jobs):
+            self._after(n, 0, None)
+        try: self.w.grab_release()
+        except Exception: pass
+        try: self.w.destroy()
+        except Exception: pass
+        if getattr(self.app, "_keymap", None) is self:
+            self.app._keymap = None
+
+    # ---- keyboard and mouse ------------------------------------------------------------
+    def _hook(self, K):
+        cv = self.cv
+        cv.tag_bind(K["tag"], "<Enter>", lambda e, K=K: self._hover(K))
+        cv.tag_bind(K["tag"], "<Leave>", lambda e, K=K: self._unhover(K))
+        cv.tag_bind(K["tag"], "<Button-1>", lambda e, K=K: self._click_key(K))
+
+    def _draw_keyboard(self):
+        C, U, p, cv = self.C, self.U, self.pad, self.cv
+        self.KEYS = []
+        for i, (kid, lab, x, y, wd) in enumerate(self.layout):
+            x0, y0, ww, tag = p + x * U, p + y * U, wd * U, "k%d" % i
+            K = dict(id=kid, lab=lab, ids=[kid], bit=self.BIT.get(kid, 0), tag=tag, cx=x0 + ww / 2, w=ww, mouse=False)
+            K["body"] = self._rr(x0 + 2, y0 + 2, x0 + ww - 2, y0 + U - 2, 6, fill=C["btn"], outline=C["line"], tags=(tag,))
+            K["ring"] = self._rr(x0 + 1, y0 + 1, x0 + ww - 1, y0 + U - 1, 7, fill="", outline="", width=3, tags=(tag,))
+            K["name"] = cv.create_text(x0 + 7, y0 + 5, text=lab, anchor="nw", fill=C["dim"], font=self.f_name0, tags=(tag,))
+            K["cap"] = cv.create_text(x0 + ww / 2, y0 + U - 6, text="", anchor="s", fill=C["txt"], font=self.f_cap, tags=(tag,))
+            K["mark"] = cv.create_text(x0 + ww - 5, y0 + 3, text="", anchor="ne", justify="right", fill=C["dim"],
+                                       font=self.f_mark, tags=(tag,))
+            self._hook(K); self.KEYS.append(K)
+        mx, my, mw, mh = p + 19.9 * U, p + 2, 1.9 * U, 2.95 * U
+        mc, split = mx + mw / 2, my + 1.15 * U
+        self._rr(mx, my, mx + mw, my + mh, mw / 2, fill=C["btn"], outline=C["line"], width=1.5)
+        self.PARTS = []
+        r = mw * 0.5
+        shapes = {"L": [mc - 1, my + 1, mc - 1, my + 1, mc - 1, split, mc - 1, split, mx + 1, split, mx + 1, split,
+                        mx + 1, my + r, mx + 1, my + 1, mc - 1, my + 1],
+                  "R": [mc + 1, my + 1, mc + 1, my + 1, mc + 1, split, mc + 1, split, mx + mw - 1, split,
+                        mx + mw - 1, split, mx + mw - 1, my + r, mx + mw - 1, my + 1, mc + 1, my + 1]}
+        for pid in ("L", "R", "M"):
+            tag = "m" + pid
+            if pid == "M":
+                body = self._rr(mc - 7, my + 12, mc + 7, my + 42, 6, fill=C["btn"], outline=C["line"], width=1.5, tags=(tag,))
+            else:
+                body = cv.create_polygon(shapes[pid], smooth=True, fill=C["btn"], outline=C["line"], width=1.5, tags=(tag,))
+            K = dict(id=pid, lab=self.PART_NAME[pid], ids=[k for k in self.MORDER if self.MPART[k] == pid], bit=0,
+                     tag=tag, cx=mc + (-mw / 4 if pid == "L" else mw / 4 if pid == "R" else 0), mouse=True, body=body)
+            self._hook(K); self.PARTS.append(K)
+        cv.tag_raise("mM")
+        self.ml_x, self.ml_y = p + 18.95 * U, my + mh + 12
+        self.ml_items = []
+
+    def _lit(self, ids, L, V, filt):
+        here, ok = [], []
+        for i in ids:
+            for b in self.BYKEY.get(i, ()):
+                if b["m"] == L and self._applies(b, V):
+                    here.append(b)
+                    if not filt or self._row_ok(b["row"]):
+                        ok.append(b)
+        return here, ok
+
+    def _fit_cap(self, s, width):
+        """(text, font) for a keycap label: the largest size that fits, else cut short."""
+        key = (s, width)
+        if key not in self._capfit:
+            room = width - 5
+            for spec, fnt in self._capfonts:
+                if fnt.measure(s) <= room:
+                    self._capfit[key] = (s, spec)
+                    break
+            else:
+                spec, fnt = self._capfonts[-1]
+                t = s
+                while len(t) > 1 and fnt.measure(t + "…") > room:
+                    t = t[:-1]
+                self._capfit[key] = (t + "…", spec)
+        return self._capfit[key]
+
+    def _paint(self):
+        C, cv = self.C, self.cv
+        L, V, filt = self._layer(), self._cur_view(), bool(self.q or self.cat)
+        ring, rc = self.ring, self.ring_cat
+        dim_off, dim_free = self._mix(C["dim"], C["panel"], 0.45), self._mix(C["dim"], C["panel"], 0.7)
+        for K in self.KEYS:
+            here, ok = self._lit(K["ids"], L, V, filt)
+            b0 = ok[0] if ok else None
+            held = bool(K["bit"] and (L & K["bit"]))
+            ringed = bool(ring and any(i in ring for i in K["ids"])) or bool(rc and any(b["c"] == rc for b in ok))
+            if held:
+                fill, out, ow, nf, nfont = C["on"], C["accent"], 2, C["accent"], self.f_name
+            elif b0:
+                col = self._ccol(b0["c"])
+                fill, out, ow, nf, nfont = self._mix(col, C["btn"], 0.3), col, 1.5, C["txt"], self.f_name
+            else:
+                fill, out, ow, nfont = C["btn"], C["line"], 1, self.f_name0
+                nf = dim_off if here else dim_free
+            cv.itemconfigure(K["body"], fill=fill, outline=out, width=ow)
+            cv.itemconfigure(K["name"], fill=nf, font=nfont)
+            if b0 and not held:
+                t, f = self._fit_cap(b0["cap"], K["w"])
+                cv.itemconfigure(K["cap"], text=t, font=f)
+            else:
+                cv.itemconfigure(K["cap"], text="")
+            if ringed:
+                cv.itemconfigure(K["ring"], outline=C["txt"], width=3)
+            elif self.hot is K:
+                cv.itemconfigure(K["ring"], outline=C["accent"], width=2)
+            else:
+                cv.itemconfigure(K["ring"], outline="")
+            # the other modifiers this key works with, one to a line in the top-right corner
+            oth = [self._mabbr(m) for m in sorted({b["m"] for b in self.BYKEY.get(K["id"], ())
+                                                   if b["m"] and b["m"] != L and self._applies(b, V)})]
+            cv.itemconfigure(K["mark"], text="\n".join(oth if len(oth) < 3 else [oth[0], " ".join(oth[1:])]))
+        for K in self.PARTS:
+            here, ok = self._lit(K["ids"], L, V, filt)
+            b0 = ok[0] if ok else None
+            ringed = bool(ring and any(i in ring for i in K["ids"])) or bool(rc and any(b["c"] == rc for b in ok))
+            col = self._ccol(b0["c"]) if b0 else None
+            cv.itemconfigure(K["body"], fill=self._mix(col, C["btn"], 0.3) if col else C["btn"],
+                             outline=C["txt"] if ringed else C["accent"] if self.hot is K else (col or C["line"]),
+                             width=3 if ringed else 2 if self.hot is K else 1.5)
+        # what each mouse action does in this layer, under the mouse
+        for i in self.ml_items:
+            cv.delete(i)
+        self.ml_items = []
+        lines = [b for k in self.MORDER for b in self.BYKEY.get(k, ())
+                 if b["m"] == L and self._applies(b, V) and (not filt or self._row_ok(b["row"]))]
+        lh = max(12, int(self.U * 0.38))
+        for n, b in enumerate(lines[:6 if len(lines) > 7 else 7]):
+            y = self.ml_y + n * lh
+            self.ml_items.append(cv.create_text(self.ml_x, y, text=self.MNAME[b["k"]], anchor="nw", fill=C["dim"], font=self.f_ml))
+            self.ml_items.append(cv.create_text(self.ml_x + 2.05 * self.U, y, text=b["cap"], anchor="nw", fill=C["txt"], font=self.f_ml))
+        if len(lines) > 7:
+            self.ml_items.append(cv.create_text(self.ml_x, self.ml_y + 6 * lh, text="+%d more (hover the mouse)" % (len(lines) - 6),
+                                                anchor="nw", fill=C["dim"], font=self.f_ml))
+        for n, b in self.mod_btns.items():
+            self._seg_set(b, (self.latch | self.held) & self.BIT[n])
+        for v, b in getattr(self, "view_btns", {}).items():
+            self._seg_set(b, self.view == v)
+
+    # ---- one tab (a table) ----------------------------------------------------------------
+    def _set_tab(self, i):
+        self._hide_pop()
+        self.tab = i
+        if self.on_tab:
+            try: self.on_tab(i)
+            except Exception: pass
+        for j, b in enumerate(self.tab_btns):
+            self._seg_set(b, j == i)
+        T = self.tabs[i][1]
+        self.views = T.get("views") or []
+        self.view = T.get("default") or (self.views[0]["id"] if self.views else None)
+        self.latch = self.held = 0; self.cat = None; self.hot = self.ring = self.ring_cat = None
+        self.tmp_l = self.tmp_v = None; self.hot_row = None
+        self.title_l.configure(text=T.get("title", ""))
+        self.ROWS, self.BYKEY, self.COLS = [], {}, []
+        if self.qvar.get():
+            self.qvar.set("")                  # (nothing to filter yet)
+        self.q = ""
+        # every binding, filed by key
+        for col in T.get("cols", []):
+            cat = view = None; sub = ""; items = []
+            for r in col.get("rows", []):
+                if "sub" in r:
+                    cat, view, sub = r.get("c") or cat, r.get("v"), r["sub"]
+                    items.append({"sub": r["sub"], "c": cat, "v": view}); continue
+                R = {"k": r["k"], "d": r["d"], "c": r.get("c") or cat, "v": r.get("v") or view, "binds": []}
+                for b in r.get("b", []):
+                    parts = b[0].split("+")
+                    m = 0
+                    for x in parts[:-1]:
+                        m |= self.BIT.get(x, 0)
+                    B = {"ch": b[0], "k": parts[-1], "m": m, "cap": b[1] if len(b) > 1 else "",
+                         "d": b[2] if len(b) > 2 else r["d"], "c": R["c"], "v": R["v"], "row": R}
+                    R["binds"].append(B); self.BYKEY.setdefault(B["k"], []).append(B)
+                R["text"] = " ".join([sub, self._vname(R["v"]) if R["v"] else "", r["k"], r["d"]] +
+                                     ["%s %s %s" % (b["ch"], b["cap"], b["d"]) for b in R["binds"]]).lower()
+                items.append(R); self.ROWS.append(R)
+            self.COLS.append({"title": col.get("title", ""), "items": items})
+        # views
+        for ch in self.viewf.winfo_children():
+            ch.destroy()
+        self.view_btns = {v["id"]: self._seg(self.viewf, v["name"], lambda v=v["id"]: self._set_view(v)) for v in self.views}
+        if self.views:
+            self.view_lab.configure(text="keys in"); self.mod_lab.configure(text="with")
+        else:
+            self.view_lab.configure(text=""); self.mod_lab.configure(text="keys with")
+        self._build_cats()
+        self._build_cols()
+        self._refresh()
+
+    def _set_view(self, v):
+        self.view = v; self._refresh()
+
+    def _toggle_mod(self, bit):
+        self.latch ^= bit; self._paint()
+
+    def _build_cats(self):
+        C = self.C
+        for ch in self.catf.winfo_children():
+            ch.destroy()
+        self.chip_w = {}
+        used = []
+        for R in self.ROWS:
+            if R["c"] and R["c"] not in used:
+                used.append(R["c"])
+        for c in used:
+            f = tk.Frame(self.catf, bg=C["panel"], highlightthickness=1, highlightbackground=C["panel"], cursor="hand2")
+            f.pack(side="left", padx=(0, 8))
+            dot = tk.Label(f, text="●", bg=C["panel"], fg=self._ccol(c), font=self.f_chip)
+            dot.pack(side="left", padx=(4, 2))
+            nm = tk.Label(f, text=self.catd.get(c, {}).get("name", c), bg=C["panel"], fg=C["dim"], font=self.f_chip)
+            nm.pack(side="left", padx=(0, 4))
+            for wdg in (f, dot, nm):
+                wdg.bind("<Button-1>", lambda e, c=c: self._set_cat(c))
+                wdg.bind("<Enter>", lambda e, c=c: self._ring_cat(c))
+                wdg.bind("<Leave>", lambda e: self._ring_cat(None))
+            self.chip_w[c] = (f, nm)
+        # a tab may carry its own hint as a third item: (name, table, hint)
+        tab = self.tabs[self.tab]
+        tip = tab[2] if len(tab) > 2 and tab[2] else \
+            "hover or press a key to see all it does · hover a row to find its keys"
+        tk.Label(self.catf, text=tip, bg=C["panel"], fg=C["dim"], font=self.f_chip).pack(side="right")
+
+    def _set_cat(self, c):
+        self.cat = None if self.cat == c else c
+        self._refresh()
+
+    def _ring_cat(self, c):
+        self.ring_cat = c
+        self._paint()
+
+    def _build_cols(self):
+        C = self.C
+        for ch in self.colsf.winfo_children():
+            ch.destroy()
+        n = max(1, len(self.COLS)); gap = 14
+        colw = (self.W - 24 - gap * (n - 1)) // n
+        self.keys_w = max(110, min(150, colw * 2 // 5))
+        desc_w = max(120, colw - self.keys_w - 34)
+        self.colw = []
+        for ci, col in enumerate(self.COLS):
+            cf = tk.Frame(self.colsf, bg=C["panel"])
+            cf.grid(row=0, column=ci, sticky="nsew", padx=(0 if ci == 0 else gap, 0))
+            self.colsf.grid_columnconfigure(ci, weight=1, uniform="kxcol")
+            tk.Label(cf, text=col["title"].upper(), bg=C["panel"], fg=C["accent"], font=self.f_head_b, anchor="w"
+                     ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 3))
+            cv = tk.Canvas(cf, highlightthickness=0, bd=0, bg=C["panel"], width=colw - 18, height=self.colh, yscrollincrement=20)
+            sb = (tk.Scrollbar(cf, command=cv.yview) if self.old else ttk.Scrollbar(cf, orient="vertical", command=cv.yview))
+            cv.configure(yscrollcommand=sb.set)
+            cv.grid(row=1, column=0, sticky="nsew"); sb.grid(row=1, column=1, sticky="ns", padx=(2, 0))
+            cf.grid_rowconfigure(1, weight=1); cf.grid_columnconfigure(0, weight=1)
+            inner = tk.Frame(cv, bg=C["panel"])
+            win = cv.create_window((0, 0), window=inner, anchor="nw", width=colw - 18)
+            r = 0
+            for it in col["items"]:
+                if "sub" in it:
+                    hf = tk.Frame(inner, bg=C["panel"]); hf.grid(row=r, column=0, sticky="we", pady=(9, 3)); r += 1
+                    if it["v"]:                 # the view tag first, so a long heading wraps beside it
+                        tk.Label(hf, text=self._vname(it["v"]), bg=C["panel"], fg=C["dim"], font=self.f_head, padx=3,
+                                 highlightthickness=1, highlightbackground=C["line"]).pack(side="right", anchor="n", padx=(6, 4))
+                    tk.Label(hf, text="●", bg=C["panel"], fg=self._ccol(it["c"]), font=self.f_head).pack(side="left", anchor="n")
+                    tk.Label(hf, text=it["sub"].upper(), bg=C["panel"], fg=C["dim"], font=self.f_head, justify="left",
+                             anchor="w", wraplength=max(120, colw - (150 if it["v"] else 50))).pack(side="left", padx=(4, 0))
+                    it["el"] = hf; it["seps"] = []
+                    continue
+                sep = tk.Frame(inner, bg=C["line"], height=1); sep.grid(row=r, column=0, sticky="we"); r += 1
+                rf = tk.Frame(inner, bg=C["panel"]); rf.grid(row=r, column=0, sticky="we"); r += 1
+                rf.grid_columnconfigure(0, minsize=self.keys_w)
+                kf = tk.Frame(rf, bg=C["panel"]); kf.grid(row=0, column=0, sticky="nw", padx=(3, 6), pady=4)
+                self._chips(kf, self._units(it["k"]), self._ccol(it["c"]), self.keys_w - 9, C["panel"])
+                tk.Label(rf, text=it["d"], bg=C["panel"], fg=C["txt"], font=self.f_row, justify="left", anchor="w",
+                         wraplength=desc_w).grid(row=0, column=1, sticky="nw", pady=5)
+                it["el"], it["sep"] = rf, sep
+                self._hook_row(it, rf)
+            inner.grid_columnconfigure(0, weight=1)
+            none = tk.Label(inner, text="Nothing in this column matches.", bg=C["panel"], fg=C["dim"], font=self.f_row)
+            none.grid(row=r, column=0, sticky="w", pady=8)
+            col.update(cv=cv, sb=sb, inner=inner, frame=cf, none=none, win=win)
+
+            def _fit(e=None, col=col):
+                cv_, inner_ = col["cv"], col["inner"]
+                cv_.configure(scrollregion=(0, 0, inner_.winfo_reqwidth(), inner_.winfo_reqheight()))
+                if cv_.winfo_height() + 1 >= inner_.winfo_reqheight():
+                    col["sb"].grid_remove(); cv_.yview_moveto(0)
+                else:
+                    col["sb"].grid()
+            inner.bind("<Configure>", _fit); cv.bind("<Configure>", _fit)
+
+    def _descendants(self, wdg):
+        out = [wdg]
+        for ch in wdg.winfo_children():
+            out.extend(self._descendants(ch))
+        return out
+
+    def _hook_row(self, it, rf):
+        def enter(_e=None):
+            self._after("row", 0, None)
+            if self.hot_row is not it:
+                self._row_hover(it)
+
+        def leave(_e=None):
+            self._after("row", 50, check)
+
+        def check():
+            try:
+                wdg = self.w.winfo_containing(self.w.winfo_pointerx(), self.w.winfo_pointery())
+            except Exception:
+                wdg = None
+            while wdg is not None and wdg is not rf:
+                wdg = getattr(wdg, "master", None)
+            if wdg is None and self.hot_row is it:
+                self._row_hover(None)
+        for wdg in self._descendants(rf):
+            wdg.bind("<Enter>", enter, add="+"); wdg.bind("<Leave>", leave, add="+")
+
+    def _row_bg(self, it, bg):
+        C = self.C
+        for wdg in self._descendants(it["el"]):
+            try:
+                if wdg.cget("bg") in (C["panel"], C["hov"], C["on"]):
+                    wdg.configure(bg=bg)
+            except Exception:
+                pass
+
+    def _row_hover(self, R):
+        if self.hot_row is not None and self.hot_row is not R:
+            self._row_bg(self.hot_row, self.C["panel"])
+        self.hot_row = R
+        if R is None:
+            self.ring = None; self.tmp_l = self.tmp_v = None
+            self._paint(); return
+        self._row_bg(R, self.C["hov"])
+        self.ring = {b["k"] for b in R["binds"]}
+        self.tmp_l = R["binds"][0]["m"] if R["binds"] else None
+        # a row for keys that work in another view shows that view while it is hovered
+        if R["v"] and R["v"] != self.view:
+            self.tmp_v = R["v"]
+        elif not R["v"] and self._only(self.view):
+            self.tmp_v = next((v["id"] for v in self.views if not v.get("only")), None)
+        else:
+            self.tmp_v = None
+        self._paint()
+
+    def _refresh(self):
+        V = self.view
+        for col in self.COLS:
+            head, seen, shown = None, False, 0
+            groups = []
+            for it in col["items"]:
+                if "sub" in it:
+                    head = it; groups.append([it]); seen = False; continue
+                if not groups:
+                    groups.append([None])
+                groups[-1].append(it)
+            for g in groups:
+                head, rows = g[0], g[1:]
+                seen = False
+                for it in rows:
+                    ok = self._row_ok(it)
+                    if ok:
+                        it["el"].grid()
+                        (it["sep"].grid() if seen else it["sep"].grid_remove())
+                        seen = True; shown += 1
+                        here = it["v"] == V if it["v"] else not self._only(V)
+                        self._dim_row(it, not here)
+                    else:
+                        it["el"].grid_remove(); it["sep"].grid_remove()
+                if head is not None:
+                    (head["el"].grid() if seen else head["el"].grid_remove())
+            (col["none"].grid_remove() if shown else col["none"].grid())
+        for c, (f, nm) in getattr(self, "chip_w", {}).items():
+            on = self.cat == c
+            f.configure(highlightbackground=self._ccol(c) if on else self.C["panel"])
+            nm.configure(fg=self.C["txt"] if on else self.C["dim"])
+        self._paint()
+
+    def _dim_row(self, it, na):
+        if it.get("na") == na:
+            return
+        it["na"] = na
+        C = self.C
+        fg = self._mix(C["txt"], C["panel"], 0.5) if na else C["txt"]
+        for wdg in self._descendants(it["el"]):
+            if isinstance(wdg, tk.Label):
+                try:
+                    cur = wdg.cget("fg")
+                    if cur in (C["txt"], self._mix(C["txt"], C["panel"], 0.5)):
+                        wdg.configure(fg=fg)
+                except Exception:
+                    pass
+
+    def _on_search(self):
+        self.q = self.qvar.get().strip().lower()
+        if hasattr(self, "COLS"):
+            self._refresh()
+
+    # ---- details of one key (or mouse button), under the keyboard ------------------------
+    def _hide_pop(self):
+        if self.pop is not None:
+            try: self.pop.destroy()
+            except Exception: pass
+            self.pop = None
+
+    def _show_pop(self, K):
+        self._hide_pop()
+        C = self.C
+        lst = [b for i in K["ids"] for b in self.BYKEY.get(i, ())]
+        lst.sort(key=lambda b: (b["m"], K["ids"].index(b["k"])))
+        f = tk.Frame(self.w, bg=C["tip"], highlightthickness=1, highlightbackground=C["accent"], bd=0)
+        name = K["lab"] if K["mouse"] or K["lab"] == K["id"] else K["id"] + " " + K["lab"]
+        hd = tk.Frame(f, bg=C["tip"]); hd.grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(6, 3))
+        tk.Label(hd, text=name, bg=C["tip"], fg=C["accent"], font=self.f_bold).pack(side="left")
+        if lst:
+            tk.Label(hd, text="%d shortcut%s" % (len(lst), "s" if len(lst) > 1 else ""), bg=C["tip"], fg=C["dim"],
+                     font=self.f_row).pack(side="left", padx=(6, 0))
+        V = self._cur_view()
+        r = 1
+        for b in lst:
+            fg = C["txt"] if self._applies(b, V) else self._mix(C["dim"], C["tip"], 0.7)
+            u = tk.Frame(f, bg=C["tip"]); u.grid(row=r, column=0, sticky="w", padx=(8, 8), pady=1)
+            self._chips(u, [("chord", b["ch"].split("+"))], self._ccol(b["c"]), 400, C["tip"])
+            tk.Label(f, text=b["d"], bg=C["tip"], fg=fg, font=self.f_row, justify="left", anchor="w",
+                     wraplength=330).grid(row=r, column=1, sticky="w", pady=1)
+            if b["v"]:
+                tk.Label(f, text=self._vname(b["v"]), bg=C["tip"], fg=C["dim"], font=self.f_head, padx=3,
+                         highlightthickness=1, highlightbackground=C["line"]).grid(row=r, column=2, sticky="w", padx=(6, 8))
+            r += 1
+        note = ("Click it, or hold it, to see the %s+ shortcuts on the keyboard." % K["id"]) if K["bit"] else \
+            ("" if lst else "Not used.")
+        if note:
+            tk.Label(f, text=note, bg=C["tip"], fg=C["dim"], font=self.f_row).grid(row=r, column=0, columnspan=3,
+                                                                                  sticky="w", padx=8, pady=(2, 0))
+            r += 1
+        tk.Frame(f, bg=C["tip"], height=5).grid(row=r, column=0)
+        f.update_idletasks()
+        pw, ph = f.winfo_reqwidth(), f.winfo_reqheight()
+        ww, wh = self.w.winfo_width(), self.w.winfo_height()
+        x = int(self.cv.winfo_x() + K["cx"] - pw / 2)
+        x = max(6, min(x, ww - pw - 6))
+        y = self.cv.winfo_y() + self.cv.winfo_height() + 2
+        if y + ph > wh - 4:
+            y = max(4, wh - ph - 4)
+        f.place(x=x, y=y); f.lift()
+        self.pop = f
+
+    def _hover(self, K):
+        self._after("unhover", 0, None)
+        if self.hot_row is not None:          # the pointer has left the list for the keyboard
+            self._after("row", 0, None); self._row_hover(None)
+        if self.hot is K and self.pop is not None:
+            return
+        self.hot = K; self._paint(); self._show_pop(K)
+
+    def _unhover(self, K):
+        def go():
+            if self.hot is K:
+                self.hot = None; self._paint(); self._hide_pop()
+        self._after("unhover", 60, go)
+
+    def _click_key(self, K):
+        if K["bit"]:
+            self._toggle_mod(K["bit"]); self._show_pop(K); return
+        L, V = self._layer(), self._cur_view()
+        rows = []
+        for i in K["ids"]:
+            for b in self.BYKEY.get(i, ()):
+                if b["m"] == L and self._applies(b, V) and b["row"] not in rows:
+                    rows.append(b["row"])
+        self._flash_rows(rows)
+
+    def _flash_rows(self, rows):
+        """Bring each row into view in its column and light it up for a moment."""
+        C, seen = self.C, set()
+        for R in rows:
+            el = R.get("el")
+            if el is None or not el.winfo_ismapped() and not self._row_ok(R):
+                continue
+            col = next((c for c in self.COLS if R in c["items"]), None)
+            if col is None:
+                continue
+            if id(col) not in seen:
+                seen.add(id(col))
+                try:
+                    col["inner"].update_idletasks()
+                    y, h = el.winfo_y(), max(1, col["inner"].winfo_reqheight())
+                    top = col["cv"].canvasy(0); vis = col["cv"].winfo_height()
+                    if y < top + 4 or y + el.winfo_height() > top + vis - 4:
+                        col["cv"].yview_moveto(max(0.0, (y - 30) / h))
+                except Exception:
+                    pass
+            self._row_bg(R, C["on"])
+            self._after("flash%d" % id(R), 900, lambda R=R: self._row_bg(R, C["hov"] if self.hot_row is R else C["panel"]))
+
+    def _press(self, K):
+        C = self.C
+        self.cv.itemconfigure(K["body"], fill=self._mix(C["txt"], C["btn"], 0.25))
+        self._after("press", 180, self._paint)
+
+    # ---- keys pressed in the window are looked up --------------------------------------
+    @staticmethod
+    def _mods(state):
+        alt = state & (0x20000 if sys.platform.startswith("win") else 0x8)
+        return (1 if state & 0x1 else 0) | (2 if state & 0x4 else 0) | (4 if alt else 0)
+
+    def _key_id(self, keysym):
+        if len(keysym) == 1 and keysym.isalnum():
+            return keysym.upper()
+        if keysym.startswith("F") and keysym[1:].isdigit():
+            return keysym
+        return self.KEYSYM.get(keysym)
+
+    def _on_key(self, e):
+        ks = e.keysym
+        if e.widget is self.search:
+            if ks == "Escape":
+                if self.qvar.get():
+                    self.qvar.set("")
+                else:
+                    self.close()
+            elif ks == "F1":
+                self.close()
+            return "break"                       # typing still works; the launcher's keys don't fire
+        mods = self._mods(e.state)
+        if ks in ("Escape", "F1"):
+            self.close(); return "break"
+        if ks.lower() == "f" and mods & 2:
+            self.search.focus_set(); self.search.select_range(0, "end"); return "break"
+        kid = self._key_id(ks)
+        if kid in self.BIT:
+            self.held = mods | self.BIT[kid]; self._paint(); return "break"
+        self.held = mods
+        K = next((k for k in self.KEYS if k["id"] == kid), None)
+        if K is not None:
+            self._after("unhover", 0, None)
+            self.hot = K; self._paint(); self._show_pop(K); self._press(K)
+            self._click_key(K)
+        else:
+            self._paint()
+        return "break"
+
+    def _on_key_up(self, e):
+        kid = self._key_id(e.keysym)
+        if kid in self.BIT:
+            self.held = self._mods(e.state) & ~self.BIT[kid]; self._paint()
+        return "break"
+
+    def _focus_out(self, _e=None):
+        if self.held:
+            self.held = 0
+            try: self._paint()
+            except tk.TclError: pass
+
+    def _wheel(self, e):
+        """The column under the mouse pointer scrolls, whichever widget has the focus."""
+        try:
+            wdg = self.w.winfo_containing(e.x_root, e.y_root)
+        except Exception:
+            wdg = None
+        while wdg is not None and not any(wdg is c.get("frame") for c in self.COLS):
+            wdg = getattr(wdg, "master", None)
+        for c in self.COLS:
+            if wdg is c.get("frame") and c["cv"].winfo_height() < c["inner"].winfo_reqheight():
+                up = getattr(e, "delta", 0) > 0 or getattr(e, "num", 0) == 4
+                c["cv"].yview_scroll(-3 if up else 3, "units")
+                return "break"
 
 class App(tk.Tk):
     def __init__(self, initial_file=None):
@@ -2255,76 +3070,32 @@ class App(tk.Tk):
         self.wait_window(w)
         return res["ok"]
 
-    @staticmethod
-    def _fill_hotkeys(frm,rows,col,old):
-        """Grid one column group of the shortcut list into `frm` at columns col / col+1.
+    # The hint on the F1 window's "3D viewer" tab: the page only hears keys once it has them.
+    KEYMAP_VIEWER_HINT=("these work once you click in the 3D view · "
+                        "hover or press a key to see all it does")
 
-        Launcher keys go at 0/1 and viewer keys at 2/3, side by side, so the window fits on a
-        768px-high screen. Descriptions wrap at a font-measured width so the window width stays
-        bounded whichever font is in use."""
-        try:
-            import tkinter.font as _tkfont
-            _f=_tkfont.nametofont("TkDefaultFont") if old else _tkfont.Font(font=FONT_SMALL)
-            wrap=_f.measure("x"*50)          # descriptions past ~50 chars fold to a 2nd line
-        except Exception:
-            wrap=0                           # 0 = Tk's default, i.e. no wrapping
-        lpad = 6 if col==0 else 26           # gutter between the two column-groups
-        r=0
-        for key,desc in rows:
-            if not key:                      # "--- Section ---" header spans both of its columns
-                if old:
-                    tk.Label(frm,text=desc.strip("- "),font="TkDefaultFont").grid(
-                        row=r,column=col,columnspan=2,sticky="w",padx=(lpad,6),pady=(8,2))
-                else:
-                    ttk.Label(frm,text=desc.strip("- "),style="PanelDim.TLabel").grid(
-                        row=r,column=col,columnspan=2,sticky="w",padx=(lpad,6),pady=(8,2))
-                r+=1; continue
-            if old:
-                tk.Label(frm,text=key,font="TkDefaultFont").grid(row=r,column=col,sticky="w",padx=(lpad,18),pady=1)
-                tk.Label(frm,text=desc,font="TkDefaultFont",justify="left",wraplength=wrap).grid(
-                    row=r,column=col+1,sticky="w",padx=6,pady=1)
-            else:
-                ttk.Label(frm,text=key,style="Panel.TLabel",foreground=ACCENT).grid(row=r,column=col,sticky="w",padx=(lpad,18),pady=1)
-                ttk.Label(frm,text=desc,style="Panel.TLabel",justify="left",wraplength=wrap).grid(
-                    row=r,column=col+1,sticky="w",padx=6,pady=1)
-            r+=1
+    def _keymap_tabs(self):
+        """The F1 window's tabs: (name, shortcut table[, hint]). The Map Viewer has its own."""
+        import mohaa_view as MV
+        return [("3D viewer",MV.VIEWER_KEYS,self.KEYMAP_VIEWER_HINT),("Launcher",KEYS_LAUNCHER)]
 
     def _show_hotkeys(self):
-        # OS-default window when "Use old popup windows" is on, themed otherwise. Titled "All
-        # Keyboard shortcuts" because it covers both programs; the viewer's H overlay shows only
-        # the viewer subset.
-        if OLD_POPUPS:
-            w=tk.Toplevel(self); w.title("All Keyboard shortcuts")
-            w.transient(self); w.resizable(False,False)
-            frm=tk.Frame(w); frm.pack(fill="both",expand=True,padx=10,pady=10)
-            self._fill_hotkeys(frm,HOTKEYS_LAUNCHER,0,True)
-            self._fill_hotkeys(frm,HOTKEYS_VIEWER,2,True)
-            btn=tk.Button(w,text="Close",command=w.destroy); btn.pack(pady=(0,10))
-            w.bind("<Escape>",lambda e:w.destroy()); w.bind("<F1>",lambda e:w.destroy())
-            try:
-                w.update_idletasks()
-                x=self.winfo_rootx()+(self.winfo_width()-w.winfo_width())//2
-                y=self.winfo_rooty()+(self.winfo_height()-w.winfo_height())//2
-                x0,y0,_x1,_y1=_virtual_screen(w)
-                w.geometry(f"+{max(x0,x)}+{max(y0,y)}")
-            except Exception: pass
-            w.grab_set(); btn.focus_set(); return
-        w=tk.Toplevel(self); w.title("All Keyboard shortcuts"); w.configure(bg=BG)
-        w.transient(self); w.resizable(False,False)
-        frm=ttk.Frame(w,style="Panel.TFrame"); frm.pack(fill="both",expand=True,padx=10,pady=10)
-        self._fill_hotkeys(frm,HOTKEYS_LAUNCHER,0,False)
-        self._fill_hotkeys(frm,HOTKEYS_VIEWER,2,False)
-        btn=ttk.Button(w,text="Close",command=w.destroy,cursor="hand2"); btn.pack(pady=(0,10))
-        w.bind("<Escape>",lambda e:w.destroy()); w.bind("<F1>",lambda e:w.destroy())
+        """Help > Keyboard shortcuts (F1): the KeyMapWindow, on the 3D viewer's keys while a
+        page is open in the pane (else the launcher's), or the tab you last picked."""
+        km=getattr(self,"_keymap",None)
         try:
-            w.update_idletasks()
-            x=self.winfo_rootx()+(self.winfo_width()-w.winfo_width())//2
-            y=self.winfo_rooty()+(self.winfo_height()-w.winfo_height())//2
-            x0,y0,_x1,_y1=_virtual_screen(w)
-            w.geometry(f"+{max(x0,x)}+{max(y0,y)}")
+            if km is not None and km.w.winfo_exists():
+                km.w.deiconify(); km.w.lift(); km.cv.focus_set(); return
         except Exception: pass
-        self._apply_titlebar(w)
-        w.grab_set(); btn.focus_set()
+        try:
+            import mohaa_view as MV
+            tabs=self._keymap_tabs()
+        except Exception as e:
+            self._log_line(f"(the keyboard shortcuts need mohaa_view.py: {e})","err"); return
+        tab=getattr(self,"_keymap_tab",None)
+        if tab is None: tab=0 if self._webview is not None else 1
+        self._keymap=KeyMapWindow(self,tabs,MV.KX_CATS,MV.KX_LAYOUT,tab=tab,
+                                  on_tab=lambda i:setattr(self,"_keymap_tab",i))
 
     def _show_privacy(self):
         self._text_dialog("Privacy & Legal", PRIVACY_TEXT, width=88, height=26)

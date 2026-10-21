@@ -1831,6 +1831,519 @@ def _js_lit(s):
     return (json.dumps(str(s)).replace("<","\\u003c").replace(">","\\u003e")
             .replace("&","\\u0026").replace("\u2028","\\u2028").replace("\u2029","\\u2029"))
 
+# ------------------------------------------------------- keyboard shortcuts ---
+# The shortcut window of both viewer pages (H) and of both launchers (F1) is a keyboard
+# and mouse with every key the program uses coloured by what it does, and the same
+# shortcuts as a list underneath, in columns that scroll on their own like the map
+# viewer's legend. Everything it shows comes from these tables:
+#
+#   KX_CATS     each kind of shortcut: its name and its colour in the dark / light theme
+#   KX_LAYOUT   the keyboard: [key id, label, x, y, width], in key widths
+#   a table     {"title", "views", "cols"}: VIEWER_KEYS below for this viewer,
+#               MAP_VIEWER_KEYS in mohaa_map_view.py, KEYS_LAUNCHER in each launcher
+#
+# A table's "views" are what some keys depend on (the camera mode, an open pop-up list);
+# a view marked "only" is one where nothing but its own keys work, and "default" is the
+# view shown first (else the first one). Each column's "rows"
+# are headings, _kx_sub(title, category, view), and shortcuts, _kx(keys, text, *binds):
+#   keys    as the list shows them: "|" between alternatives ("W|S" shows W / S), the
+#           words "or", "…" and "–" as written, and "+" joining a chord
+#   binds   (chord, keycap label[, what this key does]) for each key the row covers; these
+#           put the row on the keyboard. A chord is modifiers and one key id from
+#           KX_LAYOUT ("Ctrl+Alt+1", "Shift+/"), or a mouse action from KX_MOUSE.
+# A heading's category and view carry on to the rows under it. kx_check(table) lists
+# any chord that names no key. The page side is KEYS_JS / KEYS_CSS below; the launcher
+# side is KeyMapWindow in mohaa_launcher.py.
+KX_CATS=[
+ {"id":"cam", "name":"Camera",       "dark":"#58a6ff","light":"#0969da"},
+ {"id":"sel", "name":"Selecting",    "dark":"#f0883e","light":"#bc4c00"},
+ {"id":"show","name":"Show / hide",  "dark":"#3fb950","light":"#1a7f37"},
+ {"id":"disp","name":"Display",      "dark":"#bc8cff","light":"#8250df"},
+ {"id":"play","name":"Playback",     "dark":"#e3b341","light":"#9a6700"},
+ {"id":"list","name":"Pop-up lists", "dark":"#39c5cf","light":"#1b7c83"},
+ {"id":"win", "name":"Window",       "dark":"#a5b1be","light":"#57606a"},
+ {"id":"app", "name":"Launcher",     "dark":"#39c5cf","light":"#1b7c83"},
+ {"id":"tree","name":"Pak tree",     "dark":"#f778ba","light":"#bf3989"},
+]
+# Mouse actions a chord can end in, and the mouse button each one uses.
+KX_MOUSE={"Click":"L","DblClick":"L","Drag":"L","RClick":"R","RDrag":"R",
+          "MClick":"M","MDrag":"M","Wheel":"M"}
+
+def _kx_layout():
+    """A US keyboard without the number pad: [id, label, x, y, width] in key widths.
+    Both Shift, Ctrl, Alt and Win keys share one id."""
+    K=[]
+    def add(i,x,y,w=1,lab=None): K.append([i,lab or i,x,y,w])
+    add("Esc",0,0)
+    for n in range(12): add("F%d"%(n+1),2+n+(n//4)*0.5,0)
+    for n,c in enumerate("`1234567890-="): add(c,n,1.25)
+    add("Backspace",13,1.25,2)
+    add("Tab",0,2.25,1.5)
+    for n,c in enumerate("QWERTYUIOP[]"): add(c,1.5+n,2.25)
+    add("\\",13.5,2.25,1.5)
+    add("Caps",0,3.25,1.75)
+    for n,c in enumerate("ASDFGHJKL;'"): add(c,1.75+n,3.25)
+    add("Enter",12.75,3.25,2.25)
+    add("Shift",0,4.25,2.25)
+    for n,c in enumerate("ZXCVBNM,./"): add(c,2.25+n,4.25)
+    add("Shift",12.25,4.25,2.75)
+    for i,x,w in (("Ctrl",0,1.25),("Win",1.25,1.25),("Alt",2.5,1.25),("Space",3.75,6.25),
+                  ("Alt",10,1.25),("Win",11.25,1.25),("Menu",12.5,1.25),("Ctrl",13.75,1.25)):
+        add(i,x,5.25,w)
+    for i,x,y in (("PrtSc",0,0),("ScrLk",1,0),("Pause",2,0),("Ins",0,1.25),("Home",1,1.25),
+                  ("PgUp",2,1.25),("Del",0,2.25),("End",1,2.25),("PgDn",2,2.25)):
+        add(i,15.25+x,y)
+    for i,x,y,lab in (("Up",1,4.25,"↑"),("Left",0,5.25,"←"),("Down",1,5.25,"↓"),
+                      ("Right",2,5.25,"→")):
+        add(i,15.25+x,y,1,lab)
+    return K
+KX_LAYOUT=_kx_layout()
+
+def _kx_sub(title,cat,view=None):
+    """A heading in a shortcut column; its category (and view) carry on to the rows below."""
+    d={"sub":title,"c":cat}
+    if view: d["v"]=view
+    return d
+
+def _kx(keys,text,*binds):
+    """One shortcut row: the keys as the list shows them, what they do, and the
+    (chord, keycap label[, what this key does]) of each key it covers."""
+    return {"k":keys,"d":text,"b":[list(b) for b in binds]}
+
+def kx_check(table):
+    """Every chord in a shortcut table that names no key (empty when all is well)."""
+    ids={k[0] for k in KX_LAYOUT}|set(KX_MOUSE)
+    mods={"Shift","Ctrl","Alt"}
+    bad=[]
+    for col in table.get("cols",[]):
+        for r in col.get("rows",[]):
+            for b in r.get("b",[]):
+                parts=b[0].split("+")
+                if parts[-1] not in ids or any(p not in mods for p in parts[:-1]):
+                    bad.append(b[0])
+    return bad
+
+def kx_payload(table):
+    """What a page's shortcut window reads: categories, keyboard and the table."""
+    return {"cats":KX_CATS,"layout":KX_LAYOUT,"t":table}
+
+_KX_ALNUM="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+# The model viewer's shortcuts (the page's H window, and the launcher's F1 window on its
+# "3D viewer" tab). Keep in step with the page's key handlers below.
+VIEWER_KEYS={
+ "title":"Model viewer keyboard shortcuts",
+ "views":[{"id":"free","name":"Free-look"},{"id":"lock","name":"Tag-lock"},
+          {"id":"list","name":"Pop-up list","only":True}],
+ "default":"lock",                       # the page opens in Tag-lock
+ "cols":[
+  {"title":"Camera","rows":[
+   _kx_sub("Free-look camera","cam","free"),
+   _kx("drag","look around",("Drag","look")),
+   _kx("wheel","move forward / back",("Wheel","move")),
+   _kx("W|S","move forward / back",("W","forward","move forward"),("S","back","move back")),
+   _kx("Up|Down","move forward / back",("Up","forward","move forward"),("Down","back","move back")),
+   _kx("A|D","strafe left / right",("A","left","strafe left"),("D","right","strafe right")),
+   _kx("Space|C","move up / down",("Space","up","move up"),("C","down","move down")),
+   _kx("Q|E","tilt (roll) left / right",("Q","tilt L","tilt (roll) left"),("E","tilt R","tilt (roll) right")),
+   _kx("Left|Right","turn left / right",("Left","turn L","turn left"),("Right","turn R","turn right")),
+   _kx_sub("Tag-lock camera","cam","lock"),
+   _kx("drag","orbit the model, or the tag selected in the list",("Drag","orbit")),
+   _kx("wheel","zoom in / out",("Wheel","zoom")),
+   _kx_sub("Both cameras","cam"),
+   _kx("R","reset the camera (and clear the tag selection)",("R","reset")),
+   _kx("V","switch Free-look / Tag-lock",("V","camera")),
+  ]},
+  {"title":"Playback and display","rows":[
+   _kx_sub("Playback","play"),
+   _kx("P","play / pause the model and its animation",("P","play")),
+   _kx("F","freeze / resume everything (as Play / Pause)",("F","freeze")),
+   _kx("[|]","step one frame back / forward",("[","frame -","step one frame back"),("]","frame +","step one frame forward")),
+   _kx("Backspace","reset the model and its effects to time 0",("Backspace","reset")),
+   _kx_sub("Display","disp"),
+   _kx("1 … 7","Texture · Mesh · Wire · Setsizes · Nodes · Labels · Face Anims",
+       ("1","Texture","Texture: the skin textures on / off"),
+       ("2","Mesh","Mesh: the shaded surfaces on / off"),
+       ("3","Wire","Wire: the triangle wireframe on / off"),
+       ("4","Setsizes","Setsizes: the setsize or .map bounding box on / off"),
+       ("5","Nodes","Nodes: the tag and bone circles on / off"),
+       ("6","Labels","Labels: the tag and bone names on / off"),
+       ("7","Face","Face Anims: the face animation riding on the body animation (when it has one)")),
+   _kx("L","light / dark theme",("L","theme")),
+   _kx_sub("Tag list (side panel)","sel"),
+   _kx("click","select a tag or bone (Tag-lock orbits it); again to deselect",("Click","select","select a tag or bone in the list")),
+   _kx("click","on a dot: hide / show that tag",("Click","hide","hide / show a tag (click its dot)")),
+   _kx("Shift+click","on a dot: hide / show every tag (or every bone)",("Shift+Click","hide all","hide / show every tag (Shift+click a dot)")),
+   _kx_sub("Window","win"),
+   _kx("H or ?","show / hide this window",("H","keys","show / hide the keyboard shortcuts"),("Shift+/","keys","show / hide the keyboard shortcuts")),
+   _kx("\\","collapse / expand the control panel",("\\","panel")),
+   _kx("Esc","close the viewer (the launcher goes back to its start page)",("Esc","close","close the viewer")),
+  ]},
+  {"title":"Pop-up lists","rows":[
+   _kx_sub("Animations · surfaces · attach","list","list"),
+   _kx("type","filter the list",*[(c,"filter","type to filter the list") for c in _KX_ALNUM]),
+   _kx("Up|Down","move the highlight",("Up","up","highlight the row above"),("Down","down","highlight the row below")),
+   _kx("Enter","open the highlighted row (or the only match)",("Enter","open")),
+   _kx("Right","open the highlighted category",("Right","open")),
+   _kx("Left|Backspace","go back one level",("Left","back"),("Backspace","back")),
+   _kx("Home|End","jump to the first / last row",("Home","first","jump to the first row"),("End","last","jump to the last row")),
+   _kx("click","open a row",("Click","open")),
+   _kx("Esc","close the list",("Esc","close")),
+  ]},
+ ]}
+
+# The page side of the shortcut window: kxBuild(host, kx_payload(table), {onClose}) fills
+# a card with the keyboard, the mouse and the list. Both viewer pages paste these in
+# (__KEYS_CSS__ / __KEYS_JS__ / __KEYS__ in their templates). They use the pages' own
+# colour variables (--panel, --line, --txt, --dim, --accent, --btn, --onbg, --btnhover).
+KEYS_CSS = r"""
+ /* ---- keyboard shortcuts window (KEYS_CSS, shared by the model and map viewers) ---- */
+ .kx-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;
+   justify-content:center;z-index:40}
+ .kx-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px 10px;
+   width:min(1240px,96vw);height:min(900px,94vh);box-shadow:0 12px 40px rgba(0,0,0,.5);
+   display:flex;flex-direction:column;overflow:hidden}
+ .kx{position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:7px;font-size:12px}
+ .kx button{padding:3px 9px;font-size:11px;border-radius:5px}
+ .kx-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+ .kx-title{color:var(--accent);font-weight:bold;font-size:13px;margin-right:auto}
+ .kx-seg{display:inline-flex}
+ .kx-seg button{border-radius:0;margin-left:-1px}
+ .kx-seg button:first-child{border-radius:5px 0 0 5px;margin-left:0}
+ .kx-seg button:last-child{border-radius:0 5px 5px 0}
+ .kx-seg button.on{position:relative;z-index:1}
+ .kx-lab{color:var(--dim);font-size:11px}
+ input.kx-q{width:190px;background:var(--btn);color:var(--txt);border:1px solid var(--line);border-radius:5px;
+   padding:3px 7px;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+ input.kx-q:focus{outline:1px solid var(--accent);outline-offset:0}
+ .kx-kbw{flex:none;display:flex;justify-content:center;min-height:0}
+ .kx-svg{display:block;width:100%;height:auto;max-height:36vh;user-select:none;-webkit-user-select:none}
+ .kx-svg text{pointer-events:none;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+ .kx-k,.kx-mp{cursor:pointer}
+ .kx-kb{fill:var(--btn);stroke:var(--line);stroke-width:1}
+ .kx-kt{fill-opacity:0;stroke-width:1.5;stroke-opacity:0}
+ .kx-ko{fill:none;stroke:none}
+ .kx-kn{fill:var(--dim);font-size:11px;opacity:.6}
+ .kx-kc{fill:var(--txt);font-size:10px}
+ .kx-km{fill:var(--dim);font-size:8px}
+ .kx-k.on .kx-kt,.kx-mp.on .kx-kt{fill-opacity:.28;stroke-opacity:1}
+ .kx-k.on .kx-kn{fill:var(--txt);opacity:1;font-weight:bold}
+ .kx-k.off{opacity:.38}
+ .kx-k.latch .kx-kb{fill:var(--onbg)}
+ .kx-k.latch .kx-kn{fill:var(--accent);opacity:1;font-weight:bold}
+ .kx-k.latch .kx-ko{stroke:var(--accent);stroke-width:2}
+ .kx-k.hot .kx-ko,.kx-mp.hot .kx-ko{stroke:var(--accent);stroke-width:2.5}
+ .kx-k.ring .kx-ko,.kx-mp.ring .kx-ko{stroke:var(--txt);stroke-width:3}
+ .kx-k.ring,.kx-mp.ring{filter:drop-shadow(0 0 4px var(--accent))}
+ .kx-k.press .kx-kb{fill:var(--btnhover)}
+ .kx-mo{fill:none;stroke:var(--line);stroke-width:1.5}
+ .kx-ml{fill:var(--dim);font-size:10px}
+ .kx-ml tspan.c{fill:var(--txt)}
+ .kx-cats{flex:none;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-size:11px;color:var(--dim)}
+ .kx-chip{display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:1px 7px;border-radius:10px;
+   border:1px solid transparent;user-select:none}
+ .kx-chip i{width:9px;height:9px;border-radius:50%;background:var(--kc)}
+ .kx-chip:hover{color:var(--txt)}
+ .kx-chip.on{border-color:var(--kc);color:var(--txt)}
+ .kx-tip{margin-left:auto;font-size:11px}
+ .kx-cols{flex:1 1 auto;min-height:120px;display:flex;border-top:1px solid var(--line);padding-top:6px}
+ .kx-col{flex:1 1 0;min-width:0;overflow-y:auto;padding:0 10px 0 14px;border-left:1px solid var(--line)}
+ .kx-col:first-child{border-left:none;padding-left:0}
+ .kx-col h4{position:sticky;top:0;z-index:1;background:var(--panel);margin:0;padding:0 0 4px;font-size:11px;
+   letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+ .kx-sub{display:flex;align-items:center;gap:6px;color:var(--dim);text-transform:uppercase;font-size:10px;
+   letter-spacing:.1em;padding:10px 0 4px}
+ .kx-sub i{width:8px;height:8px;border-radius:50%;background:var(--kc);flex:none}
+ .kx-vt{margin-left:auto;text-transform:none;letter-spacing:0;font-size:10px;color:var(--dim);
+   border:1px solid var(--line);border-radius:3px;padding:0 4px;white-space:nowrap}
+ .kx-row{display:flex;gap:10px;align-items:baseline;padding:5px 3px;border-top:1px solid var(--line);border-radius:3px}
+ .kx-sub+.kx-row{border-top:none}
+ .kx-row:hover{background:var(--btn)}
+ .kx-row.na{opacity:.5}
+ .kx-row.flash{animation:kxFlash 1.1s ease-out}
+ @keyframes kxFlash{0%,35%{background:var(--onbg)}100%{background:transparent}}
+ .kx-ks{flex:0 0 150px;display:flex;flex-wrap:wrap;align-items:center;gap:3px 2px}
+ .kx-ch{display:inline-flex;align-items:center;white-space:nowrap}
+ .kx-d{flex:1;min-width:0;color:var(--txt)}
+ .kx kbd{display:inline-block;min-width:18px;text-align:center;padding:0 5px;border:1px solid var(--line);
+   border-bottom:2px solid var(--kc,var(--line));border-radius:4px;background:var(--btn);color:var(--txt);
+   font:11px/16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+ .kx kbd.m{border-radius:8px;font-style:italic}
+ .kx-ks i,.kx-pop i{font-style:normal;color:var(--dim);font-size:10px}
+ .kx-sep{color:var(--dim);font-size:11px;padding:0 2px}
+ .kx-none{color:var(--dim);font-size:11px;padding:10px 0}
+ .kx-bot{flex:none;display:flex;align-items:center;gap:10px}
+ .kx-pop{position:absolute;z-index:6;display:none;max-width:min(470px,92%);background:var(--panel);
+   border:1px solid var(--accent);border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.45);padding:8px 10px;
+   font-size:12px;pointer-events:none}
+ .kx-ph{font-weight:bold;color:var(--accent);margin-bottom:5px}
+ .kx-ph span{font-weight:normal;color:var(--dim);font-size:11px;margin-left:6px}
+ .kx-pop table{border-collapse:collapse}
+ .kx-pop td{padding:2px 8px 2px 0;vertical-align:top}
+ .kx-pop td:first-child{white-space:nowrap}
+ .kx-pop tr.na{opacity:.45}
+ .kx-pop .kx-vt{margin-left:0}
+ .kx-pn{color:var(--dim);font-size:11px;margin-top:5px}
+ @media (max-width:820px){.kx-cols{flex-direction:column;overflow-y:auto}
+   .kx-col{flex:none;overflow:visible;border-left:none;padding:0 0 10px}.kx-tip{display:none}}
+"""
+
+KEYS_JS = r"""
+/* ---- keyboard shortcuts window (KEYS_JS, shared by the model and map viewers) -----------
+   kxBuild(host, P, opt) fills `host` with a keyboard and a mouse showing every key the
+   viewer uses, coloured by what it does, and the same shortcuts as a list in columns that
+   each scroll on their own. P is {cats, layout, t} from kx_payload() in mohaa_view.py: the
+   kinds of shortcut, the keyboard, and the viewer's table. Hovering a key (or pressing it)
+   lists everything it does with every modifier; Shift / Ctrl / Alt, clicked or held, show
+   their layer of the keyboard; hovering a row of the list rings its keys, and clicking a
+   key finds its rows. opt.onClose() closes the window. Returns {show(view), hide()}. */
+function kxBuild(host,P,opt){
+ opt=opt||{};
+ const NS='http://www.w3.org/2000/svg',U=40,T=P.t,VIEWS=T.views||[];
+ const CAT={};P.cats.forEach(c=>{CAT[c.id]=c;});
+ const BIT={Shift:1,Ctrl:2,Alt:4};
+ const MPART={Click:'L',DblClick:'L',Drag:'L',RClick:'R',RDrag:'R',MClick:'M',MDrag:'M',Wheel:'M'};
+ const MNAME={Click:'click',DblClick:'double-click',Drag:'drag',RClick:'right-click',RDrag:'right-drag',
+   MClick:'middle-click',MDrag:'middle-drag',Wheel:'wheel'};
+ const MORDER=['Click','DblClick','Drag','RClick','RDrag','MClick','MDrag','Wheel'];
+ const MWORD={click:1,'double-click':1,drag:1,'right-click':1,'right-drag':1,'middle-click':1,'middle-drag':1,wheel:1,type:1};
+ const SEPS={'…':1,'–':1,or:1,then:1};
+ const CODE={Backquote:'`',Minus:'-',Equal:'=',BracketLeft:'[',BracketRight:']',Backslash:'\\',Semicolon:';',
+   Quote:"'",Comma:',',Period:'.',Slash:'/',Escape:'Esc',Backspace:'Backspace',Tab:'Tab',CapsLock:'Caps',
+   Enter:'Enter',NumpadEnter:'Enter',ShiftLeft:'Shift',ShiftRight:'Shift',ControlLeft:'Ctrl',ControlRight:'Ctrl',
+   AltLeft:'Alt',AltRight:'Alt',MetaLeft:'Win',MetaRight:'Win',OSLeft:'Win',OSRight:'Win',ContextMenu:'Menu',
+   Space:'Space',ArrowUp:'Up',ArrowDown:'Down',ArrowLeft:'Left',ArrowRight:'Right',Insert:'Ins',Delete:'Del',
+   Home:'Home',End:'End',PageUp:'PgUp',PageDown:'PgDn',PrintScreen:'PrtSc',ScrollLock:'ScrLk',Pause:'Pause'};
+ const st={view:T.default||(VIEWS.length?VIEWS[0].id:null),latch:0,held:0,q:'',cat:null,hot:null,ring:null,ringCat:null,
+   tmpL:null,tmpV:null,open:false,kb:true,kbSet:false};
+ const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+ const ccol=c=>{const x=CAT[c];return x?(document.documentElement.classList.contains('light')?x.light:x.dark):'#8b97a6';};
+ const vname=v=>{const x=VIEWS.find(w=>w.id===v);return x?x.name:v;};
+ const only=v=>{const x=VIEWS.find(w=>w.id===v);return!!(x&&x.only);};
+ const applies=(b,v)=>v==null||(b.v?b.v===v:!only(v));
+ const layer=()=>st.tmpL!=null?st.tmpL:(st.latch|st.held);
+ const curView=()=>st.tmpV||st.view;
+ const mods=e=>(e.shiftKey?1:0)|(e.ctrlKey||e.metaKey?2:0)|(e.altKey?4:0);
+ const mabbr=m=>(m&2?'C':'')+(m&4?'A':'')+(m&1?'S':'');
+ const parse=ch=>{const p=ch.split('+'),k=p.pop();let m=0;p.forEach(x=>{m|=BIT[x]||0;});return{k:k,m:m};};
+ // ---- every binding, filed by key
+ const ROWS=[],BYKEY={};
+ T.cols.forEach(C=>{let cat=null,view=null,sub='';C.items=[];
+   C.rows.forEach(r=>{
+     if(r.sub!=null){cat=r.c||cat;view=r.v||null;sub=r.sub;C.items.push({sub:r.sub,c:cat,v:view});return;}
+     const R={k:r.k,d:r.d,c:r.c||cat,v:r.v||view,binds:[]};
+     (r.b||[]).forEach(b=>{const p=parse(b[0]);
+       const B={ch:b[0],k:p.k,m:p.m,cap:b[1]||'',d:b[2]||r.d,c:R.c,v:R.v,row:R};
+       R.binds.push(B);(BYKEY[p.k]=BYKEY[p.k]||[]).push(B);});
+     R.text=[sub,R.v?vname(R.v):'',r.k,r.d].concat(R.binds.map(b=>b.ch+' '+b.cap+' '+b.d)).join(' ').toLowerCase();
+     C.items.push(R);ROWS.push(R);});});
+ const rowOk=R=>(!st.cat||R.c===st.cat)&&(!st.q||R.text.indexOf(st.q)>=0);
+ const rowHere=R=>R.v?R.v===curView():!only(curView());
+ // ---- the window
+ const el=(tag,cls,html)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;return e;};
+ const sv=(tag,a)=>{const e=document.createElementNS(NS,tag);for(const k in a)e.setAttribute(k,a[k]);return e;};
+ const kbd=p=>'<kbd'+(MWORD[p]?' class="m"':'')+'>'+esc(p)+'</kbd>';
+ const keysHTML=k=>String(k).split(' ').filter(t=>t).map(t=>SEPS[t]?'<span class="kx-sep">'+esc(t)+'</span>':
+   t.split('|').map(a=>'<span class="kx-ch">'+a.split('+').map(kbd).join('<i>+</i>')+'</span>').join('<span class="kx-sep">/</span>')).join(' ');
+ const chordHTML=ch=>'<span class="kx-ch">'+ch.split('+').map(p=>kbd(MNAME[p]||p)).join('<i>+</i>')+'</span>';
+ host.innerHTML='';
+ const root=el('div','kx');host.appendChild(root);
+ const top=el('div','kx-top');root.appendChild(top);
+ top.appendChild(el('span','kx-title',esc(T.title||'Keyboard shortcuts')));
+ const vBtns={},mBtns={};
+ if(VIEWS.length){const seg=el('span','kx-seg');
+   VIEWS.forEach(v=>{const b=el('button','',esc(v.name));b.type='button';
+     b.title='The keys as they work in '+v.name+(v.only?' (only its own keys work there)':'');
+     b.onclick=()=>{st.view=v.id;refresh();};vBtns[v.id]=b;seg.appendChild(b);});
+   top.appendChild(el('span','kx-lab','keys in'));top.appendChild(seg);}
+ {const seg=el('span','kx-seg');
+   ['Shift','Ctrl','Alt'].forEach(n=>{const b=el('button','',n);b.type='button';
+     b.title='Show the '+n+'+ shortcuts on the keyboard (holding '+n+' does it too)';
+     b.onclick=()=>{st.latch^=BIT[n];paint();};mBtns[n]=b;seg.appendChild(b);});
+   top.appendChild(el('span','kx-lab',VIEWS.length?'with':'keys with'));top.appendChild(seg);}
+ const q=el('input','kx-q');q.type='search';q.placeholder='search shortcuts';q.spellcheck=false;
+ q.title='Keep only the shortcuts that mention this (Ctrl+F)';
+ q.addEventListener('input',()=>{st.q=q.value.trim().toLowerCase();refresh();});
+ top.appendChild(q);
+ const kbBtn=el('button','','Keyboard');kbBtn.type='button';kbBtn.title='Show / hide the keyboard';
+ kbBtn.onclick=()=>{st.kb=!st.kb;st.kbSet=true;kbw.style.display=st.kb?'':'none';kbBtn.classList.toggle('on',st.kb);hidePop();};
+ top.appendChild(kbBtn);
+ // ---- keyboard and mouse (SVG, 40 units to a key)
+ const kbw=el('div','kx-kbw');root.appendChild(kbw);
+ const W=23*U,H=6.25*U;
+ const svg=sv('svg',{viewBox:'-3 -3 '+(W+6)+' '+(H+6),'class':'kx-svg'});kbw.appendChild(svg);
+ const KEYS=[],PARTS=[];
+ const hook=(K)=>{K.g.addEventListener('mouseenter',()=>hover(K));K.g.addEventListener('mouseleave',()=>unhover(K));
+   K.g.addEventListener('click',()=>clickKey(K));};
+ P.layout.forEach(L=>{const id=L[0],x=L[2]*U,y=L[3]*U,w=L[4]*U,h=U;
+   const g=sv('g',{'class':'kx-k'}),box={x:x+2,y:y+2,width:w-4,height:h-4,rx:5};
+   const kt=sv('rect',Object.assign({'class':'kx-kt'},box));
+   const tn=sv('text',{x:x+7,y:y+15,'class':'kx-kn'});tn.textContent=L[1];
+   const tc=sv('text',{x:x+w/2,y:y+h-9,'class':'kx-kc','text-anchor':'middle'});
+   const tm=sv('text',{x:x+w-6,y:y+13,'class':'kx-km','text-anchor':'end'});
+   g.append(sv('rect',Object.assign({'class':'kx-kb'},box)),kt,sv('rect',Object.assign({'class':'kx-ko'},box)),tn,tc,tm);
+   svg.appendChild(g);
+   const K={id:id,lab:L[1],g:g,kt:kt,tc:tc,tm:tm,mx:x+w-6,w:w,bit:BIT[id]||0,ids:[id]};hook(K);KEYS.push(K);});
+ const MX=19.9*U,MY=2,MW=1.9*U,MH=2.95*U,MC=MX+MW/2,SPLIT=MY+1.15*U;
+ {const defs=sv('defs',{}),cp=sv('clipPath',{id:'kxMouseClip'});
+  cp.appendChild(sv('rect',{x:MX,y:MY,width:MW,height:MH,rx:MW/2,ry:0.95*U}));defs.appendChild(cp);svg.appendChild(defs);}
+ const mg=sv('g',{'clip-path':'url(#kxMouseClip)'});svg.appendChild(mg);
+ mg.appendChild(sv('rect',{x:MX,y:MY,width:MW,height:MH,'class':'kx-kb'}));
+ function part(id,a,parent,name){const g=sv('g',{'class':'kx-mp'});
+   g.append(sv('rect',Object.assign({'class':'kx-kb'},a)),sv('rect',Object.assign({'class':'kx-kt'},a)),sv('rect',Object.assign({'class':'kx-ko'},a)));
+   parent.appendChild(g);
+   const K={id:id,lab:name,g:g,kt:g.childNodes[1],ids:MORDER.filter(k=>MPART[k]===id),mouse:true};hook(K);PARTS.push(K);}
+ part('L',{x:MX,y:MY,width:MW/2-1.5,height:SPLIT-MY},mg,'Left mouse button');
+ part('R',{x:MC+1.5,y:MY,width:MW/2-1.5,height:SPLIT-MY},mg,'Right mouse button');
+ svg.appendChild(sv('rect',{x:MX,y:MY,width:MW,height:MH,rx:MW/2,ry:0.95*U,'class':'kx-mo'}));
+ part('M',{x:MC-7,y:MY+12,width:14,height:30,rx:7},svg,'Mouse wheel and middle button');
+ const mlist=sv('text',{x:18.95*U,y:MY+MH+17,'class':'kx-ml'});svg.appendChild(mlist);
+ // ---- category chips
+ const cats=el('div','kx-cats');root.appendChild(cats);
+ const used=[];ROWS.forEach(R=>{if(R.c&&used.indexOf(R.c)<0)used.push(R.c);});
+ const chipEls={};
+ used.forEach(c=>{const ch=el('span','kx-chip','<i></i>'+esc((CAT[c]||{}).name||c));
+   ch.title='Keep only these shortcuts (click again for all of them)';
+   ch.onmouseenter=()=>{st.ringCat=c;paint();};ch.onmouseleave=()=>{st.ringCat=null;paint();};
+   ch.onclick=()=>{st.cat=st.cat===c?null:c;refresh();};chipEls[c]=ch;cats.appendChild(ch);});
+ cats.appendChild(el('span','kx-tip','hover or press a key to see all it does · hover a row to find its keys'));
+ // ---- the list, one column each, scrolling on their own
+ const colsEl=el('div','kx-cols');root.appendChild(colsEl);
+ T.cols.forEach(C=>{const ce=el('div','kx-col');ce.appendChild(el('h4','',esc(C.title)));
+   C.items.forEach(it=>{
+     if(it.sub!=null){it.el=el('div','kx-sub','<i></i>'+esc(it.sub)+(it.v?'<span class="kx-vt">'+esc(vname(it.v))+'</span>':''));
+       ce.appendChild(it.el);return;}
+     it.el=el('div','kx-row','<span class="kx-ks">'+keysHTML(it.k)+'</span><span class="kx-d">'+esc(it.d)+'</span>');
+     it.el.addEventListener('mouseenter',()=>rowHover(it));it.el.addEventListener('mouseleave',()=>rowHover(null));
+     ce.appendChild(it.el);});
+   C.none=el('div','kx-none','Nothing in this column matches.');ce.appendChild(C.none);
+   C.el=ce;colsEl.appendChild(ce);});
+ const bot=el('div','kx-bot');root.appendChild(bot);
+ const closeB=el('button','','Close');closeB.type='button';closeB.title='Close (Esc)';closeB.onclick=()=>close();
+ bot.appendChild(closeB);
+ const pop=el('div','kx-pop');root.appendChild(pop);
+ // ---- drawing
+ function setCap(t,s,w){t.textContent=s;const room=w-10;
+   if(s&&s.length*6.1>room){t.setAttribute('textLength',room);t.setAttribute('lengthAdjust','spacingAndGlyphs');}
+   else{t.removeAttribute('textLength');t.removeAttribute('lengthAdjust');}}
+ function lit(ids,L,V,filt){const here=[],ok=[];
+   ids.forEach(id=>(BYKEY[id]||[]).forEach(b=>{if(b.m===L&&applies(b,V)){here.push(b);if(!filt||rowOk(b.row))ok.push(b);}}));
+   return{here:here,ok:ok};}
+ function paint(){
+   const L=layer(),V=curView(),filt=!!(st.q||st.cat),ring=st.ring,rc=st.ringCat;
+   const ringed=(K,ok)=>!!(ring&&K.ids.some(i=>ring.has(i)))||!!(rc&&ok.some(b=>b.c===rc));
+   KEYS.forEach(K=>{const r=lit(K.ids,L,V,filt),b0=r.ok[0],held=!!(K.bit&&(L&K.bit));
+     K.g.classList.toggle('on',!!b0&&!held);K.g.classList.toggle('off',!b0&&!held&&r.here.length>0);
+     K.g.classList.toggle('latch',held);K.g.classList.toggle('hot',st.hot===K);K.g.classList.toggle('ring',ringed(K,r.ok));
+     if(b0){const c=ccol(b0.c);K.kt.style.fill=c;K.kt.style.stroke=c;}
+     setCap(K.tc,b0&&!held?b0.cap:'',K.w);
+     // the other modifiers this key works with, one to a line in the top-right corner
+     const oth=[];(BYKEY[K.id]||[]).forEach(b=>{if(b.m&&b.m!==L&&applies(b,V)&&oth.indexOf(b.m)<0)oth.push(b.m);});
+     const ms=oth.sort((a,b)=>a-b).map(mabbr),ml=ms.length>2?[ms[0],ms.slice(1).join(' ')]:ms;
+     while(K.tm.firstChild)K.tm.removeChild(K.tm.firstChild);
+     ml.forEach((t,i)=>{const s=sv('tspan',{x:K.mx,dy:i?8.5:0});s.textContent=t;K.tm.appendChild(s);});});
+   PARTS.forEach(K=>{const r=lit(K.ids,L,V,filt),b0=r.ok[0];
+     K.g.classList.toggle('on',!!b0);K.g.classList.toggle('off',!b0&&r.here.length>0);
+     K.g.classList.toggle('hot',st.hot===K);K.g.classList.toggle('ring',ringed(K,r.ok));
+     if(b0){const c=ccol(b0.c);K.kt.style.fill=c;K.kt.style.stroke=c;}});
+   // what each mouse action does in this layer, listed under the mouse
+   const lines=[];MORDER.forEach(k=>(BYKEY[k]||[]).forEach(b=>{if(b.m===L&&applies(b,V)&&(!filt||rowOk(b.row)))lines.push(b);}));
+   while(mlist.firstChild)mlist.removeChild(mlist.firstChild);
+   const x0=18.95*U,max=lines.length>7?6:7;
+   lines.slice(0,max).forEach((b,i)=>{const a=sv('tspan',{x:x0,dy:i?15:0});a.textContent=MNAME[b.k];
+     const c=sv('tspan',{x:x0+82,'class':'c'});c.textContent=b.cap;mlist.append(a,c);});
+   if(lines.length>max){const a=sv('tspan',{x:x0,dy:15});a.textContent='+'+(lines.length-max)+' more (hover the mouse)';mlist.appendChild(a);}
+   for(const n in mBtns)mBtns[n].classList.toggle('on',!!((st.latch|st.held)&BIT[n]));}
+ function recolor(){
+   T.cols.forEach(C=>C.items.forEach(it=>{if(it.el)it.el.style.setProperty('--kc',ccol(it.c));}));
+   for(const c in chipEls)chipEls[c].style.setProperty('--kc',ccol(c));}
+ function refresh(){
+   T.cols.forEach(C=>{let head=null,any=false,shown=0;
+     const done=()=>{if(head)head.el.style.display=any?'':'none';};
+     C.items.forEach(it=>{if(it.sub!=null){done();head=it;any=false;return;}
+       const ok=rowOk(it);it.el.style.display=ok?'':'none';if(ok){any=true;shown++;}
+       it.el.classList.toggle('na',!rowHere(it));});
+     done();C.none.style.display=shown?'none':'';});
+   for(const v in vBtns)vBtns[v].classList.toggle('on',st.view===v);
+   for(const c in chipEls)chipEls[c].classList.toggle('on',st.cat===c);
+   paint();}
+ // ---- details of one key (or mouse button), under the keyboard
+ function showPop(K){
+   const list=[];K.ids.forEach(id=>(BYKEY[id]||[]).forEach(b=>list.push(b)));
+   list.sort((a,b)=>a.m-b.m||K.ids.indexOf(a.k)-K.ids.indexOf(b.k));
+   const name=K.mouse||K.lab===K.id?K.lab:K.id+' '+K.lab,V=curView();
+   let h='<div class="kx-ph">'+esc(name)+(list.length?'<span>'+list.length+' shortcut'+(list.length>1?'s':'')+'</span>':'')+'</div>';
+   if(list.length){h+='<table>';
+     list.forEach(b=>{h+='<tr'+(applies(b,V)?'':' class="na"')+' style="--kc:'+ccol(b.c)+'"><td>'+chordHTML(b.ch)+'</td><td>'+esc(b.d)+
+       '</td><td>'+(b.v?'<span class="kx-vt">'+esc(vname(b.v))+'</span>':'')+'</td></tr>';});
+     h+='</table>';}
+   else if(!K.bit)h+='<div class="kx-pn">Not used.</div>';
+   if(K.bit)h+='<div class="kx-pn">Click it, or hold it, to see the '+K.id+'+ shortcuts on the keyboard.</div>';
+   pop.innerHTML=h;pop.style.display='block';
+   const rr=root.getBoundingClientRect(),kr=K.g.getBoundingClientRect(),sr=svg.getBoundingClientRect();
+   const pw=pop.offsetWidth,ph=pop.offsetHeight;
+   const x=Math.max(0,Math.min(kr.left+kr.width/2-pw/2-rr.left,rr.width-pw));
+   let y=sr.bottom-rr.top+4;if(y+ph>rr.height)y=Math.max(0,rr.height-ph);
+   pop.style.left=x+'px';pop.style.top=y+'px';}
+ function hidePop(){pop.style.display='none';}
+ function hover(K){st.hot=K;paint();showPop(K);}
+ function unhover(K){if(st.hot===K){st.hot=null;paint();}hidePop();}
+ function clickKey(K){
+   if(K.bit){st.latch^=K.bit;paint();showPop(K);return;}
+   const L=layer(),V=curView(),rows=[];
+   K.ids.forEach(id=>(BYKEY[id]||[]).forEach(b=>{if(b.m===L&&applies(b,V)&&rows.indexOf(b.row)<0)rows.push(b.row);}));
+   flashRows(rows);}
+ // bring each row into view in its column and light it up for a moment
+ function flashRows(rows){const seen=new Set();
+   rows.forEach(R=>{if(!R.el||R.el.style.display==='none')return;const ce=R.el.parentNode;
+     if(!seen.has(ce)){seen.add(ce);const y=R.el.getBoundingClientRect().top-ce.getBoundingClientRect().top;
+       if(y<24||y>ce.clientHeight-30)ce.scrollTop+=y-40;}
+     R.el.classList.remove('flash');void R.el.offsetWidth;R.el.classList.add('flash');});}
+ function rowHover(R){
+   if(!R){st.ring=null;st.tmpL=st.tmpV=null;paint();return;}
+   st.ring=new Set(R.binds.map(b=>b.k));
+   st.tmpL=R.binds.length?R.binds[0].m:null;
+   // a row for keys that work in another view shows that view while it is hovered
+   st.tmpV=R.v&&R.v!==st.view?R.v:(!R.v&&only(st.view)?(VIEWS.find(w=>!w.only)||{}).id||null:null);
+   paint();}
+ // ---- keys pressed while the window is open are looked up, not acted on
+ function onKey(e){
+   if(!st.open)return;
+   const inQ=e.target===q;
+   e.stopImmediatePropagation();
+   if(e.key==='Escape'){e.preventDefault();if(inQ&&q.value){q.value='';st.q='';refresh();}else close();return;}
+   if((e.ctrlKey||e.metaKey)&&e.code==='KeyF'){e.preventDefault();q.focus();q.select();return;}
+   if(inQ)return;
+   if(e.key==='Shift'||e.key==='Control'||e.key==='Alt'||e.key==='Meta'){e.preventDefault();st.held=mods(e);paint();return;}
+   const c=e.code||'',id=CODE[c]||(/^Key[A-Z]$/.test(c)?c.slice(3):/^Digit\d$/.test(c)?c.slice(5):/^F\d\d?$/.test(c)?c:null);
+   const m=mods(e);
+   if(!(m&6)&&(e.key==='h'||e.key==='?')){e.preventDefault();close();return;}   // H or ? closes, as it opened
+   if(e.key!=='Tab')e.preventDefault();
+   st.held=m;
+   const K=KEYS.find(k=>k.id===id);
+   if(K){st.hot=K;paint();showPop(K);K.g.classList.add('press');setTimeout(()=>K.g.classList.remove('press'),220);
+     if(!K.bit)clickKey(K);}
+   else paint();}
+ function onKeyUp(e){if(st.open&&(e.key==='Shift'||e.key==='Control'||e.key==='Alt'||e.key==='Meta')){st.held=mods(e);paint();}}
+ function onBlur(){st.held=0;if(st.open)paint();}
+ function onResize(){if(st.open)hidePop();}
+ function show(v){
+   if(v&&VIEWS.some(w=>w.id===v))st.view=v;
+   Object.assign(st,{open:true,latch:0,held:0,q:'',cat:null,tmpL:null,tmpV:null,hot:null,ring:null,ringCat:null});
+   q.value='';
+   if(!st.kbSet)st.kb=window.innerHeight>=560;     // a short window starts with the list alone
+   kbw.style.display=st.kb?'':'none';kbBtn.classList.toggle('on',st.kb);
+   recolor();refresh();hidePop();
+   window.addEventListener('keydown',onKey,true);window.addEventListener('keyup',onKeyUp,true);
+   window.addEventListener('blur',onBlur);window.addEventListener('resize',onResize);
+   try{const a=document.activeElement;if(a&&a!==document.body&&a.blur)a.blur();}catch(_e){}}
+ function hide(){st.open=false;hidePop();
+   window.removeEventListener('keydown',onKey,true);window.removeEventListener('keyup',onKeyUp,true);
+   window.removeEventListener('blur',onBlur);window.removeEventListener('resize',onResize);}
+ function close(){if(opt.onClose)opt.onClose();else hide();}
+ return{show:show,hide:hide};
+}
+"""
+
 def write_html(path,title,payload,theme=None):
     # Model data is untrusted (it comes from whatever .pk3 was loaded). json.dumps leaves '<'
     # alone, so a '</script>' in a string would end the inline block early. Escaping <, > and
@@ -1840,10 +2353,14 @@ def write_html(path,title,payload,theme=None):
     repl={"__TITLE__":_html_esc(title), "__TITLE_JS__":_js_lit(title),
           "__DATA__":data_json, "__REV__":str(VIEWER_REV),
           # --theme launch flag: bake the initial theme; empty string = auto (saved choice)
-          "__THEME__":(theme if theme in ("light","dark") else "")}
+          "__THEME__":(theme if theme in ("light","dark") else ""),
+          # the keyboard shortcuts window (H): its code, style and this viewer's table
+          "__KEYS_CSS__":KEYS_CSS,"__KEYS_JS__":KEYS_JS,
+          "__KEYS__":json.dumps(kx_payload(VIEWER_KEYS),separators=(",",":"))
+                     .replace("<","\\u003c").replace(">","\\u003e").replace("&","\\u0026")}
     # ONE pass, so a substituted value can never be re-scanned as another token - a model
     # named "__DATA__" must not splice the whole payload into the <title>.
-    html=re.sub(r"__(?:TITLE_JS|TITLE|DATA|REV|THEME)__",lambda m:repl[m.group(0)],_HTML_TEMPLATE)
+    html=re.sub(r"__(?:TITLE_JS|TITLE|DATA|REV|THEME|KEYS_CSS|KEYS_JS|KEYS)__",lambda m:repl[m.group(0)],_HTML_TEMPLATE)
     open(path,"w",encoding="utf-8").write(html)
 
 # Max number of the .tik's own animations baked into the page; the rest are built on
@@ -1853,7 +2370,7 @@ ANIM_PRELOAD_MAX=150
 # Page format revision, baked into each HTML as <!--mohaa-viewer-rev:N-->. Bump it when
 # the page gains features a cached HTML must pick up, and raise VIEWER_REV_REQUIRED in
 # mohaa_launcher.py to match so older pages are rebuilt. History: docs/CHANGELOG.md.
-VIEWER_REV=69
+VIEWER_REV=70
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!--mohaa-viewer-rev:__REV__-->
@@ -1996,20 +2513,11 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
    border-radius:8px 0 0 8px;padding:14px 5px;cursor:pointer;font-size:12px;line-height:1;
    user-select:none;transition:color .12s,border-color .12s}
  #sideTab:hover{color:var(--accent);border-color:var(--accent)}
- #helpOv{position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;
-   align-items:center;justify-content:center;z-index:20}
- #helpCard{background:var(--panel);border:1px solid var(--line);border-radius:10px;
-   padding:16px 20px 14px;max-height:86%;max-width:92%;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.5)}
- #helpCard h3{margin:0 0 10px;color:var(--accent);font-size:13px}
- #helpCard table{border-collapse:collapse;font-size:12px}
- #helpCard td{padding:2px 12px 2px 0;vertical-align:top}
- #helpCard td:first-child{color:var(--accent);white-space:nowrap}
- #helpCard .grp td{color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.1em;padding-top:9px}
- #helpClose{margin-top:12px}
  ::-webkit-scrollbar{width:10px;height:10px}
  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
  ::-webkit-scrollbar-thumb:hover{background:var(--btnhover)}
  ::-webkit-scrollbar-track{background:transparent}
+__KEYS_CSS__
 </style>
 <script>
 /* Boot flags from the URL hash the launcher loads us with
@@ -2040,44 +2548,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
  <div id="stage"><canvas id="gl"></canvas><canvas id="c"></canvas>
   <div id="hint"><kbd>H</kbd> hotkeys</div>
   <div id="sideTab" title="Collapse the control panel (\)">&#10095;</div>
-  <div id="helpOv" style="display:none">
-   <div id="helpCard">
-    <h3>Viewer Keyboard shortcuts</h3>
-    <table>
-     <tr class="grp"><td colspan="2">Camera (free-look)</td></tr>
-     <tr><td>drag / wheel</td><td>look around / zoom</td></tr>
-     <tr><td>W / S</td><td>move forward / back</td></tr>
-     <tr><td>A / D</td><td>strafe left / right</td></tr>
-     <tr><td>Q / E</td><td>tilt (roll) left / right</td></tr>
-     <tr><td>Space / C</td><td>move up / down</td></tr>
-     <tr><td>Up / Down</td><td>move forward / back</td></tr>
-     <tr><td>Left / Right</td><td>turn (yaw) left / right</td></tr>
-     <tr><td>R</td><td>reset camera</td></tr>
-     <tr><td>V</td><td>toggle Free-look / Tag-lock camera</td></tr>
-     <tr class="grp"><td colspan="2">Playback</td></tr>
-     <tr><td>P</td><td>play / pause the model &amp; animation</td></tr>
-     <tr><td>F</td><td>freeze / resume everything (same as Play / Pause)</td></tr>
-     <tr><td>[ / ]</td><td>step one frame back / forward</td></tr>
-     <tr><td>Backspace</td><td>reset model &amp; effects to time 0</td></tr>
-     <tr class="grp"><td colspan="2">Display toggles</td></tr>
-     <tr><td>1&ndash;7</td><td>Texture &middot; Mesh &middot; Wire &middot; Setsizes &middot; Nodes &middot; Labels &middot; Face Anims</td></tr>
-     <tr><td>L</td><td>toggle Light / Dark theme</td></tr>
-     <tr><td>\</td><td>collapse / expand the control panel</td></tr>
-     <tr class="grp"><td colspan="2">Pop-up lists (animations &middot; surfaces &middot; attach)</td></tr>
-     <tr><td>type</td><td>filter the list</td></tr>
-     <tr><td>Up / Down</td><td>move the highlight</td></tr>
-     <tr><td>Enter</td><td>open the highlighted row (or take the top match)</td></tr>
-     <tr><td>Right</td><td>open the highlighted category</td></tr>
-     <tr><td>Left / Backspace</td><td>go back one level</td></tr>
-     <tr><td>Home / End</td><td>jump to the first / last row</td></tr>
-     <tr><td>Esc</td><td>close the list</td></tr>
-     <tr class="grp"><td colspan="2">Window</td></tr>
-     <tr><td>H or ?</td><td>show / hide this panel</td></tr>
-     <tr><td>Esc</td><td>close the viewer window</td></tr>
-    </table>
-    <button id="helpClose" title="Close this panel (Esc)">Close</button>
-   </div>
-  </div>
+  <!-- keyboard shortcuts (H): the keyboard map, built from VIEWER_KEYS on first open -->
+  <div id="helpOv" class="kx-ov" style="display:none"><div id="helpCard" class="kx-card"></div></div>
  </div>
  <div id="side">
    <div class="sect"><h1 id="ttl">model</h1><div class="sub" id="stats"></div><div class="sub" id="setsizeLine"></div></div>
@@ -2165,6 +2637,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
    <div id="taglist"></div>
  </div>
 </div>
+<script type="application/json" id="mohaa-keys">__KEYS__</script>
+<script>
+__KEYS_JS__
+</script>
 <script>
 // Side-panel collapse tab: hides/restores the control panel; the stage stretches to the
 // window edge while it's hidden. Wired before model parsing so it works even if an asset
@@ -6183,9 +6659,17 @@ resetBtn.onclick=resetModel;
 // ---- Keyboard shortcuts + help overlay ----
 // Fly keys (WASDQEC/Space/arrows) and R belong to the camera listeners above; these keys
 // don't overlap them. Ignored while a select/input has focus.
+// The window (kxBuild, KEYS_JS) is built the first time it opens. While it is open it takes
+// the keys itself: a key pressed there is looked up, not acted on, and Esc or H closes it.
 const helpOv=document.getElementById('helpOv');
+let KX=null;
 function toggleHelp(force){const show=(force!==undefined)?force:(helpOv.style.display==='none');
-  helpOv.style.display=show?'flex':'none';}
+  if(show&&!KX){
+    try{KX=kxBuild(document.getElementById('helpCard'),JSON.parse(document.getElementById('mohaa-keys').textContent),
+                   {onClose:()=>toggleHelp(false)});}
+    catch(e){document.getElementById('helpCard').textContent='The keyboard shortcuts could not be shown: '+e;}}
+  helpOv.style.display=show?'flex':'none';
+  if(KX){if(show){keysDown.clear();KX.show(camMode==='free'?'free':'lock');}else KX.hide();}}
 function closeViewer(){
   // Embedded (#embed): the WebView2 host handles 'mohaa-close' and returns to its start page
   // (App._close_viewer). In a browser tab, just close it.
@@ -6195,7 +6679,6 @@ function closeViewer(){
   try{window.close();}catch(_e){}
 }
 document.getElementById('bHelp').onclick=()=>toggleHelp();
-document.getElementById('helpClose').onclick=()=>toggleHelp(false);
 helpOv.addEventListener('click',e=>{if(e.target===helpOv)toggleHelp(false);});
 function stepFrame(d){if(curAnim<0)return;const n=DATA.anims[curAnim].frames.length;
   curFrame=((curFrame+d)%n+n)%n;scrub.value=curFrame;applyFrame();}
@@ -6223,9 +6706,9 @@ window.addEventListener('keydown',e=>{
   case '\\':case '|':document.getElementById('sideTab').click();e.preventDefault();break;
   case 'h':case 'H':case '?':toggleHelp();break;
   case 'Escape':
-    // Esc closes the help panel and the viewer itself (the launcher returns to its start
-    // page).
-    if(helpOv.style.display!=='none') toggleHelp(false);
+    // Esc closes the shortcuts window when it is open; otherwise the viewer itself (the
+    // launcher returns to its start page).
+    if(helpOv.style.display!=='none'){toggleHelp(false);break;}
     closeViewer();
     break;
  }

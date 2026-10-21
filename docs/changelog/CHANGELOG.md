@@ -63,6 +63,7 @@ ascending order, so add new ones at the end of their section.
 - rev 67: the launcher can choose the renderer. The page reads `#renderer=gl|2d` from its boot hash (ahead of the browser's saved choice), exposes `setViewerRenderer()` so View > Viewer renderer switches the open page, and reports its own Display > WebGL toggle to the launcher (`mohaa-renderer gl|2d`) so both stay in sync.
 - rev 68: attach-to-bone models draw in WebGL. The WebGL pass listed only the host's own surfaces (`DATA.surfRanges`) instead of the live list that includes attachments (`LSR`), so attachments showed only in 2D. Its index and UV buffers now follow attachments too (32-bit indices once the combined model passes 65535 vertices, re-cut whenever the surface list changes). Attached surfaces also get a vertex range, which fixes attached autosprite surfaces (a muzzle flash): WebGL threw an error on every frame and 2D never drew them. Attachments now also hide particles behind them in the 2D renderer.
 - rev 69: translucent bases (`blendFunc blend`, e.g. barbed wire) are flagged `blend`. WebGL draws them after the opaque surfaces without depth writes, as the engine does for a blended stage (`tr_shader.c:1149-1153`), and the 2D renderer no longer darkens their see-through part into a grey box.
+- rev 70: the keyboard shortcuts window (`H`) is a keyboard map, shared with the Map Viewer: a keyboard and mouse with every key the viewer uses coloured by kind (camera, playback, display, tag list, window, pop-up lists). Hovering a key, or pressing it, lists everything it does with every modifier and in which view; Shift / Ctrl / Alt (clicked or held) show their layer; Free-look / Tag-lock / Pop-up list switch the view (the page's camera mode is shown first); a search box and the category chips narrow it down; the list underneath has one column per section, each scrolling on its own, with a line between rows; hovering a row rings its keys and clicking a key finds its rows. One table, `VIEWER_KEYS`, feeds it and the launcher's `F1` window; the window itself is `KEYS_JS` / `KEYS_CSS`, built on first open. While it is open, keys are looked up instead of acting on the model (R used to reset the camera behind it, W to fly). Esc with it open closes only the window; it used to close the viewer too (in the launcher, back to the start page).
 
 ## Launcher cache floor (VIEWER_REV_REQUIRED)
 
@@ -84,6 +85,7 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - rev 67: pages built before this ignore the launcher's renderer setting.
 - rev 68: pages built before this don't draw attachments in WebGL.
 - rev 69: pages and attachment sidecars built before this draw barbwire_long_pulse with a black background and the pulse_map models untextured.
+- rev 70: pages built before this have the old shortcut table, and Esc there closes the viewer along with it.
 
 ## Launcher (mohaa_launcher.py)
 
@@ -108,6 +110,7 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - Pak entries over 192 MB are skipped when extracting to the workspace or reading a `.map`, as they already were for reads through the pak index.
 - New yellow Output lines (`note`) for problems that were worked around, such as a missing shader map replaced by a texture found elsewhere in the paks.
 - The embedded pane's WebView2 keeps its browser files in `output/webview2` (the `WEBVIEW2_USER_DATA_FOLDER` environment variable, set before the pane is created). tkwebview2 names no folder, so WebView2 created `pythonw.exe.WebView2` beside Python, which fails where Python is installed read-only (`C:\Program Files`) and left the pane blank. A `pythonw.exe.WebView2` folder left beside Python by older versions can be deleted. This applies to both viewers.
+- Help > Keyboard shortcuts (`F1`) is a keyboard map (`KeyMapWindow`), the same as the viewer pages' `H` window: a keyboard and mouse with every shortcut coloured by kind, the details of a key on hover (or when you press it), Shift / Ctrl / Alt layers, the views of a table (Free-look, Tag-lock...), a search box and category chips, and the list underneath in columns that each scroll on their own, with a line between rows. Tabs switch between the 3D viewer's keys and the launcher's own (`KEYS_LAUNCHER`); it opens on the viewer's while a page is in the pane, else on the launcher's, or on the tab last picked. Keys pressed in it are looked up and never run (F5 used to reload the paks behind it); Esc or F1 closes it. With old popup windows on it uses the system's colours. It replaces the two side-by-side lists (`HOTKEYS_LAUNCHER`, `HOTKEYS_VIEWER`, `_fill_hotkeys`).
 
 ## Notable fixes (mohaa_view.py)
 
@@ -454,3 +457,49 @@ Changes to `python_installer_updater.bat` unless noted.
     new entities (a test copy of m1l1 with a damaged patch listed 616 errors and 613
     entities too many; now the patch is one error and the entity count is right).
   - Messages say what was found instead of a text offset (`expected "(" but found "0"`).
+- Map Viewer page rev 16 (`MAP_VIEWER_REV` 16, `MAP_VIEWER_REV_REQUIRED` 16):
+  - `X` stops the camera, and the Camera panel lists it. The camera also stops when the
+    page loses the keyboard or the window, while the page doesn't have the focus, when a
+    drag's mouse button was let go outside the page, and on any click on the launcher
+    while the map is in its pane. A key or button let go outside the page never reached
+    it, so the camera kept moving (or turning with the mouse) until the next click in it.
+  - Show buttons of their own for Rain (`Ctrl+I`, `common/rain`, hidden at first, also in
+    the Editor look) and Foliage clips (`Ctrl+G`, `common/foliageclip`, apart from
+    Clips); Nodraw has a key, `Ctrl+O`. The In-game look hides both new groups. Saved
+    options from before start with Rain hidden. The legend shows the keys.
+  - The Entities button stays on (dashed) while only some of its kinds are hidden by their
+    own buttons (AI nodes, Lights, Models, Paths, Point ents), and its tooltip names them;
+    it used to look off. Details was never one of them.
+  - `Ctrl+Z` (and an Undo button beside Show all) undoes the last Hide or Show all, one
+    step at a time.
+  - Open beside Copy on an info card's `.map source`: the `.map` in the Text Editor at
+    that line (in the launcher's pane), or as text in a new tab (in a browser).
+  - The map's stats count real entities (an entity number in game, against MOHAA's 1024),
+    simple ones and static props; so do the launcher's map details and the build log
+    (`entity_kind` in mohaa_entdefs.py, from OpenMoHAA's class tree). Static props of a
+    `.bsp` are now found by the decompiler's static-model index, not the `static_` prefix,
+    which some lack (24 in Spearhead's t2l4), so they also lose their labels as other
+    static props do.
+  - Find / Classes: clicking a class row anywhere opens its list (it took the arrow), and
+    hidden entities show red, a partly hidden class yellow with its hidden count.
+  - Shortcut lists (`H`, launcher `F1`): `X`, `Ctrl+Z`, `Ctrl+O / I / G`.
+  - The launcher shows the builder's `!` lines in red as warnings; they used to end the
+    build's status as an error.
+- Map Viewer page rev 17 (`MAP_VIEWER_REV` 17, `MAP_VIEWER_REV_REQUIRED` 17): the
+  keyboard shortcuts.
+  - The shortcut windows (`H` in the viewer, Help > Keyboard shortcuts `F1` in the
+    launcher) are a keyboard map, as in Adobe Audition: a keyboard and a mouse with every
+    key the viewer uses coloured by kind (camera, selecting, show / hide, display,
+    window), with its short name on the key. Hovering a key, or pressing it, lists
+    everything it does with every modifier and in which camera; Shift, Ctrl and Alt
+    (clicked, or held) show their layer of the keyboard, and Free-look / Radiant-look
+    switch the camera keys (the viewer opens on the camera in use). A search box and the
+    category chips narrow it down. The list underneath has three columns that each scroll
+    on their own, with a line between rows; hovering a row rings its keys (in their
+    layer), and clicking a key finds its rows. While the window is open, keys are looked
+    up instead of acting on the map; Esc, H or `?` closes it. Both windows read one table,
+    `MAP_VIEWER_KEYS` in mohaa_map_view.py; the page's window is the Model Viewer's
+    (`KEYS_JS` / `KEYS_CSS` in mohaa_view.py), the launcher's is `KeyMapWindow`.
+  - The All, In-game look and Editor look buttons have keys, shown on them: `Ctrl+A`,
+    `G` and `Shift+G`. `Ctrl+A` in the Find box still selects its text.
+  - The Editor look tooltip says it hides rain too (it has since rev 16).

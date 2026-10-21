@@ -115,6 +115,38 @@ class EntityDefs:
 EDITOR_FLAGS = {8: "!Easy", 9: "!Medium", 10: "!Hard", 11: "!DeathMatch"}
 
 
+# What a map entity becomes in game, for the counts the viewer shows: "real" entities take
+# one of the game's 1024 entity slots (each gets an entity number), "simple" ones don't.
+# These classes derive from SimpleEntity, not Entity (OpenMoHAA code/fgame: PathNode in
+# navigate.cpp, PlayerStart and its subclasses in playerstart.cpp, Waypoint and
+# VehiclePoint in misc.cpp, GrenadeHint, AISpawnPoint in Entities.cpp), so they never get
+# an entity number...
+SIMPLE_CLASSES = frozenset((
+    "info_pathnode", "info_player_start", "info_player_deathmatch", "info_player_allied",
+    "info_player_axis", "testplayerstart", "info_waypoint", "info_vehiclepoint",
+    "info_grenadehint", "info_aispawnpoint"))
+# ...and these don't stay entities: a light removes itself as it spawns (Light::Light posts
+# EV_Remove), as do info_null, misc_model and func_remove (misc.cpp); info_landmark and
+# lodmaster are Listeners; func_group, func_detail and detail brushes are merged into the
+# world by the compiler, which also uses up vis_leafgroup.
+DROPPED_CLASSES = frozenset((
+    "light", "info_null", "misc_model", "func_remove", "info_landmark", "lodmaster",
+    "func_group", "func_detail", "detail", "vis_leafgroup"))
+
+
+def entity_kind(classname, static=False):
+    """"real", "simple" or "static" for a map entity's class. A static prop is a static_*
+    class, which the compiler turns into a model the game draws without an entity (static:
+    the entity is one already, such as a .bsp's static model decompiled under its .tik's
+    class name)."""
+    c = (classname or "").lower()
+    if static or c.startswith("static_"):
+        return "static"
+    if c in SIMPLE_CLASSES or c in DROPPED_CLASSES:
+        return "simple"
+    return "real"
+
+
 # Model classes: point entities even where a definition gives them no box (they take
 # their model's size), never brush entities.
 _POINT_NO_BOX = ("script_model", "misc_model", "script_model_realdamage")

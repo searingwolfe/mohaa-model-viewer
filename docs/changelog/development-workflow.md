@@ -53,7 +53,8 @@ beyond Python 3, Node.js and a headless browser.
 | The cached shader / entity-definition index | `INDEX_VERSION` (mohaa_map_view.py) |
 | A release | `VERSION` (mohaa_launcher.py) and `docs/version.txt`, then tag the commit `v<version>` (the updater downloads that tag). Both viewers ship together. |
 | The privacy notice | `docs/PRIVACY.md` and `PRIVACY_TEXT` (mohaa_launcher.py), with the date; then check every left-hand text in `_PRIVACY_SWAPS` (mohaa_map_launcher.py) still matches |
-| Viewer hotkeys | Model Viewer: the page's `#helpCard` table and `HOTKEYS_VIEWER` (mohaa_launcher.py). Map Viewer: its page's `#helpCard` (mohaa_map_page.py) and `HOTKEYS_VIEWER` (mohaa_map_launcher.py) |
+| Viewer hotkeys | One table per viewer feeds both its page's `H` window and the launcher's `F1` window: `VIEWER_KEYS` (mohaa_view.py) and `MAP_VIEWER_KEYS` (mohaa_map_view.py); bump that viewer's page rev so cached pages pick it up. The launchers' own keys are `KEYS_LAUNCHER` (mohaa_launcher.py) and `MAP_KEYS_LAUNCHER` (mohaa_map_launcher.py). `kx_check(table)` (mohaa_view.py) lists any chord that names no key. A new key on a Display or Show button also goes in that button's label or tooltip |
+| The keyboard map's look or behaviour | Both versions: the page's (`KEYS_JS` / `KEYS_CSS`, mohaa_view.py, used by both viewer pages) and the launcher's (`KeyMapWindow`, mohaa_launcher.py), then both viewers' page revs |
 | The Map Viewer's legend | `LEGEND` (mohaa_map_view.py) only: the page and the launcher's Help > Legend both read it |
 | Package requirements | `docs/requirements.txt`, both RUN .bat files and `python_installer_updater.bat` (`Pillow>=10.3.0`, `pywebview==4.4.1`) |
 

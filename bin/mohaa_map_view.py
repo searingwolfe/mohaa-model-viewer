@@ -48,7 +48,7 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 15
+MAP_VIEWER_REV = 17
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
 INDEX_VERSION = 7
@@ -579,8 +579,9 @@ LEGEND = [
           "desc": "metalclip, woodclip, stoneclip, dirtclip, grassclip, gravelclip, mudclip, sandclip, "
                   "snowclip, glassclip, carpetclip, paperclip, puddleclip: invisible but solid, with that "
                   "material's footsteps and bullet hits."},
-         {"sw": "tex", "tex": "textures/common/foliageclip", "name": "foliageclip",
-          "desc": "Walk-through; bullets hitting it make foliage effects."},
+         {"sw": "tex", "tex": "textures/common/foliageclip", "name": "foliageclip", "key": "Ctrl+G",
+          "desc": "Walk-through; bullets hitting it make foliage effects. Shown and hidden apart from "
+                  "the other clips."},
          {"sw": "tex", "tex": "textures/common/trigger", "name": "trigger", "key": "Ctrl+T",
           "desc": "The volume of a trigger_* entity: walking into it (or using it) fires the trigger."},
          {"sw": "tex", "tex": "textures/common/hint", "name": "hint", "key": "Ctrl+H",
@@ -595,12 +596,12 @@ LEGEND = [
           "desc": "Splits the map into areas that a closed door shuts off from view."},
          {"sw": "tex", "tex": "textures/common/origin", "name": "origin",
           "desc": "The pivot of a door or other moving brush entity."},
-         {"sw": "tex", "tex": "textures/common/nodraw", "name": "nodraw",
-          "desc": "Not drawn and not solid. The Nodraw button hides it, with rain, ladder, patharea "
-                  "and commontreeshadow."},
-         {"sw": "tex", "tex": "textures/common/rain", "name": "rain",
-          "desc": "The volume of a func_rain entity: the game makes it rain inside it. Not drawn, not "
-                  "solid."},
+         {"sw": "tex", "tex": "textures/common/nodraw", "name": "nodraw", "key": "Ctrl+O",
+          "desc": "Not drawn and not solid. The Nodraw button hides it, with ladder, patharea and "
+                  "commontreeshadow."},
+         {"sw": "tex", "tex": "textures/common/rain", "name": "rain", "key": "Ctrl+I",
+          "desc": "The volume of a func_rain entity: the game makes it rain (or snow) inside it. Not "
+                  "drawn, not solid. Hidden until you show it."},
          {"sw": "tex", "tex": "textures/misc_outside/commontreeshadow", "name": "commontreeshadow",
           "desc": "A flat picture of a tree, put beside a tree model so the tree casts a shadow when the "
                   "map is lit. It's a world brush, not part of the tree: the game never draws it, and the "
@@ -626,6 +627,143 @@ LEGEND = [
                   "(missing)."},
      ]},
 ]
+
+
+# The map viewer's keyboard shortcuts: the page's H window, and the launcher's F1 window
+# on its "3D viewer" tab. The format is the Model Viewer's (VIEWER_KEYS and the notes
+# above it in mohaa_view.py): a heading is _kx_sub(title, category, view) and a row is
+# _kx(keys as shown, what they do, (chord, keycap label[, what this key does]) ...).
+# Keep it in step with the page's key handlers (keydown and the mouse in
+# mohaa_map_page.py) and the FILTERS / DISPLAY buttons.
+def _kx_sub(title, cat, view=None):
+    d = {"sub": title, "c": cat}
+    if view:
+        d["v"] = view
+    return d
+
+
+def _kx(keys, text, *binds):
+    return {"k": keys, "d": text, "b": [list(b) for b in binds]}
+
+
+MAP_VIEWER_KEYS = {
+    "title": "Map viewer keyboard shortcuts",
+    "views": [{"id": "free", "name": "Free-look"}, {"id": "rad", "name": "Radiant-look"}],
+    "cols": [
+        {"title": "Camera", "rows": [
+            _kx_sub("Free-look camera", "cam", "free"),
+            _kx("W|S", "move forward / back", ("W", "forward", "move forward"), ("S", "back", "move back")),
+            _kx("Up|Down", "move forward / back", ("Up", "forward", "move forward"), ("Down", "back", "move back")),
+            _kx("A|D", "strafe left / right", ("A", "left", "strafe left"), ("D", "right", "strafe right")),
+            _kx("Space|C", "move up / down", ("Space", "up", "move up"), ("C", "down", "move down")),
+            _kx("Q|E", "tilt (roll) left / right", ("Q", "tilt L", "tilt (roll) left"),
+                ("E", "tilt R", "tilt (roll) right")),
+            _kx("Left|Right", "turn left / right", ("Left", "turn L", "turn left"), ("Right", "turn R", "turn right")),
+            _kx("right-drag", "look around, as drag does", ("RDrag", "look", "look around")),
+            _kx_sub("Radiant-look camera (MOHRadiant's keys)", "cam", "rad"),
+            _kx("right-drag", "fly: push the mouse up to go forward, left / right to turn", ("RDrag", "fly")),
+            _kx("Up|Down", "move forward / back", ("Up", "forward", "move forward"), ("Down", "back", "move back")),
+            _kx("Left|Right", "turn left / right", ("Left", "turn L", "turn left"), ("Right", "turn R", "turn right")),
+            _kx(",|.", "strafe left / right", (",", "left", "strafe left"), (".", "right", "strafe right")),
+            _kx("D|C", "move up / down", ("D", "up", "move up"), ("C", "down", "move down")),
+            _kx("A|Z", "look up / down", ("A", "look up", "look up"), ("Z", "look dn", "look down")),
+            _kx("Ctrl+Up|Down|,|.", "one grid step (64 units) forward / back / left / right",
+                ("Ctrl+Up", "step", "one grid step forward"), ("Ctrl+Down", "step", "one grid step back"),
+                ("Ctrl+,", "step", "one grid step left"), ("Ctrl+.", "step", "one grid step right")),
+            _kx_sub("Both cameras", "cam"),
+            _kx("drag", "look around", ("Drag", "look")),
+            _kx("wheel", "move forward / back (with Shift, 4x as far)", ("Wheel", "move", "move forward / back"),
+                ("Shift+Wheel", "move x4", "move forward / back, 4x as far")),
+            _kx("middle-drag", "slide (strafe / rise)", ("MDrag", "slide")),
+            _kx("Shift", "hold to move and turn faster (4x)", ("Shift", "faster", "hold: move and turn 4x faster")),
+            _kx("V", "switch Free-look / Radiant-look", ("V", "camera")),
+            _kx("R", "back to the player start", ("R", "start")),
+            _kx("F|double-click", "fly to the selection", ("F", "fly to"), ("DblClick", "fly to")),
+            _kx("End", "level the view", ("End", "level")),
+            _kx("PgUp|PgDn", "up / down one floor", ("PgUp", "floor up", "up one floor"),
+                ("PgDn", "floor dn", "down one floor")),
+            _kx("[|]", "cubic clip nearer / further", ("[", "clip -", "cubic clip nearer"),
+                ("]", "clip +", "cubic clip further")),
+            _kx("Ctrl+\\", "cubic clipping on / off", ("Ctrl+\\", "clip")),
+            _kx("X", "stop the camera (if it keeps moving after a click outside the map)", ("X", "stop", "stop the camera")),
+        ]},
+        {"title": "Selecting and window", "rows": [
+            _kx_sub("Selecting", "sel"),
+            _kx("click", "select a brush or entity (empty space clears the selection)", ("Click", "select")),
+            _kx("Shift+click", "add to / remove from the selection", ("Shift+Click", "add")),
+            _kx("Ctrl+click", "select it and show more info", ("Ctrl+Click", "info")),
+            _kx("Alt+click", "select everything of the same kind: the same class, or the same texture (Same "
+                "kind); with Shift, add them",
+                ("Alt+Click", "same", "select everything of the same kind: the same class, or the same texture"),
+                ("Alt+Shift+Click", "+ same", "add everything of the same kind to the selection")),
+            _kx("Ctrl+Alt+click", "select the whole path through an entity: its \"target\" chain, before and "
+                "after it (Same path); with Shift, add it",
+                ("Ctrl+Alt+Click", "path", "select the whole path through an entity: its \"target\" chain"),
+                ("Ctrl+Alt+Shift+Click", "+ path", "add the whole path through an entity to the selection")),
+            _kx("Ctrl+Shift+click|middle-click", "the clicked face's texture",
+                ("Ctrl+Shift+Click", "texture"), ("MClick", "texture")),
+            _kx("N", "more info on the selection", ("N", "info")),
+            _kx("Backspace", "hide the selection", ("Backspace", "hide")),
+            _kx("Shift+H", "show everything hidden", ("Shift+H", "show all")),
+            _kx("Ctrl+Z", "undo the last hide or show-all (again for the one before)", ("Ctrl+Z", "undo")),
+            _kx("Ctrl+F or /", "find: class, targetname, key, texture", ("Ctrl+F", "find"), ("/", "find")),
+            _kx_sub("Window", "win"),
+            _kx("H or ?", "show / hide this window", ("H", "keys", "show / hide the keyboard shortcuts"),
+                ("Shift+/", "keys", "show / hide the keyboard shortcuts")),
+            _kx("L", "the legend: what the colours, markers and editor surfaces mean", ("L", "legend")),
+            _kx("T", "light / dark theme", ("T", "theme")),
+            _kx("\\", "collapse / expand the control panel", ("\\", "panel")),
+            _kx("Esc", "close a card / clear the selection / close the map (one a press)", ("Esc", "back")),
+        ]},
+        {"title": "Show / hide and display", "rows": [
+            _kx_sub("Show / hide (as in MOHRadiant)", "show"),
+            _kx("Alt+1 … Alt+0", "World · Entities · Patches · Translucent · Liquids · Caulk · Clips · Paths · "
+                "AI nodes · Lights",
+                ("Alt+1", "World", "show / hide the world brushes"),
+                ("Alt+2", "Entities", "show / hide every entity"),
+                ("Alt+3", "Patches", "show / hide the curved patches"),
+                ("Alt+4", "Transl.", "show / hide see-through surfaces: glass, decals, effects"),
+                ("Alt+5", "Liquids", "show / hide water, slime, lava and fog volumes"),
+                ("Alt+6", "Caulk", "show / hide caulk"),
+                ("Alt+7", "Clips", "show / hide the clips (player, monster, weapon, vehicle ...)"),
+                ("Alt+8", "Paths", "show / hide spline paths and waypoints"),
+                ("Alt+9", "AI nodes", "show / hide the AI path nodes (info_pathnode)"),
+                ("Alt+0", "Lights", "show / hide the light entities")),
+            _kx("Ctrl+D|H|M", "Details · Hints and skips · Models",
+                ("Ctrl+D", "Details", "show / hide the detail brushes"),
+                ("Ctrl+H", "Hints", "show / hide hint and skip brushes"),
+                ("Ctrl+M", "Models", "show / hide every entity drawn with a model")),
+            _kx("Ctrl+R|T|P|K", "Terrain · Triggers · Areaportals · Sky",
+                ("Ctrl+R", "Terrain", "show / hide the LOD terrain"),
+                ("Ctrl+T", "Triggers", "show / hide triggers"),
+                ("Ctrl+P", "Portals", "show / hide areaportals"),
+                ("Ctrl+K", "Sky", "show / hide the sky brushes")),
+            _kx("Ctrl+O|I|G", "Nodraw · Rain (hidden at first) · Foliage clips",
+                ("Ctrl+O", "Nodraw", "show / hide nodraw, ladders, patharea and tree-shadow cards"),
+                ("Ctrl+I", "Rain", "show / hide the rain volumes (hidden at first)"),
+                ("Ctrl+G", "Foliage", "show / hide the foliage clips")),
+            _kx("Ctrl+A", "show every group (All)", ("Ctrl+A", "All")),
+            _kx("G", "In-game look: hide what the game never draws, with the game's light and sky",
+                ("G", "in-game")),
+            _kx("Shift+G", "Editor look: MOHRadiant's view, at full brightness with Simple Sky",
+                ("Shift+G", "editor")),
+            _kx("B", "Full Brightness on / off (off: the game's own lighting)", ("B", "bright")),
+            _kx("K", "Simple Sky on / off (off: the game's sky)", ("K", "sky")),
+            _kx("M", "Simple models on / off: trees drawn as the sprite the game shows far away",
+                ("M", "simple")),
+            _kx_sub("Display", "disp"),
+            _kx("1 … 9", "Texture · Shade · Wire · Setsizes · Arrows · Labels · Links · Fog · X-ray",
+                ("1", "Texture", "Texture on / off (off: each texture's average colour)"),
+                ("2", "Shade", "Shade: MOHRadiant's face shading on / off"),
+                ("3", "Wire", "Wire: outline every brush face, patch and terrain block"),
+                ("4", "Setsizes", "Setsizes: every entity's bounding box"),
+                ("5", "Arrows", "Arrows: which way entities with an angle face"),
+                ("6", "Labels", "Labels: class and $targetname over nearby entities"),
+                ("7", "Links", "Links: a line from each entity to its targets"),
+                ("8", "Fog", "Fog: the map's distance fog"),
+                ("9", "X-ray", "X-ray: the selection's outline through walls")),
+        ]},
+    ]}
 
 
 def _legend_thumb(data, size):
@@ -1778,16 +1916,39 @@ def _json_script(obj):
             .replace("&", "\\u0026"))
 
 
+# Stand-in for the keyboard map when mohaa_view.py can't be loaded: the same table as a
+# plain list (the page's Esc, H and a click outside still close it).
+_KEYS_CSS_PLAIN = (".kx-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;"
+                   "justify-content:center;z-index:40}.kx-card{background:var(--panel);border:1px solid var(--line);"
+                   "border-radius:10px;padding:14px 18px;width:min(900px,94vw);height:min(800px,92vh);overflow:auto}")
+_KEYS_JS_PLAIN = r"""function kxBuild(host,P){const e=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+ let h='<b>'+e(P.t.title)+'</b>';
+ P.t.cols.forEach(c=>{h+='<h4>'+e(c.title)+'</h4>';c.rows.forEach(r=>{h+=r.sub!=null?'<div style="color:var(--dim);margin-top:6px">'+
+   e(r.sub)+'</div>':'<div><kbd>'+e(r.k.replace(/\|/g,' / '))+'</kbd> '+e(r.d)+'</div>';});});
+ host.innerHTML=h;return{show:function(){},hide:function(){}};}"""
+
+
+def _keys_parts():
+    """The keyboard shortcuts window for the page: its style, its code and its data
+    (KEYS_CSS, KEYS_JS and kx_payload in mohaa_view.py, with this viewer's table)."""
+    if MV is not None and hasattr(MV, "KEYS_JS"):
+        return MV.KEYS_CSS, MV.KEYS_JS, MV.kx_payload(MAP_VIEWER_KEYS)
+    return _KEYS_CSS_PLAIN, _KEYS_JS_PLAIN, {"cats": [], "layout": [], "t": MAP_VIEWER_KEYS}
+
+
 def write_html(path, title, b64, info, theme=None):
     """Fill the page template (mohaa_map_page.py) and write it, via a temporary file so
     a half-written page is never left behind."""
     from mohaa_map_page import HTML_TEMPLATE
+    kcss, kjs, kdata = _keys_parts()
     repl = {"__TITLE__": _html_esc(title), "__TITLE_JS__": _js_lit(title),
             "__DATA__": b64, "__REV__": str(MAP_VIEWER_REV),
             "__INFO__": _json_script(info),
-            "__THEME__": theme if theme in ("light", "dark") else ""}
+            "__THEME__": theme if theme in ("light", "dark") else "",
+            "__KEYS_CSS__": kcss, "__KEYS_JS__": kjs, "__KEYS__": _json_script(kdata)}
     # One pass, so a substituted value is never scanned again for another token.
-    html = re.sub(r"__(?:TITLE_JS|TITLE|DATA|REV|INFO|THEME)__", lambda m: repl[m.group(0)], HTML_TEMPLATE)
+    html = re.sub(r"__(?:TITLE_JS|TITLE|DATA|REV|INFO|THEME|KEYS_CSS|KEYS_JS|KEYS)__",
+                  lambda m: repl[m.group(0)], HTML_TEMPLATE)
     tmp = path + ".part"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(html)
@@ -1886,8 +2047,16 @@ def build(src, args):
     nbrush = sum(e["brushes"] for e in ents)
     npatch = sum(e["patches"] for e in ents)
     nterr = sum(e["terrain"] for e in ents)
-    log("map: %d entities, %d brushes, %d patches, %d terrain blocks, %d textures"
-        % (len(ents), nbrush, npatch, nterr, len(used)))
+    # real entities (an entity number in game, 1024 slots), simple ones, static props (for a
+    # .bsp, every entity from its static model lump, which the decompiler writes last)
+    kinds = {"real": 0, "simple": 0, "static": 0}
+    first_static = bspinfo["firstStatic"] if bspinfo else None
+    for i, e in enumerate(ents):
+        kinds[ME.entity_kind(e["kvd"].get("classname"), first_static is not None and i >= first_static)] += 1
+    log("map: %d entities (%d real, %d simple, %d static props), %d brushes, %d patches, %d terrain blocks, %d textures"
+        % (len(ents), kinds["real"], kinds["simple"], kinds["static"], nbrush, npatch, nterr, len(used)))
+    if kinds["real"] > 1024:
+        log("! %d real entities: more than the game's 1024 entity slots" % kinds["real"])
     # ---- textures -------------------------------------------------------------
     t0 = time.time()
     tcache = TextureCache(os.path.join(cache_dir, "tex") if cache_dir else None)
@@ -1962,10 +2131,12 @@ def build(src, args):
               "src": blobs.add(text.encode("latin-1", "replace")),
               "tex": texs.entries, "models": mb.models if mb else [], "modelOf": model_of,
               "defs": defs, "editorFlags": {str(k): v for k, v in ME.EDITOR_FLAGS.items()},
-              "bsp": bspinfo, "lit": lit, "sky": skies, "clouds": clouds, "legend": legend}
+              "bsp": bspinfo, "lit": lit, "sky": skies, "clouds": clouds, "legend": legend,
+              "ek": {"simple": sorted(ME.SIMPLE_CLASSES), "dropped": sorted(ME.DROPPED_CLASSES)}}
     t0 = time.time()
     b64, raw_len, gz_len = pack_payload(header, blobs)
     info = {"name": stem, "path": vpath, "kind": kind, "entities": len(ents), "brushes": nbrush,
+            "real": kinds["real"], "simple": kinds["simple"], "static": kinds["static"],
             "patches": npatch, "terrain": nterr, "textures": len(used), "models": len(model_of),
             "message": world.get("message", ""), "classes": sorted(counts.items(), key=lambda kv: kv[0].lower()),
             "missing": texs.missing[:200], "bsp": bool(bspinfo), "bspVersion": bspinfo["version"] if bspinfo else None,

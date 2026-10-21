@@ -102,11 +102,25 @@ run at once.
 - **Caulk** is pushed half a unit back along each vertex's line of sight, so it loses
   every depth tie against the walls it touches (no sparkles along corners).
 - **Nodraw.** A texture the game never draws that is in no other editor group (caulk,
-  clips, triggers, hints...) goes with the Nodraw button and the In-game look: rain (the
-  volume of a `func_rain` entity), patharea, ladders, and the flat tree pictures some
-  maps stand beside their trees (`misc_outside/commontreeshadow`), which only give the
-  tree its shadow when the map is lit. Those are world brushes, not part of the tree, so
-  hiding a tree leaves them.
+  clips, triggers, hints...) goes with the Nodraw button (`Ctrl+O`) and the In-game look:
+  patharea, ladders, and the flat tree pictures some maps stand beside their trees
+  (`misc_outside/commontreeshadow`), which only give the tree its shadow when the map is
+  lit. Those are world brushes, not part of the tree, so hiding a tree leaves them.
+- **Rain and foliage clips** have Show buttons of their own: Rain (`Ctrl+I`,
+  `common/rain`, the volumes of `func_rain` entities, which fill some winter maps like
+  hint brushes) starts hidden, in the Editor look too; Foliage clips (`Ctrl+G`,
+  `common/foliageclip`) are apart from the other Clips. The In-game look hides both.
+  Options saved before Rain had its button start with it hidden.
+- **The Entities button** (`Alt+2`) covers brush entities, point entities, lights, AI
+  nodes, paths, models and static props. With only some of those hidden by their own
+  buttons, it stays on, dashed, and its tooltip names the hidden kinds; a click hides the
+  rest, a second shows all.
+- **All, In-game look, Editor look** (under the Show buttons; `Ctrl+A`, `G`, `Shift+G`):
+  All shows every group. In-game look hides what the game never draws (caulk, clips,
+  triggers, hints, origin brushes, areaportals, nodraw, rain, foliage clips) and the
+  entity markers, with the game's lighting and sky (Full Brightness and Simple Sky off).
+  Editor look is MOHRadiant's view: everything but hints, areaportals and rain, at Full
+  Brightness with Simple Sky.
 - **Trees.** A tree model carries a sprite version: a card of the whole tree
   (`deformVertexes autoSprite2`, `alphaGen oneMinusDistFade`) that the game fades in far
   away as the tree's own surfaces fade out (`alphaGen distFade`; `R_AddStaticModelSurfaces`
@@ -150,6 +164,26 @@ run at once.
   for a model or marker its box, as the selection draws it in red. The game's sky is
   picked only where nothing else is under the cursor, as it is seen; a second pass then
   finds the nearest sky brush there.
+- **Hide** (Backspace or the Hide button) and **Show all** (Shift+H) go on a stack that
+  `Ctrl+Z` (or the Undo button beside Show all) unwinds one step at a time: a Hide shows
+  those things again, a Show all hides again what it showed.
+- **Find, Classes, Textures** (the list under Find): a class row selects the class and
+  opens (or closes) the list of its entities; hidden entities (Hide, or a Show button
+  off) are red, a class with some of them hidden yellow with the hidden count.
+- **Entity counts.** Under the map's stats: how many entities are real (the game spawns
+  them as entities, each with an entity number; MOHAA has 1024 slots), simple (path
+  nodes, player starts, waypoints, vehicle points, grenade hints, AI spawn points, which
+  derive from `SimpleEntity`, and the lights, info_nulls, misc_models and compiler-only
+  entities that don't last as entities), and static props. The class lists are
+  `SIMPLE_CLASSES` / `DROPPED_CLASSES` in mohaa_entdefs.py, from OpenMoHAA's game code;
+  an unknown class (most come from `.tik` files) counts as real. Static props are the
+  `static_*` classes of a `.map`, or the entities from a `.bsp`'s static model lump
+  (`firstStatic`; some take a `.tik` class name without the prefix). The launcher's map
+  details and the build log show the same counts, the log in red past 1024.
+- **Open** beside Copy on an info card's `.map source`: in the launcher's pane, the
+  launcher opens the `.map` in the Text Editor at that entity's or brush's line (for
+  Notepad++, VS Code, Sublime Text, Notepad2/3, EmEditor, gedit, Kate and gVim; other
+  editors open it at the top); in a browser, the whole `.map` opens as text in a new tab.
 - **Clicks.** Click selects, Shift+click adds or removes, Ctrl+click also opens the info
   card, Alt+click selects everything of the same kind. Ctrl+Shift+click (or a
   middle-click) shows the clicked face's texture; in Radiant, Ctrl+Shift+click selects a
@@ -195,6 +229,20 @@ run at once.
   entities, brushes and editor surfaces) is a column that scrolls on its own, so both
   windows stay about 640 px tall (the launcher's never taller than the launcher window);
   the mouse wheel scrolls the column under the pointer.
+- **Keyboard shortcuts** (`H` or `?`, or the "H hotkeys" chip; Help > Keyboard shortcuts /
+  `F1` in the launcher, which has the launcher's own keys on a second tab) are a keyboard
+  map, as in Adobe Audition: a keyboard and a mouse with every key the viewer uses
+  coloured by kind (camera, selecting, show / hide, display, window) and its short name on
+  it, and the same shortcuts as a list underneath, three columns that each scroll on their
+  own with a line between rows. Hovering a key, or pressing it, lists everything it does
+  with every modifier and in which camera; Shift, Ctrl and Alt (clicked, or held) show
+  their layer of the keyboard; Free-look / Radiant-look switch the camera keys, and the
+  page's window opens on the camera in use. Hovering a row rings its keys, clicking a key
+  finds its rows, and a search box and the category chips narrow it all down. While the
+  window is open, keys are only looked up; Esc, H or `?` closes it (Esc or F1 in the
+  launcher). Both windows read `MAP_VIEWER_KEYS` in mohaa_map_view.py. The page's window
+  is the Model Viewer's (`KEYS_JS` / `KEYS_CSS` in mohaa_view.py), the launcher's is
+  `KeyMapWindow` in mohaa_launcher.py.
 - **Remembered** per browser: theme, backdrop, display / filter choices, camera
   settings, and the camera position for each map (keyed by the map's path inside the
   paks, or its file name). The embedded pane runs WebView2 in private mode, so there
@@ -255,9 +303,15 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
   fall, A / Z look up and down, End levels the view, PgUp / PgDn hop to the floor above /
   below (UpFloor / DownFloor), Ctrl+arrows and Ctrl+`,` / `.` move one 64-unit grid step,
   `[` / `]` move the cubic clip.
+- **Stopping.** `X` stops the camera (held keys, a drag, Radiant-look's flight, a fly-to).
+  It also stops by itself when the page loses the keyboard or the window, while the page
+  doesn't have the focus, when a drag's mouse button turns out to have been let go
+  outside the page, and, in the launcher's pane, on any click on the launcher: a key or
+  button let go outside the page never reaches it, and the camera used to keep moving.
 - `V` switches cameras, `R` returns to the player start, `B` toggles Full Brightness,
   `K` Simple Sky, `M` Simple models, `L` opens the legend and `T` switches the theme. The
-  FOV slider runs from 60 to 150. Press `H` in the viewer for the full list.
+  FOV slider runs from 60 to 150. Press `H` in the viewer for all of them (Keyboard
+  shortcuts, above).
 
 ## Versions
 
