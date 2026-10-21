@@ -165,6 +165,37 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
  ::-webkit-scrollbar-thumb:hover{background:var(--btnhover)}
  ::-webkit-scrollbar-track{background:transparent}
+ /* the game cvars list (Display): the Model Viewer's pop-up list look */
+ #cvarRow{margin-top:7px;flex-wrap:nowrap}
+ #cvarBtn{display:flex;align-items:center;gap:6px;max-width:150px;flex:none;padding:3px 8px;font-size:11px}
+ #cvarBtn .albl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+ #cvarBtn .acar{color:var(--dim);font-size:10px}
+ #cvarCount{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ #cvarCount.on{color:var(--accent)}
+ .amPanel{position:fixed;z-index:71;display:flex;flex-direction:column;background:var(--panel);
+   border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 26px rgba(0,0,0,.45);
+   width:340px;max-height:78vh;padding:4px 0}
+ .amHead{display:flex;align-items:center;gap:6px;padding:3px 8px 5px 8px;color:var(--dim);
+   font-size:11px;border-bottom:1px solid var(--line);margin-bottom:4px}
+ .amHead .amPathTxt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .amSearch{width:calc(100% - 12px);margin:2px 6px 5px 6px;padding:3px 6px;
+   background:var(--btn);color:var(--txt);border:1px solid var(--line);border-radius:4px;
+   font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+ .amSearch:focus{outline:1px solid var(--accent);outline-offset:0}
+ .amBody{overflow-y:auto;overflow-x:hidden;min-height:0}
+ .amItem{display:flex;align-items:center;gap:6px;padding:3px 8px;cursor:pointer;white-space:nowrap;overflow:hidden}
+ .amItem:hover{background:var(--btnhover)}
+ .amItem .arw{flex:none;width:12px;text-align:center;color:var(--accent);font-size:11px}
+ .amItem .lbl{flex:none;min-width:0;overflow:hidden;text-overflow:ellipsis}
+ .amItem .cnt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--dim);font-size:11px;text-align:right}
+ .amItem.on .lbl{color:var(--accent)}
+ .amItem.na .lbl,.amItem.na .arw{opacity:.5}
+ .amItem input{flex:none;width:70px;padding:1px 4px;background:var(--btn);color:var(--txt);border:1px solid var(--line);
+   border-radius:4px;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+ .amItem input:focus{outline:1px solid var(--accent);outline-offset:0}
+ .amNote{padding:4px 8px;color:var(--dim);font-size:11px;white-space:normal}
+ #cvWhere{border-top:1px solid var(--line);margin-top:4px;padding-top:5px}
+ #cvWhere div{margin:1px 0} #cvWhere .msg{color:var(--accent)} #cvWhere .warn{color:var(--warn)}
  /* the hotkey on the All / In-game look / Editor look buttons */
  .row button .k{color:var(--dim);font-size:10px;margin-left:4px} .row button.on .k{color:inherit;opacity:.75}
 __KEYS_CSS__
@@ -270,6 +301,7 @@ __KEYS_CSS__
        <input type="color" id="bgcol" value="#0e1116" style="width:44px;height:22px;padding:1px;border:1px solid var(--line);border-radius:6px;background:var(--btn);cursor:pointer" title="Backdrop colour behind the map. Overrides the theme's default; remembered.">
        <button class="sm" id="bgReset" title="Return the backdrop to the theme's default colour">Default</button>
      </div>
+     <div class="row co" id="cvarRow"><button id="cvarBtn" title="Some of the game's debugging cvars, doing here what they do in game: r_showtris (what the game draws from where the camera is), ai_showroutes (the AI's path connections) and their settings. Type a cvar and a value in its box as in the game's console. (` like the game's console key)"><span class="albl">&mdash; game cvars &mdash;</span><span class="acar">&#9668;</span></button><span id="cvarCount">none set</span></div>
    </div>
    <div class="sect">
      <h2>Show</h2>
@@ -2148,7 +2180,10 @@ function draw(){
   drawScene(VP,0);
   drawSelection(VP);
   drawLines(VP);
+  drawShowTris(VP);
+  drawRoutes(VP);
   draw2D();
+  if(cvEl)cvarWhereRender();
   updateHint();
   cloudTick();
 }
@@ -2336,6 +2371,623 @@ function draw2D(){
     ctx.moveTo(W/2-10,H/2);ctx.lineTo(W/2+10,H/2);ctx.moveTo(W/2,H/2-10);ctx.lineTo(W/2,H/2+10);ctx.stroke();
     ctx.beginPath();ctx.moveTo(W/2,H/2);ctx.lineTo(radFly.x,radFly.y);ctx.stroke();ctx.globalAlpha=1;}
 }
+
+// ============================================================================
+//  The game's own view: r_showtris (what the renderer draws from the camera)
+// ============================================================================
+// tr_world.c: the camera's leaf (R_PointInLeaf) names its cluster, and R_MarkLeaves keeps
+// the leafs whose cluster is in that cluster's row of the vis lump and whose area is
+// joined to the camera's. Doors cut a map into areas: the areas are flooded through the
+// open area portals (cm_test.c), a level starts with every door shut but the ones that
+// start open, and cm_noAreas 1 joins them all. From a leaf with no cluster (outside the
+// map) every leaf is kept. R_RecursiveWorldNode walks the tree, dropping the boxes past
+// the farplane, and R_AddWorldSurface drops the planar faces facing away from the camera
+// (with 8 units of slack) and the triangle soups and curved patches past the farplane; a
+// patch keeps only the rows and columns its distance allows (RB_SurfaceGrid with
+// r_lodCurveError 250). Brush entities and models are sent to the client only when a
+// cluster their box touches is in the PVS and their area is joined to the camera's
+// (sv_snapshot.c); static props are listed by the leafs. r_showtris then outlines every
+// triangle that was drawn (tr_shade.c DrawTris): 1 hidden behind walls, 2 through them,
+// with an axis cross at the origin of each model drawn (red up, green along y, blue a
+// diagonal: the engine's own slip), 3 the crosses alone. Terrain is outlined at full
+// detail (the game thins it out with distance) and models at their full detail too.
+let GV=null;
+const DOOR_CLASSES={func_door:1,func_rotatingdoor:1,script_door:1};
+function gvInit(){
+  const V=D.vis;if(!V||!V.nl)return;
+  const G={np:D.f32(V.np),nc:D.i32(V.nc),nb:D.i32(V.nb),lf:D.i32(V.lf),ls:D.i32(V.ls),lt:D.i32(V.lt),lm:D.i32(V.lm),
+    pvs:V.pvs!=null?D.bytes(V.pvs):null,ncl:V.ncl|0,cb:V.cb|0,si:D.i32(V.si),sf:D.f32(V.sf),v:D.f32(V.v),l:D.u32(V.l),
+    ge:D.f32(V.ge),nn:V.nn|0,nl:V.nl|0,ns:V.ns|0};
+  let na=0;for(let l=0;l<G.nl;l++){const a=G.lf[l*14+1];if(a+1>na)na=a+1;}
+  G.na=na;
+  // the farplane: nodes are dropped past it with farplane_cull 1 (the default), boxes and
+  // spheres with any farplane_cull but 0; terrain patches 768 units past it
+  const wk=MAP.ents[0]?MAP.ents[0].kvl:{}, fc=wk.farplane_cull!=null?parseInt(wk.farplane_cull,10)||0:1;
+  G.far=parseFloat(wk.farplane)||0;G.farNodes=G.far>0&&fc===1;G.farBoxes=G.far>0&&fc!==0;
+  // The lines are kept as their two ends (each vertex knows the other end, so a line that
+  // runs behind the camera can be cut at the near plane: see VS_GVL). The surfaces' lines
+  // come first, in the .bsp's order (vertex m of the list is the m-th line end of G.l),
+  // then the terrain's, each block's edges once, from the page's own terrain.
+  const blk=new Map();SC.prims.forEach((p,pi)=>{if(p.ent===0&&p.kind===2)blk.set(p.bn,pi);});
+  G.terPrim=(V.to||[]).map(bn=>blk.has(bn)?blk.get(bn):-1);
+  const TL=[];G.terRange=G.terPrim.map(pi=>{
+    if(pi<0)return null;const p=SC.prims[pi],seen=new Set(),start=G.l.length+TL.length;
+    for(let fc=p.f0;fc<p.f1;fc++)for(let k=SC.faceE0[fc],ke=k+SC.faceEN[fc];k+1<ke;k+=2){
+      let a=SC.edge[k],b=SC.edge[k+1];if(a>b){const x=a;a=b;b=x;}const key=a*SC.nv+b;
+      if(!seen.has(key)){seen.add(key);TL.push(a,b);}}
+    return [start,G.l.length+TL.length-start];});
+  G.terLines=new Uint32Array(TL);
+  G.idx=new Uint32Array(Math.max(2,G.l.length+TL.length));
+  // a patch's lines are made each time, as many as its finest level can have
+  let gm=0;for(let s=0;s<G.ns;s++)if(G.si[s*8]===3){const w=G.si[s*8+4],h=G.si[s*8+5];gm+=(w-1)*h+w*(h-1)+(w-1)*(h-1);}
+  G.grid=new Float32Array(Math.max(12,gm*12));
+  G.stS=new Int32Array(G.ns).fill(-1);G.stT=new Int32Array(Math.max(1,(V.to||[]).length)).fill(-1);G.stM=new Int32Array(Math.max(1,G.lm.length)).fill(-1);
+  G.frame=0;
+  // brush entities: their own surfaces
+  G.bm=new Map();for(const r of V.bm||[]){let a=G.bm.get(r[0]);if(!a){a=[];G.bm.set(r[0],a);}a.push(r[1],r[2]);}
+  // every entity the game sends: its clusters and areas from its box grown by a unit
+  // (SV_LinkEntity); a door that starts open opens the portal between its two areas
+  G.ent=new Map();G.portals=[];
+  const fs=D.bsp&&D.bsp.firstStatic!=null?D.bsp.firstStatic:MAP.ents.length;
+  for(const X of ENTS){
+    if(X.ei===0||X.ei>=fs||!X.box)continue;
+    const door=DOOR_CLASSES[MAP.ents[X.ei].cls];
+    if(!G.bm.has(X.ei)&&X.model<0&&!door)continue;
+    const b=X.box,o=b.origin,mn=[o[0]+b.mins[0]-1,o[1]+b.mins[1]-1,o[2]+b.mins[2]-1],mx=[o[0]+b.maxs[0]+1,o[1]+b.maxs[1]+1,o[2]+b.maxs[2]+1];
+    const leafs=[];gvBoxLeafs(G,mn,mx,leafs);
+    const cl=[];let a1=-1,a2=-1;
+    for(const l of leafs){const c=G.lf[l*14],a=G.lf[l*14+1];
+      if(a>=0){if(a1>=0&&a1!==a)a2=a;else a1=a;}
+      if(c>=0&&!cl.includes(c))cl.push(c);}
+    G.ent.set(X.ei,{cl:cl,a1:a1,a2:a2,mn:[mn[0]+1,mn[1]+1,mn[2]+1],mx:[mx[0]-1,mx[1]-1,mx[2]-1]});
+    if(door&&a1>=0&&a2>=0&&(parseInt(MAP.ents[X.ei].kvl.spawnflags||'0',10)&1))G.portals.push([a1,a2]);
+  }
+  G.key='';G.leafVis=new Uint8Array(G.nl);G.nodeVis=new Uint8Array(Math.max(1,G.nn));G.conn=null;G.camArea=-1;G.camCluster=-1;
+  G.sig='';G.nIdx=0;G.nGrid=0;G.nX=0;G.stats='';
+  GV=G;
+}
+// The leafs a box touches (CM_BoxLeafnums), with BoxOnPlaneSide's quick test for the
+// axial planes.
+function gvBoxLeafs(G,mn,mx,out){
+  if(!G.nn){out.push(0);return;}
+  const st=[0];
+  while(st.length){
+    let n=st.pop();
+    while(n>=0){
+      const o=n*4,nx=G.np[o],ny=G.np[o+1],nz=G.np[o+2],d=G.np[o+3];let s;
+      if(nx===1)s=d<=mn[0]?1:(d>=mx[0]?2:3);
+      else if(ny===1)s=d<=mn[1]?1:(d>=mx[1]?2:3);
+      else if(nz===1)s=d<=mn[2]?1:(d>=mx[2]?2:3);
+      else{const d1=(nx>0?mx[0]:mn[0])*nx+(ny>0?mx[1]:mn[1])*ny+(nz>0?mx[2]:mn[2])*nz,
+                 d2=(nx>0?mn[0]:mx[0])*nx+(ny>0?mn[1]:mx[1])*ny+(nz>0?mn[2]:mx[2])*nz;
+        s=0;if(d1>=d)s=1;if(d2<d)s|=2;}
+      if(s===1)n=G.nc[n*2];else if(s===2)n=G.nc[n*2+1];else{st.push(G.nc[n*2]);n=G.nc[n*2+1];}
+    }
+    out.push(-(n+1));
+  }
+}
+function gvPointLeaf(G,p){
+  if(!G.nn)return 0;
+  let n=0;
+  while(n>=0){const o=n*4;n=(p[0]*G.np[o]+p[1]*G.np[o+1]+p[2]*G.np[o+2]-G.np[o+3]>0)?G.nc[n*2]:G.nc[n*2+1];}
+  return -(n+1);
+}
+// The areas joined to the camera's (CM_FloodAreaConnections through the open portals),
+// or null when every area counts as joined.
+function gvAreas(G,area){
+  if(CVARS.cm_noAreas||area<0||G.na<2)return null;
+  const conn=new Uint8Array(G.na);conn[area]=1;
+  let grew=true;
+  while(grew){grew=false;for(const[a,b]of G.portals){if(conn[a]&&!conn[b]){conn[b]=1;grew=true;}else if(conn[b]&&!conn[a]){conn[a]=1;grew=true;}}}
+  return conn;
+}
+// R_MarkLeaves: the leafs kept for the camera's cluster and area, and every node above one.
+function gvMark(G,leaf){
+  const cl=G.lf[leaf*14],area=G.lf[leaf*14+1];
+  const key=cl+':'+area+':'+(CVARS.cm_noAreas?1:0);
+  if(key===G.key)return;
+  G.key=key;G.camArea=area;G.camCluster=cl;
+  const lv=G.leafVis;lv.fill(0);
+  G.conn=gvAreas(G,area);
+  if(cl<0){lv.fill(1);G.conn=null;}       // no PVS for a leaf outside the map: everything
+  else{
+    const row=(G.pvs&&cl<G.ncl)?cl*G.cb:-1;
+    for(let l=0;l<G.nl;l++){
+      const c=G.lf[l*14];if(c<0)continue;
+      if(row>=0&&!(G.pvs[row+(c>>3)]&(1<<(c&7))))continue;
+      const a=G.lf[l*14+1];if(G.conn&&(a<0||!G.conn[a]))continue;
+      lv[l]=1;}
+  }
+  // a node is walked if any leaf under it is kept
+  const nv=G.nodeVis;nv.fill(0);
+  if(G.nn){
+    const st=[[0,0]];
+    while(st.length){
+      const top=st[st.length-1],n=top[0];
+      if(top[1]<2){const c=G.nc[n*2+top[1]];top[1]++;if(c>=0)st.push([c,0]);continue;}
+      st.pop();
+      let v=0;for(let k=0;k<2;k++){const c=G.nc[n*2+k];if(c>=0?nv[c]:lv[-(c+1)])v=1;}
+      nv[n]=v;
+    }
+  }
+}
+// Does the server send this entity to the camera (sv_snapshot.c)? Its area joined to the
+// camera's (CM_AreasConnected: never from or to area -1), and a cluster its box touches
+// in the camera's PVS (CM_ClusterPVS gives the first row for a cluster it has no row for).
+function gvSent(G,ei){
+  const E=G.ent.get(ei);if(!E||!E.cl.length)return false;
+  if(!CVARS.cm_noAreas){
+    if(G.camArea<0)return false;
+    if(G.conn){if(!((E.a1>=0&&G.conn[E.a1])||(E.a2>=0&&G.conn[E.a2])))return false;}
+    else if(E.a1<0&&E.a2<0)return false;
+  }
+  if(!G.pvs)return true;
+  const row=(G.camCluster>=0&&G.camCluster<G.ncl)?G.camCluster*G.cb:0;
+  for(const c of E.cl)if(G.pvs[row+(c>>3)]&(1<<(c&7)))return true;
+  return false;
+}
+// past the farplane: the box's nearest corner along the view is further than the farplane
+function gvBeyond(f,fe,far,x0,y0,z0,x1,y1,z1){
+  return (f[0]>0?x0:x1)*f[0]+(f[1]>0?y0:y1)*f[1]+(f[2]>0?z0:z1)*f[2]-fe>far;
+}
+// Everything the game draws from the camera: the line ends to draw out of the fixed list
+// (G.idx), the patches' lines as they are now (G.grid), each model's visible instances and
+// the axis crosses. Sent to the graphics card only when something changed.
+function gvUpdate(){
+  const G=GV,e=cam.pos,f=camAxes().f,fe=f[0]*e[0]+f[1]*e[1]+f[2]*e[2],far=G.far;
+  const nodeFar=G.farNodes,boxFar=G.farBoxes;
+  gvMark(G,gvPointLeaf(G,e));
+  const fr=++G.frame,surfs=[],ters=[],stats=[];
+  const lf=G.lf,nb=G.nb;
+  const leaf=l=>{
+    const o=l*14;
+    for(let k=lf[o+8],ke=k+lf[o+9];k<ke;k++){const s=G.ls[k];if(s>=0&&s<G.ns&&G.stS[s]!==fr){G.stS[s]=fr;surfs.push(s);}}
+    for(let k=lf[o+10],ke=k+lf[o+11];k<ke;k++){const t=G.lt[k];if(t>=0&&t<G.stT.length&&G.stT[t]!==fr){G.stT[t]=fr;ters.push(t);}}
+    for(let k=lf[o+12],ke=k+lf[o+13];k<ke;k++){const m=G.lm[k];if(m>=0&&m<G.stM.length&&G.stM[m]!==fr){G.stM[m]=fr;stats.push(m);}}
+  };
+  if(!G.nn){if(G.leafVis[0])leaf(0);}
+  else{
+    const st=[0];
+    while(st.length){
+      let n=st.pop();
+      for(;;){
+        if(n>=0){
+          if(!G.nodeVis[n])break;
+          const b=n*6;if(nodeFar&&gvBeyond(f,fe,far,nb[b],nb[b+1],nb[b+2],nb[b+3],nb[b+4],nb[b+5]))break;
+          st.push(G.nc[n*2]);n=G.nc[n*2+1];continue;}
+        const l=-(n+1);
+        if(G.leafVis[l]){const o=l*14+2;
+          if(!(nodeFar&&gvBeyond(f,fe,far,lf[o],lf[o+1],lf[o+2],lf[o+3],lf[o+4],lf[o+5])))leaf(l);}
+        break;
+      }
+    }
+  }
+  // the surfaces: faces facing away dropped (R_CullSurface), soups and patches past the farplane
+  let n=0,ng=0,sig=0;const out=G.idx,gr=G.grid,si=G.si,sf=G.sf,P=G.v;
+  const cnt=[0,0,0,0];
+  const gline=(i,j)=>{gr.set([P[i*3],P[i*3+1],P[i*3+2],P[j*3],P[j*3+1],P[j*3+2],P[j*3],P[j*3+1],P[j*3+2],P[i*3],P[i*3+1],P[i*3+2]],ng);ng+=12;};
+  const add=s=>{
+    const o=s*8,k=si[o],q=s*10;
+    if(k===1){
+      const c=si[o+1];
+      if(c!==2){const d=e[0]*sf[q]+e[1]*sf[q+1]+e[2]*sf[q+2];if(c===0?d<sf[q+3]-8:d>sf[q+3]+8)return false;}
+    }else if(k===2||k===3){
+      if(boxFar&&gvBeyond(f,fe,far,sf[q+4],sf[q+5],sf[q+6],sf[q+7],sf[q+8],sf[q+9]))return false;
+    }else return false;
+    if(k===3){
+      // RB_SurfaceGrid: the rows and columns whose error the distance allows
+      const v0=si[o+3],w=si[o+4],h=si[o+5],eo=si[o+6];
+      let d=Math.abs((sf[q]-e[0])*f[0]+(sf[q+1]-e[1])*f[1]+(sf[q+2]-e[2])*f[2])-sf[q+3];if(d<1)d=1;
+      const lod=250/d,wt=[0],ht=[0];
+      for(let i=1;i<w-1;i++)if(G.ge[eo+i]<=lod)wt.push(i);wt.push(w-1);
+      for(let i=1;i<h-1;i++)if(G.ge[eo+w+i]<=lod)ht.push(i);ht.push(h-1);
+      // each quad as RB_SurfaceGrid splits it: its sides and the diagonal from its lower
+      // left to its upper right
+      for(let r=0;r<ht.length;r++)for(let c=0;c<wt.length;c++){
+        const p=v0+ht[r]*w+wt[c];
+        if(c+1<wt.length)gline(p,v0+ht[r]*w+wt[c+1]);
+        if(r+1<ht.length){gline(p,v0+ht[r+1]*w+wt[c]);if(c+1<wt.length)gline(v0+ht[r+1]*w+wt[c],v0+ht[r]*w+wt[c+1]);}}
+      sig=(Math.imul(sig,31)+s*7+wt.length*131+ht.length)|0;
+    }else{const a=si[o+3],c=si[o+4];for(let m=a;m<a+c;m++)out[n++]=m;sig=(Math.imul(sig,31)+s)|0;}
+    cnt[k]++;
+    return true;
+  };
+  let world=false;
+  for(const s of surfs)if(add(s))world=true;
+  // terrain patches from the kept leafs, but not 768 units past the farplane (R_MarkTerrainPatch)
+  let nter=0;
+  for(const t of ters){const R=G.terRange[t];if(!R)continue;const p=SC.prims[G.terPrim[t]];
+    if(far>0&&((p.mins[0]+p.maxs[0])/2-e[0])*f[0]+((p.mins[1]+p.maxs[1])/2-e[1])*f[1]+((p.mins[2]+p.maxs[2])/2-e[2])*f[2]>far+768)continue;
+    for(let m=R[0];m<R[0]+R[1];m++)out[n++]=m;
+    world=true;nter++;sig=(Math.imul(sig,31)+t*3+1)|0;}
+  // crosses: the world's (at the origin), then each brush entity and model drawn
+  const X=[];
+  const cross=(o,ax,len)=>{
+    const Q=(x,y,z)=>[o[0]+(ax[0][0]*x+ax[1][0]*y+ax[2][0]*z)*len,o[1]+(ax[0][1]*x+ax[1][1]*y+ax[2][1]*z)*len,o[2]+(ax[0][2]*x+ax[1][2]*y+ax[2][2]*z)*len];
+    for(const[a,b,c]of[[Q(0,0,-5),Q(0,0,5),[1,0,0]],[Q(0,-5,0),Q(0,5,0),[0,1,0]],[Q(-5,0,0),Q(5,5,0),[0,0,1]]])
+      X.push(a[0],a[1],a[2],b[0],b[1],b[2],c[0],c[1],c[2],1,b[0],b[1],b[2],a[0],a[1],a[2],c[0],c[1],c[2],1);};
+  const I3=[[1,0,0],[0,1,0],[0,0,1]];
+  if(world)cross([0,0,0],I3,1);
+  let nbm=0,nmod=0;
+  for(const[ei,ranges]of G.bm){
+    if(!gvSent(G,ei))continue;
+    const E=G.ent.get(ei);if(boxFar&&E&&gvBeyond(f,fe,far,E.mn[0],E.mn[1],E.mn[2],E.mx[0],E.mx[1],E.mx[2]))continue;
+    let any=false;
+    for(let r=0;r<ranges.length;r+=2)for(let s=ranges[r];s<ranges[r]+ranges[r+1]&&s<G.ns;s++)if(add(s))any=true;
+    if(any){const o=ENTS[ei].origin||[0,0,0];cross(o,I3,1);nbm++;sig=(Math.imul(sig,31)+ei*5+2)|0;}
+  }
+  // models: entities the server sends, static props their leafs list
+  const fs=D.bsp&&D.bsp.firstStatic!=null?D.bsp.firstStatic:MAP.ents.length;
+  const vis=new Set();
+  for(const m of stats){const ei=fs+m;if(ei<ENTS.length&&ENTS[ei].model>=0)vis.add(ei);}
+  for(const ei of G.ent.keys())if(ENTS[ei].model>=0&&gvSent(G,ei))vis.add(ei);
+  for(const R of MODELS){
+    const a=[];
+    for(const ei of R.inst){if(!vis.has(ei))continue;
+      const E=ENTS[ei],b=E.box,o=E.origin;
+      if(boxFar&&b&&gvBeyond(f,fe,far,o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2],o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]))continue;
+      const rows=instRows(E);for(const v of rows)a.push(v);nmod++;sig=(Math.imul(sig,31)+ei*11+3)|0;
+      // a static prop's cross takes its .tik scale and its own (R_RotateForStaticModel);
+      // an entity's axes are unit length
+      const kv=MAP.ents[ei].kvl,ax=anglesAxis(entAngles(kv));
+      cross(o,ax,ei>=fs?(parseFloat(kv.scale)||1)*(R.M.sc||1):1);
+    }
+    R.gvRows=a;
+  }
+  const pl=(v,w,ws)=>v+' '+(v===1?w:(ws||w+'s'));
+  G.stats=[pl(cnt[1],'face'),cnt[2]?pl(cnt[2],'triangle soup'):'',cnt[3]?pl(cnt[3],'patch','patches'):'',
+    nter?pl(nter,'terrain block'):'',nbm?pl(nbm,'brush entity','brush entities'):'',pl(nmod,'model')].filter(Boolean).join(' · ');
+  const key=sig+':'+n+':'+ng+':'+X.length;
+  G.nX=X.length/10;
+  if(key===G.sig&&!G.dirty)return;
+  G.sig=key;G.dirty=false;G.nIdx=n;G.nGrid=ng/6;
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,B.gvIdx);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,out.subarray(0,Math.max(2,n)),gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER,B.gvGrid);gl.bufferData(gl.ARRAY_BUFFER,gr.subarray(0,Math.max(12,ng)),gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER,B.gvX);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(X.length?X:new Array(10).fill(0)),gl.DYNAMIC_DRAW);
+  for(const R of MODELS){if(!R.gvVao)continue;
+    gl.bindBuffer(gl.ARRAY_BUFFER,R.gvInst);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(R.gvRows.length?R.gvRows:new Array(12).fill(0)),gl.DYNAMIC_DRAW);
+    R.gvN=R.gvRows.length/12;}
+}
+// Line programs. Every line end carries the line's other end (aOther), so a line running
+// behind the camera is cut where it crosses the near plane: some WebGL line rasterizers
+// drop a line with an end behind the camera instead of cutting it, and a wall's outline
+// often does. Both ends are first pulled a hair toward the camera (uPull) so r_showtris 1
+// isn't lost in the very faces it outlines. A model's lines go through each instance's
+// placement (aR0..aR2); the routes' through the distance test of the node they belong to.
+const GV_CLIP=`
+vec4 clipEnd(vec3 p,vec3 q){
+  p=uEye+(p-uEye)*(1.0-uPull);q=uEye+(q-uEye)*(1.0-uPull);
+  vec4 a=uVP*vec4(p,1.0),b=uVP*vec4(q,1.0);
+  float da=a.z+a.w,db=b.z+b.w;
+  if(da<0.0&&db>0.0)a=mix(a,b,min(1.0,da/(da-db)+1e-5));
+  return a;}`;
+const VS_GVL=`#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec3 aOther; layout(location=7) in vec4 aCol;
+uniform mat4 uVP; uniform vec3 uEye; uniform float uPull;
+out vec4 vC;`+GV_CLIP+`
+void main(){vC=aCol;gl_Position=clipEnd(aPos,aOther);}`;
+const VS_GVLM=`#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec3 aOther; layout(location=7) in vec4 aCol;
+layout(location=3) in vec4 aR0; layout(location=4) in vec4 aR1; layout(location=5) in vec4 aR2;
+uniform mat4 uVP; uniform vec3 uEye; uniform float uPull;
+out vec4 vC;`+GV_CLIP+`
+vec3 placed(vec3 v){vec4 h=vec4(v,1.0);return vec3(dot(aR0,h),dot(aR1,h),dot(aR2,h));}
+void main(){vC=aCol;gl_Position=clipEnd(placed(aPos),placed(aOther));}`;
+let PGVL=null,PGVLM=null;
+function gvLineVAO(buf,withCol){
+  const v=gl.createVertexArray();gl.bindVertexArray(v);const st=withCol?40:24;
+  attr(0,buf,3,st,0);attr(1,buf,3,st,12);if(withCol)attr(7,buf,4,st,24);else gl.disableVertexAttribArray(7);
+  return v;}
+function gvGL(){
+  if(B.gvIdx)return;
+  PGVL=compile(VS_GVL,FS_LINE);PGVLM=compile(VS_GVLM,FS_LINE);
+  // the fixed list: every surface line, then every terrain line, as (end, other end) pairs
+  const G=GV,P=G.v,L=G.l,T=G.terLines,S=SC.pos,nw=L.length,out=new Float32Array(Math.max(6,(nw+T.length)*6));
+  for(let m=0;m<nw;m++){const i=L[m],j=L[m^1];out.set([P[i*3],P[i*3+1],P[i*3+2],P[j*3],P[j*3+1],P[j*3+2]],m*6);}
+  for(let m=0;m<T.length;m++){const i=T[m],j=T[m^1];out.set([S[i*3],S[i*3+1],S[i*3+2],S[j*3],S[j*3+1],S[j*3+2]],(nw+m)*6);}
+  B.gvS=makeBuf(gl.ARRAY_BUFFER,out);
+  B.gvIdx=makeBuf(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(2),gl.DYNAMIC_DRAW);
+  B.vGvS=gvLineVAO(B.gvS,false);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,B.gvIdx);gl.bindVertexArray(null);
+  B.gvGrid=makeBuf(gl.ARRAY_BUFFER,new Float32Array(12),gl.DYNAMIC_DRAW);
+  B.vGvG=gvLineVAO(B.gvGrid,false);gl.bindVertexArray(null);
+  B.gvX=makeBuf(gl.ARRAY_BUFFER,new Float32Array(10),gl.DYNAMIC_DRAW);
+  B.vGvX=gvLineVAO(B.gvX,true);gl.bindVertexArray(null);
+  // each model's triangles as lines (the surfaces it is drawn with close up)
+  for(const R of MODELS){
+    if(!R.inst.length)continue;
+    const nv=R.pos.length/3,seen=new Set(),Lm=[],Q=R.pos;
+    for(const s of R.surfs){if(s.sprite||s.lod)continue;
+      for(let k=s.first;k+2<s.first+s.count;k+=3){const t=[R.idx[k],R.idx[k+1],R.idx[k+2]];
+        for(let j=0;j<3;j++){let a=t[j],b=t[(j+1)%3];if(a>b){const x=a;a=b;b=x;}const key=a*nv+b;
+          if(!seen.has(key)){seen.add(key);Lm.push(Q[a*3],Q[a*3+1],Q[a*3+2],Q[b*3],Q[b*3+1],Q[b*3+2],Q[b*3],Q[b*3+1],Q[b*3+2],Q[a*3],Q[a*3+1],Q[a*3+2]);}}}}
+    if(!Lm.length)continue;
+    R.gvLine=makeBuf(gl.ARRAY_BUFFER,new Float32Array(Lm));R.gvVerts=Lm.length/6;
+    R.gvInst=gl.createBuffer();R.gvN=0;
+    R.gvVao=gvLineVAO(R.gvLine,false);
+    gl.bindBuffer(gl.ARRAY_BUFFER,R.gvInst);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(12),gl.DYNAMIC_DRAW);
+    for(let k=0;k<3;k++){gl.enableVertexAttribArray(3+k);gl.vertexAttribPointer(3+k,4,gl.FLOAT,false,48,k*16);gl.vertexAttribDivisor(3+k,1);}
+    gl.bindVertexArray(null);
+  }
+  G.dirty=true;
+}
+function gvUniforms(p,vp,pull){gl.useProgram(p);gl.uniformMatrix4fv(p.u.uVP,false,vp);gl.uniform3fv(p.u.uEye,cam.pos);
+  gl.uniform1f(p.u.uPull,pull);gl.uniform1f(p.u.uAlpha,1);}
+function drawShowTris(vp){
+  const m=CVARS.r_showtris|0;
+  if(!m||!GV||!gl)return;
+  gvGL();gvUpdate();
+  gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);gl.depthMask(false);
+  // 1: hidden behind what is drawn (pulled a hair toward the camera); 2 and 3: on top of
+  // everything (the engine draws them with the depth range squeezed to the near end)
+  if(m===1){gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);}else gl.disable(gl.DEPTH_TEST);
+  const pull=m===1?0.0015:0;
+  gl.vertexAttrib4f(7,1,1,1,1);                 // white, as DrawTris
+  if(m<3){
+    gvUniforms(PGVL,vp,pull);
+    if(GV.nIdx){gl.bindVertexArray(B.vGvS);gl.drawElements(gl.LINES,GV.nIdx,gl.UNSIGNED_INT,0);}
+    if(GV.nGrid){gl.bindVertexArray(B.vGvG);gl.drawArrays(gl.LINES,0,GV.nGrid);}
+    gvUniforms(PGVLM,vp,pull);
+    for(const R of MODELS){if(!R.gvVao||!R.gvN)continue;gl.bindVertexArray(R.gvVao);
+      gl.drawArraysInstanced(gl.LINES,0,R.gvVerts,R.gvN);}
+  }
+  if(m>1&&GV.nX){gvUniforms(PGVL,vp,0);gl.bindVertexArray(B.vGvX);gl.drawArrays(gl.LINES,0,GV.nX);}
+  gl.bindVertexArray(null);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);
+}
+
+// ============================================================================
+//  ai_showroutes: the AI's path connections (navigate.cpp DrawAllConnections)
+// ============================================================================
+// From the map's .pth, the connections the game worked out between its path nodes (node i
+// is the map's i-th info_pathnode, dropped to the floor). Every node within
+// ai_showroutes_distance of the camera draws its connections 36 units up: a green line
+// for each one the AI can take (a fall no higher than ai_fallheight), drawn once for a
+// pair that connects both ways, and for a one-way connection a red arrowhead 16 units
+// along it, pointing the way it goes; a node with no connections gets a red X on the
+// floor, or a blue circle when it is marked not to be linked. Debug lines are hidden
+// behind walls like the rest of the map.
+let ROUTES=null;
+const VS_ROUTE=`#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec3 aOther; layout(location=7) in vec4 aCol; layout(location=8) in vec3 aNode;
+uniform mat4 uVP; uniform vec3 uEye; uniform float uPull; uniform float uDist;
+out vec4 vC;`+GV_CLIP+`
+void main(){vC=aCol;
+  if(distance(aNode,uEye)>uDist){gl_Position=vec4(2.0,2.0,2.0,1.0);return;}
+  gl_Position=clipEnd(aPos,aOther);}`;
+let PROUTE=null;
+function pathsOk(){return !!(D.paths&&!D.paths.err&&D.paths.n>=0&&D.paths.o!=null);}
+function buildRoutes(){
+  if(!pathsOk()||!gl)return;
+  const P=D.paths,n=P.n,O=D.f32(P.o),F=D.i32(P.f),C=D.f32(P.c),nc=C.length/9,fh=CVARS.ai_fallheight;
+  const first=new Int32Array(n+1);
+  for(let k=0;k<nc;k++){const i=C[k*9]|0;if(i>=0&&i<n)first[i+1]++;}
+  for(let i=0;i<n;i++)first[i+1]+=first[i];
+  const V=[];
+  const line=(a,b,c,i)=>{const o=[O[i*3],O[i*3+1],O[i*3+2]];
+    V.push(a[0],a[1],a[2],b[0],b[1],b[2],c[0],c[1],c[2],1,o[0],o[1],o[2], b[0],b[1],b[2],a[0],a[1],a[2],c[0],c[1],c[2],1,o[0],o[1],o[2]);};
+  const G=[0,1,0],RED=[1,0,0],BLUE=[0,0,1];
+  for(let i=0;i<n;i++){
+    const k0=first[i],k1=first[i+1];
+    for(let k=k0;k<k1;k++){
+      const q=k*9,to=C[q+1]|0,fall=C[q+2];
+      if(fall>fh||to<0||to>=n)continue;
+      let rev=false;
+      for(let j=first[to+1]-1;j>=first[to];j--)if(C[j*9+2]<fh&&(C[j*9+1]|0)===i){rev=true;break;}
+      if(!(i<to||!rev))continue;
+      const p1=[C[q+3],C[q+4],C[q+5]+36],p2=[C[q+6],C[q+7],C[q+8]+36];
+      line(p1,p2,G,i);
+      if(!rev){
+        let dx=C[q+6]-C[q+3],dy=C[q+7]-C[q+4];const l=Math.hypot(dx,dy);if(l>0){dx/=l;dy/=l;}else{dx=0;dy=0;}
+        const t=[p1[0]+dx*16,p1[1]+dy*16,p1[2]];
+        line(t,[t[0]-dx*8,t[1]-dy*8,t[2]-8],RED,i);
+        line(t,[t[0]-dx*8,t[1]-dy*8,t[2]+8],RED,i);
+      }
+    }
+    if(k0===k1){
+      const p=[O[i*3],O[i*3+1],O[i*3+2]+2];
+      if(F[i]&1){                                     // PATH_DONT_LINK: a blue circle
+        for(let s=0;s<24;s++){const a0=s*Math.PI/12,a1=(s+1)*Math.PI/12;
+          line([p[0]+Math.sin(a0)*12,p[1]+Math.cos(a0)*12,p[2]],[p[0]+Math.sin(a1)*12,p[1]+Math.cos(a1)*12,p[2]],BLUE,i);}
+      }else{
+        line([p[0]-12,p[1]-12,p[2]],[p[0]+12,p[1]+12,p[2]],RED,i);
+        line([p[0]+12,p[1]-12,p[2]],[p[0]-12,p[1]+12,p[2]],RED,i);
+      }
+    }
+  }
+  if(!PROUTE)PROUTE=compile(VS_ROUTE,FS_LINE);
+  if(!B.rtBuf){B.rtBuf=gl.createBuffer();B.vRt=gl.createVertexArray();gl.bindVertexArray(B.vRt);
+    gl.bindBuffer(gl.ARRAY_BUFFER,B.rtBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(13),gl.STATIC_DRAW);
+    attr(0,B.rtBuf,3,52,0);attr(1,B.rtBuf,3,52,12);attr(7,B.rtBuf,4,52,24);attr(8,B.rtBuf,3,52,40);gl.bindVertexArray(null);}
+  gl.bindBuffer(gl.ARRAY_BUFFER,B.rtBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(V.length?V:new Array(13).fill(0)),gl.STATIC_DRAW);
+  ROUTES={verts:V.length/13,fh:fh};
+}
+function drawRoutes(vp){
+  if(!CVARS.ai_showroutes||!pathsOk()||!gl)return;
+  if(!ROUTES||ROUTES.fh!==CVARS.ai_fallheight)buildRoutes();
+  if(!ROUTES||!ROUTES.verts)return;
+  gvUniforms(PROUTE,vp,0.0015);gl.uniform1f(PROUTE.u.uDist,CVARS.ai_showroutes_distance);
+  gl.disable(gl.BLEND);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(false);
+  gl.bindVertexArray(B.vRt);gl.drawArrays(gl.LINES,0,ROUTES.verts);
+  gl.bindVertexArray(null);gl.depthMask(true);
+}
+
+// ============================================================================
+//  Game cvars: the list under Display (or `, as the game's console key)
+// ============================================================================
+// A few of the game's debugging cvars, doing in the page what they do in game. CVARS
+// holds their values; a click on a row sets it (or back to its default), and the filter
+// box takes a cvar and a value the way the game's console does: "r_showtris 2", Enter.
+const CVAR_DEFAULTS={r_showtris:0,cm_noAreas:0,ai_showroutes:0,ai_showroutes_distance:1000,ai_fallheight:96};
+const CVARS=Object.assign({},CVAR_DEFAULTS);
+const CVAR_ROWS=[
+ {n:'r_showtris',v:1,need:'vis',d:'outline what the game draws',
+  t:'Outline every triangle the game draws from where the camera is, hidden behind walls: what is in the camera\'s PVS and in an area joined to its own, without the faces turned away from it'},
+ {n:'r_showtris',v:2,need:'vis',d:'through walls: the culling',
+  t:'The same outlines drawn through walls, with an axis cross at each model the game draws: shows what it culls from here. Step out of a room and the rest of the map comes in as soon as the camera reaches a cluster that can see it'},
+ {n:'r_showtris',v:3,need:'vis',d:'axis crosses only',
+  t:'Only the axis crosses: at the world origin, and at the origin of each brush entity and model the game draws from here (red up, green along y, blue a diagonal, as the engine draws it)'},
+ {n:'cm_noAreas',v:1,need:'vis',d:'every door open',
+  t:'Count every area portal as open, as if every door were open, for r_showtris. Off: the game\'s start, with every door shut but those that start open, so the areas behind a shut door aren\'t drawn even when they are in the PVS'},
+ {n:'ai_showroutes',v:1,need:'paths',d:'AI path connections',
+  t:'The connections the AI can walk between path nodes, from the map\'s .pth file: green both ways, a red arrowhead one way (pointing where it goes), a red X on a node with no connections, a blue circle on a node marked not to link. Only the nodes within ai_showroutes_distance of the camera'},
+ {n:'ai_showroutes_distance',num:[0,65536],need:'paths',d:'units',
+  t:'ai_showroutes draws the nodes within this many units of the camera (the game\'s default is 1000)'},
+ {n:'ai_fallheight',num:[0,1024],need:'paths',d:'units',
+  t:'ai_showroutes leaves out the connections with a drop higher than this, and a connection counts as both ways only when the way back drops less (the game\'s default is 96)'}];
+const CVAR_NAMES={};for(const k in CVAR_DEFAULTS)CVAR_NAMES[k.toLowerCase()]=k;
+// what a row needs from the page, and why it can't be used without it
+function cvarWhyNot(need){
+  if(need==='vis'){if(GV)return '';
+    return D.kind==='map'?'r_showtris needs the compiled .bsp: a .map has no PVS yet (open the .bsp)':'this .bsp has no BSP tree to walk';}
+  if(need==='paths'){if(pathsOk())return '';
+    if(D.paths&&D.paths.err)return 'the path file '+(D.paths.src||'')+' can\'t be read: '+D.paths.err;
+    if(!MAP.ents.some(e=>e.cls==='info_pathnode'))return 'this map has no AI path nodes (info_pathnode), so the game makes no path file for it';
+    return 'no path file for this map ('+String(D.path||'maps/?.bsp').replace(/\.(bsp|map)$/i,'.pth')+'): the game writes one when it first loads a map that has path nodes';}
+  return '';
+}
+// a value as the cvar takes it: a whole number, r_showtris 0 to 3, the switches 0 or 1
+function cvarClamp(n,v){
+  v=Number(v);if(!isFinite(v))return null;
+  const row=CVAR_ROWS.find(r=>r.n===n&&r.num);
+  if(row)return Math.max(row.num[0],Math.min(row.num[1],Math.round(v)));
+  if(n==='r_showtris')return Math.max(0,Math.min(3,Math.round(v)));
+  return v?1:0;
+}
+function setCvar(name,val){
+  const n=CVAR_NAMES[String(name).toLowerCase()];if(!n)return false;
+  const v=cvarClamp(n,val);if(v==null)return false;
+  CVARS[n]=v;
+  if(n==='cm_noAreas'&&GV)GV.key='';
+  if(n==='ai_fallheight')ROUTES=null;
+  saveOpts();cvarCountRender();cvarMenuRender();requestDraw();
+  return true;
+}
+function cvarsSet(){return Object.keys(CVAR_DEFAULTS).filter(k=>CVARS[k]!==CVAR_DEFAULTS[k]);}
+function cvarCountRender(){
+  const el=$('cvarCount');if(!el)return;
+  const on=cvarsSet();
+  el.textContent=on.length?on.map(k=>k+' '+CVARS[k]).join(' · '):'none set';
+  el.classList.toggle('on',on.length>0);
+  el.title=on.length?on.map(k=>k+' '+CVARS[k]).join('\n'):'Every cvar in the list is at the game\'s default';
+}
+// ---- the list ------------------------------------------------------------------
+let cvEl=null,cvBack=null,cvMsg='';
+const CV_W=340,CV_GAP=6;
+function cvarMenuClose(){
+  if(cvEl){cvEl.remove();cvEl=null;}
+  if(cvBack){cvBack.remove();cvBack=null;}
+  cvMsg='';
+  document.removeEventListener('keydown',cvarMenuKey,true);}
+// Capture-phase while open: every key stays in the list (typing "1" in the filter mustn't
+// switch Textures off). Esc or ` closes it; Enter runs what the filter box holds.
+function cvarMenuKey(ev){
+  const t=ev.target;
+  if(ev.key==='Escape'||(ev.code==='Backquote'&&!ev.ctrlKey&&!ev.altKey&&!ev.metaKey)){
+    cvarMenuClose();ev.preventDefault();ev.stopPropagation();return;}
+  if(ev.key==='Enter'){
+    if(t&&t.dataset&&t.dataset.cvar){setCvar(t.dataset.cvar,t.value);ev.preventDefault();}
+    else if(t&&t.id==='cvSearch'){cvarConsole(t.value);ev.preventDefault();}
+  }
+  ev.stopPropagation();}
+// The filter box as the game's console: "name value" sets it, "name" alone tells its value.
+function cvarConsole(text){
+  const w=String(text||'').trim().split(/\s+/).filter(Boolean);
+  if(!w.length)return;
+  const n=CVAR_NAMES[w[0].toLowerCase()];
+  if(!n){
+    const rows=cvarRowsFor(w[0]);
+    if(rows.length===1&&w.length===1){cvarRowClick(rows[0]);return;}
+    cvMsg='Unknown cvar "'+w[0]+'" (this list has '+Object.keys(CVAR_DEFAULTS).join(', ')+')';cvarMenuRender();return;}
+  if(w.length===1){cvMsg='"'+n+'" is:"'+CVARS[n]+'" default:"'+CVAR_DEFAULTS[n]+'"';cvarMenuRender();return;}
+  if(!setCvar(n,w[1])){cvMsg='"'+w[1]+'" isn\'t a number';cvarMenuRender();return;}
+  // the reason a cvar can't work here is already the line under the message
+  const why=cvarWhyNot((CVAR_ROWS.find(r=>r.n===n)||{}).need);
+  cvMsg=n+' '+CVARS[n]+(why&&CVARS[n]!==CVAR_DEFAULTS[n]?' (no effect on this page: see below)':'');
+  const s=$('cvSearch');if(s)s.value='';
+  cvarMenuRender();
+}
+function cvarRowsFor(f){
+  f=String(f||'').toLowerCase();
+  return CVAR_ROWS.filter(r=>!f||(r.n+(r.num?'':' '+r.v)).toLowerCase().indexOf(f)>=0||r.d.toLowerCase().indexOf(f)>=0);
+}
+function cvarRowClick(r){
+  const why=cvarWhyNot(r.need);
+  if(r.num){const i=cvEl&&cvEl.querySelector('input[data-cvar="'+r.n+'"]');if(i){i.focus();i.select();}return;}
+  setCvar(r.n,CVARS[r.n]===r.v?CVAR_DEFAULTS[r.n]:r.v);
+  if(why&&CVARS[r.n]===r.v){cvMsg=r.n+' '+r.v+' (no effect on this page: see below)';cvarMenuRender();}
+}
+function cvarMenuPlace(){
+  if(!cvEl)return;
+  const b=$('cvarBtn'),r=b.getBoundingClientRect(),vw=window.innerWidth,vh=window.innerHeight;
+  let left=r.left-CV_GAP-CV_W;
+  if(left<4)left=Math.min(r.right+CV_GAP,Math.max(4,vw-4-CV_W));
+  if(left+CV_W>vw-4)left=Math.max(4,vw-4-CV_W);
+  cvEl.style.left=left+'px';
+  const avail=vh-8;cvEl.style.maxHeight=avail+'px';cvEl.style.top='4px';
+  const h=Math.min(cvEl.getBoundingClientRect().height,avail);
+  cvEl.style.top=Math.max(4,Math.min(r.top,vh-4-h))+'px';
+}
+function cvarMenuOpen(){
+  cvarMenuClose();
+  // a click anywhere else closes the list, including on its button (how it toggles)
+  cvBack=document.createElement('div');
+  cvBack.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;z-index:70';
+  cvBack.onclick=ev=>{if(!cvEl||!cvEl.contains(ev.target))cvarMenuClose();};
+  document.body.appendChild(cvBack);
+  cvEl=document.createElement('div');cvEl.className='amPanel';cvEl.id='cvPanel';
+  cvEl.innerHTML='<div class="amHead"><span class="amPathTxt">game cvars</span><span class="amCnt" id="cvHeadCnt"></span></div>'+
+    '<input class="amSearch" id="cvSearch" type="text" spellcheck="false" autocomplete="off" placeholder="filter, or a cvar and value then Enter…">'+
+    '<div class="amBody" id="cvBody"></div><div class="amNote" id="cvWhere"></div>';
+  const se=cvEl.querySelector('#cvSearch');
+  se.oninput=()=>{cvMsg='';cvarMenuRender();};
+  // keep the focus in the filter box while rows are clicked (a row's mousedown would take
+  // it); the value boxes take it as usual
+  cvEl.addEventListener('mousedown',ev=>{if(ev.target.tagName==='INPUT')return;ev.preventDefault();});
+  cvBack.appendChild(cvEl);
+  document.addEventListener('keydown',cvarMenuKey,true);
+  cvarMenuRender();cvarMenuPlace();se.focus();
+}
+function cvarMenuRender(){
+  if(!cvEl)return;
+  const bd=cvEl.querySelector('#cvBody'),sv=bd.scrollTop;bd.innerHTML='';
+  const se=cvEl.querySelector('#cvSearch'),f=(se.value.trim().split(/\s+/)[0]||'');
+  const rows=cvarRowsFor(CVAR_NAMES[f.toLowerCase()]||f);
+  for(const r of rows){
+    const why=cvarWhyNot(r.need),on=!r.num&&CVARS[r.n]===r.v;
+    const d=document.createElement('div');d.className='amItem'+(on?' on':'')+(why?' na':'');
+    d.innerHTML='<span class="arw">'+(r.num?'#':(on?'✓':''))+'</span><span class="lbl">'+esc(r.n+(r.num?'':' '+r.v))+'</span>'+
+      (r.num?'<input type="number" min="'+r.num[0]+'" max="'+r.num[1]+'" step="1" data-cvar="'+r.n+'" value="'+CVARS[r.n]+'"><span class="cnt">'+esc(r.d)+'</span>'
+            :'<span class="cnt">'+esc(r.d)+'</span>');
+    d.title=r.t+(why?'\n\n'+why:'')+(r.num?'':'\n\nClick to '+(on?'set it back to '+CVAR_DEFAULTS[r.n]:'set it')+'.');
+    d.onclick=ev=>{if(ev.target.tagName==='INPUT')return;ev.stopPropagation();cvarRowClick(r);};
+    if(r.num){const i=d.querySelector('input');i.onchange=()=>setCvar(r.n,i.value);}
+    bd.appendChild(d);
+  }
+  if(!rows.length){const d=document.createElement('div');d.className='amNote';
+    d.textContent=CVAR_NAMES[f.toLowerCase()]?'':'No cvar in this list matches that. Enter tries it as a command.';if(d.textContent)bd.appendChild(d);}
+  const on=cvarsSet();
+  cvEl.querySelector('#cvHeadCnt').textContent=on.length?on.length+' set':'all at default';
+  cvarWhereRender();
+  bd.scrollTop=sv;
+}
+// the list's foot: the last message, and where the camera is in the game's tree
+function cvarWhereRender(){
+  if(!cvEl)return;
+  const el=cvEl.querySelector('#cvWhere');let h='';
+  if(cvMsg)h+='<div class="msg">'+esc(cvMsg)+'</div>';
+  if(GV){
+    const l=gvPointLeaf(GV,cam.pos),c=GV.lf[l*14],a=GV.lf[l*14+1];
+    h+='<div>camera: '+(c<0?'outside the map (in a leaf with no cluster: the game draws every leaf)':'cluster '+c+' of '+Math.max(GV.ncl,1)+', area '+a+(GV.na>1?' of '+GV.na:''))+'</div>';
+    // every direction: the game also drops what is outside the view, which isn't seen anyway
+    if(CVARS.r_showtris&&GV.stats)h+='<div>drawn from here, all directions: '+GV.stats+'</div>';
+    if(!GV.pvs)h+='<div>this .bsp has no vis data: every cluster sees every other</div>';
+  }else h+='<div>'+esc(cvarWhyNot('vis'))+'</div>';
+  if(pathsOk()){
+    const np=MAP.ents.reduce((s,e)=>s+(e.cls==='info_pathnode'?1:0),0);
+    h+='<div>AI paths: '+esc(D.paths.src||'')+', '+D.paths.n+' nodes'+(np!==D.paths.n?' <span class="warn">but the map has '+np+' info_pathnode: the file is from another version of the map (the game rebuilds it)</span>':'')+'</div>';
+  }else h+='<div>'+esc(cvarWhyNot('paths'))+'</div>';
+  if(el._h!==h){el._h=h;el.innerHTML=h;cvarMenuPlace();}
+}
+function toggleCvarMenu(){if(cvEl)cvarMenuClose();else cvarMenuOpen();}
 
 // ============================================================================
 //  Picking: draw ids into a one-pixel target through a projection zoomed onto the pixel
@@ -2732,6 +3384,7 @@ window.addEventListener('keydown',e=>{
     if(camMode==='rad'&&e.ctrlKey){if(['arrowup','arrowdown',',','.'].includes(kl)){gridStep(kl);e.preventDefault();}return;}
     keys.add(kl);e.preventDefault();return;}
   if(e.ctrlKey||e.metaKey||e.altKey)return;
+  if(e.code==='Backquote'){toggleCvarMenu();e.preventDefault();return;}   // as the game's console key
   switch(kl){
     case 'h':case '?':if(e.shiftKey&&kl==='h'){const had=hidEnt.size+hidPrim.size;unhideAll();
       flash(had?'Everything is shown again (Ctrl+Z hides it again)':'Nothing is hidden');}else toggleHelp();break;
@@ -2836,6 +3489,7 @@ function buildPanel(){
   $('bSimpleSky').onclick=toggleSimpleSky;
   $('bSimpleMod').onclick=toggleSimpleModels;
   $('bShowAll').onclick=showAllGroups;$('bGameView').onclick=gameLook;$('bEditView').onclick=editorLook;
+  $('cvarBtn').onclick=ev=>{ev.stopPropagation();toggleCvarMenu();};
   syncButtons();
   $('bFree').onclick=()=>setCamMode('free');$('bRad').onclick=()=>setCamMode('rad');
   const sp=$('speed');sp.value=moveSpeed;$('speedV').textContent=moveSpeed;sp.oninput=()=>{moveSpeed=+sp.value;$('speedV').textContent=moveSpeed;saveOpts();};
@@ -2897,7 +3551,8 @@ function filtersChanged(){syncButtons();saveOpts();rebuildWorld();updateSelPanel
 function setCamMode(m){camMode=m;keys.clear();radFly=null;syncButtons();saveOpts();requestDraw();}
 function setClipDist(v){clipDist=Math.max(128,Math.min(32768,v));$('clipD').value=clipDist;$('clipV').textContent=clipDist;saveOpts();requestDraw();}
 function toggleClip(){clipOn=!clipOn;$('bClip').classList.toggle('on',clipOn);saveOpts();requestDraw();}
-function saveOpts(){LS.set('mohaaMapViewerOpts',JSON.stringify({ov:2,view:view,hidden:hiddenMask,mode:camMode,speed:moveSpeed,fov:fovX,clip:clipOn,clipD:clipDist,fb:fullBright,ss:simpleSky,sm:simpleModels}));}
+function saveOpts(){const cv={};for(const k of cvarsSet())cv[k]=CVARS[k];
+  LS.set('mohaaMapViewerOpts',JSON.stringify({ov:2,view:view,hidden:hiddenMask,mode:camMode,speed:moveSpeed,fov:fovX,clip:clipOn,clipD:clipDist,fb:fullBright,ss:simpleSky,sm:simpleModels,cv:cv}));}
 function loadOpts(){try{const o=JSON.parse(LS.get('mohaaMapViewerOpts')||'null');if(!o)return;
   for(const k in view)if(k in (o.view||{}))view[k]=!!o.view[k];
   fullBright=!!o.fb;simpleSky=!!o.ss;simpleModels=!!o.sm;
@@ -2906,7 +3561,8 @@ function loadOpts(){try{const o=JSON.parse(LS.get('mohaaMapViewerOpts')||'null')
   if(!(o.ov>=2))hiddenMask|=C_RAIN;
   // static models have no Show button of their own any more (Models and Entities hide them)
   if((hiddenMask&C_ENTITIES)!==C_ENTITIES)hiddenMask&=~C_STATIC;
-  if(o.speed>0)moveSpeed=o.speed;if(o.fov>0)fovX=Math.max(60,Math.min(150,o.fov));clipOn=!!o.clip;if(o.clipD>0)clipDist=o.clipD;}catch(_e){}}
+  if(o.speed>0)moveSpeed=o.speed;if(o.fov>0)fovX=Math.max(60,Math.min(150,o.fov));clipOn=!!o.clip;if(o.clipD>0)clipDist=o.clipD;
+  for(const k in (o.cv||{}))if(k in CVAR_DEFAULTS){const v=cvarClamp(k,o.cv[k]);if(v!=null)CVARS[k]=v;}}catch(_e){}}
 
 function updateSelPanel(){
   const n=SEL.size;$('selBtns').style.display=n?'':'none';
@@ -3154,6 +3810,7 @@ function infoEntity(ei){
     if(froms.length)h+='<div>targeted by: '+froms.map(linkEnt).join(', ')+'</div>';
     h+='<div class="note"><a data-path="'+ei+'">Select the whole path</a> (Ctrl+Alt+click): everything it leads to and everything that leads to it.</div>';
   }
+  if(e.cls==='info_pathnode')h+=pathNodeInfo(ei);
   // textures of a brush entity
   if(X.hasGeo){const cnt=new Map();for(const pi of primsOfEnt(ei)){const p=SC.prims[pi];for(let f=p.f0;f<p.f1;f++){const t=SC.faceTex[f];cnt.set(t,(cnt.get(t)||0)+1);}}
     if(cnt.size){h+='<h4>Textures</h4>'+kvTable([...cnt.entries()].map(([t,c])=>[c+'x','<a data-tex="'+t+'">'+esc(TEX[t].n.replace(/^textures\//,''))+'</a>']));}}
@@ -3161,6 +3818,30 @@ function infoEntity(ei){
   if(def&&def.d)h+='<h4>About '+esc(def.n)+'</h4><div class="desc">'+esc(def.d)+'</div>'+(def.s?'<div class="note">from '+esc(def.s)+'</div>':'');
   h+='<h4>.map source<span class="sp"></span>'+copyBtn(srcText(e.ts,e.te),'Copy')+openBtn(e.ts)+'</h4><pre>'+esc(clipText(srcText(e.ts,e.te)))+'</pre>';
   card(entName(ei),h);
+}
+// A path node's paths in the map's .pth (what ai_showroutes draws): node i is the map's
+// i-th info_pathnode.
+let PN_ENTS=null;
+function pathNodeInfo(ei){
+  if(!pathsOk())return '';
+  if(!PN_ENTS){PN_ENTS=[];MAP.ents.forEach((e,i)=>{if(e.cls==='info_pathnode')PN_ENTS.push(i);});}
+  const P=D.paths,pn=PN_ENTS,i=pn.indexOf(ei);if(i<0)return '';
+  let h='<h4>AI paths (ai_showroutes)</h4>';
+  if(pn.length!==P.n)return h+'<div class="note warn">'+esc(P.src)+' has '+P.n+' nodes but the map has '+pn.length+' info_pathnode: it was made for another version of the map (the game rebuilds it).</div>';
+  const O=D.f32(P.o),F=D.i32(P.f),C=D.f32(P.c),fh=CVARS.ai_fallheight,nc=C.length/9;
+  const out=new Map(),inn=new Map();
+  for(let k=0;k<nc;k++){const a=C[k*9]|0,b=C[k*9+1]|0,f=C[k*9+2];if(a===i)out.set(b,f);if(b===i)inn.set(a,f);}
+  const two=[],to=[],from=[];
+  for(const[b,f]of out){if(inn.has(b)&&inn.get(b)<fh&&f<=fh)two.push([b,f]);else to.push([b,f]);}
+  for(const[a,f]of inn)if(!(out.has(a)&&f<fh&&out.get(a)<=fh))from.push([a,f]);
+  const lst=a=>a.slice(0,60).map(([n,f])=>linkEnt(pn[n])+(f?' <span class="co">drop '+f+(f>fh?', past ai_fallheight':'')+'</span>':'')).join(', ')+(a.length>60?', \u2026 '+(a.length-60)+' more':'');
+  h+='<div class="note">node '+i+' of '+P.n+' in '+esc(P.src)+', dropped to the floor at '+esc(fvec([O[i*3],O[i*3+1],O[i*3+2]]))+
+     ((F[i]&1)?' \u00b7 DONT_LINK: the game never connects it':'')+'</div>';
+  if(!out.size&&!inn.size)h+='<div>no paths'+((F[i]&1)?'':' (ai_showroutes draws a red X here)')+'</div>';
+  if(two.length)h+='<div>both ways ('+two.length+'): '+lst(two)+'</div>';
+  if(to.length)h+='<div>one way to ('+to.length+'): '+lst(to)+'</div>';
+  if(from.length)h+='<div>one way from ('+from.length+'): '+lst(from)+'</div>';
+  return h;
 }
 // What a marker's colour (and a path node's outline) means, since MOHRadiant shows no legend.
 function radiantNote(X,e){
@@ -3270,6 +3951,7 @@ function legendSwatch(r,thumbs){
     case 'arrow':return '<svg class="lsw ldark" viewBox="0 0 24 24"><path d="M3 12H19M19 12L14.5 7.5M19 12L14.5 16.5" stroke="#fff" stroke-width="2.6" fill="none"/></svg>';
     case 'link':return '<svg class="lsw ldark" viewBox="0 0 24 24"><path d="M4 19L20 5" stroke="'+rgb(r.fill)+'" stroke-width="1.5"/><path d="M15.5 6.8L20 5L18.2 9.5Z" fill="'+rgb(r.fill)+'"/></svg>';
     case 'label':return '<span class="lsw llab">Aa</span>';
+    case 'lines':return '<svg class="lsw ldark" viewBox="0 0 24 24">'+(r.lines||[]).map(l=>'<path d="M'+l[0]+' '+l[1]+'L'+l[2]+' '+l[3]+'" stroke="'+rgb(l[4])+'" stroke-width="1.4" fill="none"/>').join('')+'</svg>';
     case 'sel':return '<span class="lsw lsel"></span>';
     case 'hover':return '<span class="lsw lhov"></span>';
     case 'tex':{const u=thumbs[r.tex];const te=TEXI.get(r.tex);
@@ -3318,12 +4000,14 @@ async function main(){
     prepMaterials();
     prepSeeThrough();
     if(D.lit){setLoad('Lighting the game\'s polygons…',0.6);await tick();LIT=buildLit();}
+    gvInit();
     const wk=MAP.ents[0]?MAP.ents[0].kvl:{};
     FOG.far=parseFloat(wk.farplane)||0;FOG.col=parseVec(wk.farplane_color,3)||[0.5,0.5,0.5];
     setLoad('Uploading to the graphics card…',0.8);await tick();
     loadOpts();
     initGL();
     buildPanel();
+    cvarCountRender();
     loadTextures();
     resize();
     rebuildWorld();

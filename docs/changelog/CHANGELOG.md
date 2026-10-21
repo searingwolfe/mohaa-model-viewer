@@ -503,3 +503,83 @@ Changes to `python_installer_updater.bat` unless noted.
   - The All, In-game look and Editor look buttons have keys, shown on them: `Ctrl+A`,
     `G` and `Shift+G`. `Ctrl+A` in the Find box still selects its text.
   - The Editor look tooltip says it hides rain too (it has since rev 16).
+- Map Viewer page rev 18 (`MAP_VIEWER_REV` 18, `MAP_VIEWER_REV_REQUIRED` 18): the game's
+  debugging cvars.
+  - A **game cvars** list under Display, below backdrop (or `` ` ``, the game's console
+    key): `r_showtris 1 / 2 / 3`, `cm_noAreas 1` and `ai_showroutes 1`, with number boxes
+    for `ai_showroutes_distance` (1000) and `ai_fallheight` (96); each row's tooltip says
+    what it does. A click on a row sets it, a second click puts it back to the game's
+    default. The filter box doubles as the console: `r_showtris 2` then Enter sets a cvar,
+    and a name alone answers as the game does (`"ai_fallheight" is:"96" default:"96"`).
+    The list's foot shows the camera's cluster and area in the game's BSP tree, what is
+    drawn from there, and where the path file came from. The cvars that are set are named
+    beside the button and remembered with the other options. A row the page can't do is
+    greyed out with the reason: r_showtris needs a `.bsp` (a `.map` has no PVS yet), and
+    ai_showroutes needs the map's `.pth`.
+  - `r_showtris` outlines every triangle the game draws from where the camera is
+    (`DrawTris` in `tr_shade.c`; in game it also needs `developer 1`). At 1 the outlines
+    are hidden behind walls. At 2 they show through walls, with an axis cross at the
+    origin of the world and of each brush entity and model drawn (red up, green along y,
+    blue a diagonal: the engine's own slip). At 3 only the crosses are drawn. What gets
+    outlined follows the renderer:
+    - the camera's leaf and cluster (`R_PointInLeaf`), that cluster's row of the vis lump
+      and the areas joined to the camera's (`R_MarkLeaves`);
+    - the farplane (worldspawn `farplane` and `farplane_cull`);
+    - faces turned away from the camera dropped, with 8 units of slack (`R_CullSurface`);
+    - curved patches with only the rows and columns their distance allows
+      (`r_lodCurveError` 250, on the grid `R_SubdividePatchToGrid` makes with
+      `r_subdivisions` 3);
+    - terrain blocks and static props listed by the kept leafs;
+    - the brush entities and models the server sends (`sv_snapshot.c`): a cluster their
+      box touches in the PVS, and their area joined to the camera's.
+
+    Step out of a bunker and the rest of the map comes in at once, as in game.
+  - `cm_noAreas 1` counts every area portal as open. Without it, the level is as it
+    starts: every door shut except those that start open (`func_door`,
+    `func_rotatingdoor` and `script_door` with spawnflags 1). So the rooms behind a shut
+    door aren't drawn even when they are in the PVS.
+  - `ai_showroutes 1` draws the connections the AI can walk between path nodes, as
+    `DrawAllConnections` in `navigate.cpp` draws them, for the nodes within
+    `ai_showroutes_distance` of the camera:
+    - a green line 36 units up for a connection both ways;
+    - a red arrowhead 16 units along a one-way connection (the way back drops further
+      than `ai_fallheight`);
+    - a red X on a node with no connections;
+    - a blue circle on a DONT_LINK node.
+
+    The connections come from the map's `.pth` (`maps/<map>.pth` in the paks, else the
+    file beside the map), read as the game reads it (`navigate.cpp`, `archive.cpp`, and
+    the LZ77 packing of `lz77.cpp`); Allied Assault and Spearhead files both work. Node i
+    is the map's i-th `info_pathnode`. The list warns when the counts differ: the `.pth`
+    was made for another version of the map, and the game rebuilds it.
+  - A path node's info card has an **AI paths** section: the node's number in the `.pth`,
+    the point where the game dropped it to the floor, and the nodes it connects to (both
+    ways, one way to, one way from), each a link with its drop.
+  - The legend has rows for the ai_showroutes lines and the r_showtris outlines and
+    crosses. The shortcut lists (`H`, and `F1` in the launcher) have `` ` ``.
+  - The Free-look camera hints say `mouse wheel = move`, and the blank row under the
+    camera hints is gone.
+  - The cvars' lines are cut at the near plane in the vertex shader when one end is
+    behind the camera. The headless test renderer (SwiftShader) dropped such lines
+    entirely, so walls lost their outlines up close.
+  - The build adds what these need to the page:
+    - `vis_payload`: the BSP tree, the leafs, the vis lump and the lines of every surface
+      the game draws, using `Bsp.vis_tree()` and the patch tessellation
+      `subdivide_patch` in mohaa_bsp.py;
+    - `paths_payload`: the path file, using `read_path_file` in mohaa_bsp.py.
+
+    m5l1a's page grows by about 0.6 MB.
+- Map Viewer page rev 19 (`MAP_VIEWER_REV` 19, `MAP_VIEWER_REV_REQUIRED` 19):
+  - The decompiler gives a ladder's and a rotating door's origin brush the shape EA's own
+    map sources give it, and MOHRadiant shows: a thin column from the bottom of the entity
+    up through its origin and as far again above it. A `func_ladder`'s is 4 units across
+    and marks the line the player climbs (`FuncLadder` puts the player 16 units in front
+    of it); a `func_rotatingdoor`'s is 8 across and marks the hinge. They were 16-unit
+    cubes. Every ladder now gets its column, even one whose origin is the centre of its
+    brushes, where no origin brush was written before. The column is centred on the
+    origin, so the map compiles back to the same origin. In the 54 retail maps only these
+    origin brushes change (275 reshaped, 4 added). Of the 58 columns in EA's sources
+    (mohdm6, mohdm7, obj_team2, obj_team4), 56 come back exactly; the other two are a unit
+    taller, because their centre was on a half unit.
+  - The game cvars list says when a map has no AI path nodes at all, instead of saying its
+    path file is missing.

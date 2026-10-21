@@ -41,7 +41,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 17
+MAP_VIEWER_REV_REQUIRED = 19
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".cfg": "scr"}
@@ -1504,6 +1504,10 @@ class MapApp(ML.App):
         elif sw == "link":
             cv.create_rectangle(0, 0, S - 1, S - 1, fill="#2b333d", outline="")
             cv.create_line(4, 21, 21, 5, fill=fill, width=2, arrow="last", arrowshape=(7, 8, 3))
+        elif sw == "lines":                    # the game cvars' rows: coloured lines on 24 x 24
+            cv.create_rectangle(0, 0, S - 1, S - 1, fill="#2b333d", outline="")
+            for x0, y0, x1, y1, c in row.get("lines") or ():
+                cv.create_line(x0 + 1, y0 + 1, x1 + 1, y1 + 1, fill=hexc(c), width=1)
         elif sw == "label":
             cv.create_rectangle(0, 0, S - 1, S - 1, fill=ML.BG or "#0e1116", outline=ML.LINE or "#2b333d")
             cv.create_text(S // 2, S // 2, text="Aa", fill=ML.ACCENT or "#7ee787", font=ML.FONT_SMALL)

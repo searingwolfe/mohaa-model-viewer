@@ -28,7 +28,7 @@
 #           [--vfs=<path inside the paks>] [--outdir=<folder>] [--cache=<folder>]
 #           [--texsize=256] [--theme=light|dark] [--no-models] [--decompile-only] [--no-open]
 # ==============================================================================
-import base64, gzip, hashlib, io, json, os, re, struct, sys, tempfile, time
+import base64, gzip, hashlib, io, json, math, os, re, struct, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -48,7 +48,7 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 17
+MAP_VIEWER_REV = 19
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
 INDEX_VERSION = 7
@@ -484,6 +484,16 @@ def util_group(name, cont, surf):
 # the viewer's toggle for that group. {"sub": text} is a small heading inside a section.
 # Each section is one column in both legends. The path-node colours follow radiantLook /
 # NODE_OUTLINES in the page, which draw them.
+# Line swatches for the game cvars' rows: [x0, y0, x1, y1, colour] on a 24 x 24 dark square
+_LEG_ROUTE = [[3, 20, 21, 5, [0, 1, 0]]]
+_LEG_ONEWAY = [[10, 14, 9, 20, [1, 0, 0]], [10, 14, 4, 13, [1, 0, 0]]]
+_LEG_X = [[5, 5, 19, 19, [1, 0, 0]], [19, 5, 5, 19, [1, 0, 0]]]
+_LEG_CIRCLE = [[round(12 + 8 * math.sin(k * math.pi / 6), 2), round(12 + 8 * math.cos(k * math.pi / 6), 2),
+                round(12 + 8 * math.sin((k + 1) * math.pi / 6), 2), round(12 + 8 * math.cos((k + 1) * math.pi / 6), 2),
+                [0, 0, 1]] for k in range(12)]
+_LEG_TRIS = [[3, 20, 12, 4, [1, 1, 1]], [12, 4, 21, 20, [1, 1, 1]], [21, 20, 3, 20, [1, 1, 1]], [12, 4, 12, 20, [1, 1, 1]]]
+_LEG_CROSS = [[12, 3, 12, 21, [1, 0, 0]], [3, 12, 21, 12, [0, 1, 0]], [6, 18, 18, 6, [0, 0, 1]]]
+
 LEGEND = [
     {"title": "AI path nodes (info_pathnode)",
      "note": "Coloured the way MOHRadiant colours them. Select a node and press N to see which of these "
@@ -518,6 +528,17 @@ LEGEND = [
                   "The game's ai_editmode marks the same nodes."},
          {"sw": "node", "fill": [0, 0.5, 0], "name": "No border",
           "desc": "No node type: spawnflags 0, or only DONT_LINK (1) or LOW_WALL_ARC (256)."},
+         {"sub": "ai_showroutes (the game cvars list, `)"},
+         {"sw": "lines", "lines": _LEG_ROUTE, "name": "Path both ways",
+          "desc": "A path the AI can walk between two nodes, 36 units up, as the game worked it out (the "
+                  "map's .pth). Only the nodes within ai_showroutes_distance of the camera draw theirs."},
+         {"sw": "lines", "lines": _LEG_ROUTE + _LEG_ONEWAY, "name": "One way",
+          "desc": "The AI can only go one way: the way back drops further than ai_fallheight. The red "
+                  "arrowhead, 16 units along it, points the way it goes."},
+         {"sw": "lines", "lines": _LEG_X, "name": "No paths",
+          "desc": "A red X on the floor: a node the game found no path from."},
+         {"sw": "lines", "lines": _LEG_CIRCLE, "name": "Not linked",
+          "desc": "A blue circle: a node marked DONT_LINK (spawnflags 1), which the game never connects."},
      ]},
     {"title": "Entities",
      "rows": [
@@ -547,6 +568,13 @@ LEGEND = [
                   "through walls."},
          {"sw": "hover", "name": "Under the mouse",
           "desc": "Outlined in the accent colour: a brush's edges, or a model's or marker's box."},
+         {"sub": "r_showtris (the game cvars list, `)"},
+         {"sw": "lines", "lines": _LEG_TRIS, "name": "Triangle outlines",
+          "desc": "Every triangle the game draws from where the camera is: only what is in its PVS and "
+                  "in an area joined to its own. 1 hides them behind walls, 2 shows them through walls."},
+         {"sw": "lines", "lines": _LEG_CROSS, "name": "Axis cross",
+          "desc": "r_showtris 2 or 3: the origin of the world and of each brush entity and model drawn. "
+                  "Red up, green along y, blue a diagonal (the engine's own slip)."},
      ]},
     {"title": "Brushes and editor surfaces",
      "note": "Editor-only textures are drawn see-through with their editor picture, as MOHRadiant shows "
@@ -762,6 +790,8 @@ MAP_VIEWER_KEYS = {
                 ("7", "Links", "Links: a line from each entity to its targets"),
                 ("8", "Fog", "Fog: the map's distance fog"),
                 ("9", "X-ray", "X-ray: the selection's outline through walls")),
+            _kx("`", "the game cvars list: r_showtris, ai_showroutes ... (type a cvar and its value, then "
+                "Enter, as in the game's console)", ("`", "cvars", "open / close the game cvars list")),
         ]},
     ]}
 
@@ -1895,6 +1925,196 @@ def lit_payload(bsp, stats, texs, blobs, shaders, vfs, ents, model_of, models, s
 
 
 # ==============================================================================
+#  What the game draws from where the camera is (the page's r_showtris)
+# ==============================================================================
+# The renderer only draws the leafs in the camera's PVS (its cluster's bit row in the
+# vis lump) and in an area the camera's area is connected to (doors split a map into
+# areas), then drops the planar faces that face away (R_CullSurface) and, with a
+# farplane, everything past it. The page walks the same tree each frame; this packs it:
+#   np / nc / nb   each node's plane (normal, dist), children and box
+#   lf             each leaf: cluster, area, mins, maxs, first and count of its
+#                  surfaces, terrain patches and static models (14 ints)
+#   ls / lt / lm   the surface, terrain patch and static model numbers the leafs list
+#   pvs, ncl, cb   the vis rows (null without vis), clusters, bytes per row
+#   si / sf        per .bsp surface, 8 ints: kind (0 not drawn, 1 planar, 2 triangle
+#                  soup, 3 patch), cull (0 front, 1 back, 2 none), entity, then for 1 / 2
+#                  its lines (first, count) and for 3 its grid (first point, width,
+#                  height, first lod error); and 10 floats: plane (1) or lod centre and
+#                  radius (3), then mins, maxs
+#   v / l / ge     points, line pairs into them, patch columns' and rows' lod errors
+#   bm             each brush entity's surfaces: [entity, first, count]
+#   to             each terrain patch's block number in the .map's world entity
+_CULL_TWO = ("none", "twosided", "disable")
+_CULL_BACK = ("back", "backside", "backsided")
+
+
+def _surface_cull(info):
+    """The shader's cullType (tr_shader.c ParseShader): 0 front-sided (the default),
+    1 back-sided, 2 two-sided; a fence is never two-sided."""
+    c = (info or {}).get("cull")
+    if c in _CULL_BACK:
+        return 1
+    if c in _CULL_TWO:
+        return 0 if shader_render_bits(info)[1] & 0x2000 else 2
+    return 0
+
+
+def vis_payload(bsp, stats, texs, blobs, say=log):
+    """The page's data for r_showtris, or None when the .bsp has no tree to walk."""
+    from array import array
+    tree = bsp.vis_tree()
+    if not tree["nodes"] and not tree["leafs"]:
+        return None
+    planes = bsp.planes
+    NP, NC, NB = array("f"), array("i"), array("i")
+    for pn, c0, c1, x0, y0, z0, x1, y1, z1 in tree["nodes"]:
+        p = planes[pn] if 0 <= pn < len(planes) else (0.0, 0.0, 1.0, 0.0)
+        NP.extend(p)
+        NC.extend((c0, c1))
+        NB.extend((x0, y0, z0, x1, y1, z1))
+    LF = array("i")
+    for t in tree["leafs"]:
+        LF.extend(t)
+    # every drawn surface, placed where its entity puts it
+    owner = {}
+    for mi, (ei, org) in stats["models"].items():
+        if 0 <= mi < len(bsp.models):
+            m = bsp.models[mi]
+            for si in range(m["firstSurface"], m["firstSurface"] + m["numSurfaces"]):
+                owner[si] = (ei, org)
+    V, L, GE = array("f"), array("I"), array("f")
+    SI, SF = array("i"), array("f")
+    verts = bsp._verts
+    counts = [0, 0, 0, 0]
+    kinds = {MB.MST_PLANAR: 1, MB.MST_TRIANGLE_SOUP: 2, MB.MST_PATCH: 3}
+    for si, s in enumerate(bsp.surfaces):
+        rec, flo = [0] * 8, [0.0] * 10
+        own = owner.get(si)
+        sh = bsp.shaders[s["shader"]] if 0 <= s["shader"] < len(bsp.shaders) else None
+        kind = kinds.get(s["type"], 0) if own and sh else 0
+        info = texs.info(sh["name"]) if kind else None
+        if kind and (sh["surface"] & (MB.SURF_NODRAW | MB.SURF_SKY)
+                     or (info and shader_render_bits(info)[0] & (TF_NODRAW | TF_SKY))):
+            kind = 0                  # never drawn, or drawn as the sky box (no triangles of its own)
+        fv, nv = s["firstVert"], s["numVerts"]
+        if kind and (fv < 0 or nv < 3 or (fv + nv) * 44 > len(verts)):
+            kind = 0
+        if kind:
+            ei, org = own
+            pts = [(x + org[0], y + org[1], z + org[2])
+                   for x, y, z in struct.iter_unpack("<3f8x8x12x4x", verts[fv * 44:(fv + nv) * 44])]
+            mn = [min(p[k] for p in pts) for k in range(3)]
+            mx = [max(p[k] for p in pts) for k in range(3)]
+            rec[0], rec[1], rec[2] = kind, _surface_cull(info), ei
+            if kind == 3:
+                w, h = s["patchWidth"], s["patchHeight"]
+                if w * h != nv or w < 3 or h < 3:
+                    kind = rec[0] = 0
+                else:
+                    gw, gh, grid, ew, eh = MB.subdivide_patch(w, h, pts, MB.patch_subdivide_value(s))
+                    rec[3:7] = [len(V) // 3, gw, gh, len(GE)]
+                    for p in grid:
+                        V.extend(p)
+                    GE.extend(ew)
+                    GE.extend(eh)
+                    # the lod group's centre and radius (ParseMesh: lightmapVecs 0 and 1)
+                    a, b = s["vecs"][0:3], s["vecs"][3:6]
+                    c = [(a[k] + b[k]) * 0.5 for k in range(3)]
+                    flo[0:4] = [c[0] + org[0], c[1] + org[1], c[2] + org[2],
+                                math.sqrt(sum((a[k] - c[k]) ** 2 for k in range(3)))]
+                    mn = [min(p[k] for p in grid) for k in range(3)]
+                    mx = [max(p[k] for p in grid) for k in range(3)]
+            else:
+                base = len(V) // 3
+                for p in pts:
+                    V.extend(p)
+                edges = set()
+                idx = bsp.indexes[s["firstIndex"]:s["firstIndex"] + s["numIndexes"]]
+                for t in range(0, len(idx) - 2, 3):
+                    a, b, c = idx[t], idx[t + 1], idx[t + 2]
+                    if 0 <= a < nv and 0 <= b < nv and 0 <= c < nv:
+                        for u, v in ((a, b), (b, c), (c, a)):
+                            edges.add((u, v) if u < v else (v, u))
+                rec[3] = len(L)
+                for u, v in sorted(edges):
+                    L.extend((base + u, base + v))
+                rec[4] = len(L) - rec[3]
+                if kind == 1:
+                    # the plane from the lightmap vectors' third row (ParseFace)
+                    n = s["vecs"][6:9]
+                    if abs(n[0]) + abs(n[1]) + abs(n[2]) < 0.5:
+                        n = MB._norm(MB._cross(MB._sub(pts[2], pts[0]), MB._sub(pts[1], pts[0]))) or (0.0, 0.0, 0.0)
+                        if n == (0.0, 0.0, 0.0):
+                            rec[1] = 2
+                    flo[0:4] = [n[0], n[1], n[2], pts[0][0] * n[0] + pts[0][1] * n[1] + pts[0][2] * n[2]]
+            if kind:
+                flo[4:10] = mn + mx
+                counts[kind] += 1
+        SI.extend(rec)
+        SF.extend(flo)
+    bm = [[ei, bsp.models[mi]["firstSurface"], bsp.models[mi]["numSurfaces"]]
+          for mi, (ei, org) in sorted(stats["models"].items()) if mi > 0 and mi < len(bsp.models)]
+    vis = tree["vis"]
+    out = {"np": blobs.add(NP.tobytes()), "nc": blobs.add(NC.tobytes()), "nb": blobs.add(NB.tobytes()),
+           "lf": blobs.add(LF.tobytes()), "ls": blobs.add(array("i", tree["leafsurfaces"]).tobytes()),
+           "lt": blobs.add(array("i", tree["terrain"]).tobytes()), "lm": blobs.add(array("i", tree["statics"]).tobytes()),
+           "pvs": blobs.add(vis[2]) if vis else None, "ncl": vis[0] if vis else 0, "cb": vis[1] if vis else 0,
+           "si": blobs.add(SI.tobytes()), "sf": blobs.add(SF.tobytes()),
+           "v": blobs.add(V.tobytes()), "l": blobs.add(L.tobytes()), "ge": blobs.add(GE.tobytes()),
+           "bm": bm, "to": list(stats["terrain_owner"]),
+           "nn": len(tree["nodes"]), "nl": len(tree["leafs"]), "ns": len(bsp.surfaces)}
+    areas = {t[1] for t in tree["leafs"] if t[1] >= 0}
+    say("visibility: %d leafs in %d clusters%s, %d area%s; %d faces, %d triangle soups and %d patches drawn in game"
+        % (len(tree["leafs"]), vis[0] if vis else 0, "" if vis else " (no vis data: every leaf sees every other)",
+           len(areas), "" if len(areas) == 1 else "s", counts[1], counts[2], counts[3]))
+    return out
+
+
+# AI path files: maps/<map>.pth in the paks (the game's own), else beside the map
+def paths_payload(vfs, vpath, src, blobs, say=log):
+    """The path nodes and connections the game built for this map (what ai_showroutes
+    draws), from maps/<map>.pth: {"src": where it was found, "n": nodes, "o": their
+    origins, "f": their flags, "c": per connection [from, to, fallheight, pos1, pos2]
+    (9 floats), "time"}, or {"src", "err"} when it can't be read, or None when the map
+    has no path file."""
+    from array import array
+    stem = os.path.splitext(vpath.replace("\\", "/"))[0]
+    if not stem.lower().startswith("maps/"):
+        stem = "maps/" + os.path.basename(stem)
+    data = where = None
+    if vfs is not None:
+        k = (stem + ".pth").lower()
+        if k in vfs.index:
+            data = vfs.read(k)
+            zi, real = vfs.index[k]
+            where = "%s (%s)" % (real, os.path.basename(vfs.zips[zi].filename))
+    if data is None:
+        side = os.path.splitext(src)[0] + ".pth"
+        if os.path.isfile(side):
+            with open(side, "rb") as f:
+                data = f.read()
+            where = side
+    if data is None:
+        return None
+    try:
+        pf = MB.read_path_file(data)
+    except ValueError as e:
+        say("! path file %s can't be read: %s" % (where, e))
+        return {"src": where, "err": str(e)}
+    O, F, C = array("f"), array("i"), array("f")
+    for i, nd in enumerate(pf["nodes"]):
+        O.extend(nd["origin"])
+        F.append(nd["flags"])
+        for to, fall, p1, p2 in nd["children"]:
+            C.extend((i, to, fall))
+            C.extend(p1)
+            C.extend(p2)
+    say("AI paths: %d nodes, %d connections (%s)" % (len(pf["nodes"]), len(C) // 9, where))
+    return {"src": where, "n": len(pf["nodes"]), "time": pf["maptime"],
+            "o": blobs.add(O.tobytes()), "f": blobs.add(F.tobytes()), "c": blobs.add(C.tobytes())}
+
+
+# ==============================================================================
 #  HTML
 # ==============================================================================
 def _html_esc(s):
@@ -2125,6 +2345,18 @@ def build(src, args):
             log("! in-game lighting left out: %s" % e)
         if lit:
             log("lighting packed in %.1f s" % (time.time() - t0))
+    # ---- what the game draws from the camera (r_showtris) and the AI paths -------------
+    vis = None
+    if bsp is not None:
+        try:
+            vis = vis_payload(bsp, stats, texs, blobs)
+        except Exception as e:           # a damaged tree only costs r_showtris
+            log("! r_showtris left out: %s" % e)
+    try:
+        paths = paths_payload(vfs, vpath, src, blobs)
+    except Exception as e:
+        log("! AI paths left out: %s" % e)
+        paths = None
     world = ents[0]["kvd"] if ents else {}
     title = vpath
     header = {"v": 1, "name": stem, "path": vpath, "kind": kind, "built": time.strftime("%Y-%m-%d %H:%M"),
@@ -2132,6 +2364,7 @@ def build(src, args):
               "tex": texs.entries, "models": mb.models if mb else [], "modelOf": model_of,
               "defs": defs, "editorFlags": {str(k): v for k, v in ME.EDITOR_FLAGS.items()},
               "bsp": bspinfo, "lit": lit, "sky": skies, "clouds": clouds, "legend": legend,
+              "vis": vis, "paths": paths,
               "ek": {"simple": sorted(ME.SIMPLE_CLASSES), "dropped": sorted(ME.DROPPED_CLASSES)}}
     t0 = time.time()
     b64, raw_len, gz_len = pack_payload(header, blobs)

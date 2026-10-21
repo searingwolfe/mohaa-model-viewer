@@ -42,7 +42,12 @@ beyond Python 3, Node.js and a headless browser.
      Clear built maps touches only its own files (`_is_built_file`);
    - see-through editor brushes drawn one-sided, and their inner sides from inside;
    - caulk's half-unit depth push, and the sky at the far end of the depth range;
-   - looking around with the camera tilted (`lookBy`).
+   - looking around with the camera tilted (`lookBy`);
+   - `r_showtris 2` inside a room with its door shut and a step outside it (the PVS and
+     the areas), with `cm_noAreas 1`; `ai_showroutes 1` on a map whose `.pth` is in the
+     paks (m5l1a), Spearhead's (t1l1) included, and a `.map` page (r_showtris greyed out).
+     Headless Chromium draws with SwiftShader, which drops a GL line with one end behind
+     the camera; the cvars' lines are cut at the near plane for it (`clipEnd`).
 
 ## Things that must change together
 
@@ -56,6 +61,7 @@ beyond Python 3, Node.js and a headless browser.
 | Viewer hotkeys | One table per viewer feeds both its page's `H` window and the launcher's `F1` window: `VIEWER_KEYS` (mohaa_view.py) and `MAP_VIEWER_KEYS` (mohaa_map_view.py); bump that viewer's page rev so cached pages pick it up. The launchers' own keys are `KEYS_LAUNCHER` (mohaa_launcher.py) and `MAP_KEYS_LAUNCHER` (mohaa_map_launcher.py). `kx_check(table)` (mohaa_view.py) lists any chord that names no key. A new key on a Display or Show button also goes in that button's label or tooltip |
 | The keyboard map's look or behaviour | Both versions: the page's (`KEYS_JS` / `KEYS_CSS`, mohaa_view.py, used by both viewer pages) and the launcher's (`KeyMapWindow`, mohaa_launcher.py), then both viewers' page revs |
 | The Map Viewer's legend | `LEGEND` (mohaa_map_view.py) only: the page and the launcher's Help > Legend both read it |
+| The Map Viewer's game cvars | `CVAR_DEFAULTS` and `CVAR_ROWS` in the page's script (mohaa_map_page.py); a cvar that draws something gets `LEGEND` rows (a `lines` swatch), and data it needs from the `.bsp` or the paks goes in the build's payload (`vis_payload`, `paths_payload`), so the page rev goes up |
 | Package requirements | `docs/requirements.txt`, both RUN .bat files and `python_installer_updater.bat` (`Pillow>=10.3.0`, `pywebview==4.4.1`) |
 
 ## Engine references
@@ -71,7 +77,10 @@ beyond Python 3, Node.js and a headless browser.
   `qcommon/cm_terrain.c`, `qcommon/cm_patch.c`, `renderergl1/tr_bsp.c`,
   `renderergl1/tr_light.c`, `renderergl1/tr_sky.c`, `renderergl1/tr_terrain.c`,
   `renderergl1/tr_staticmodels.cpp` and `fgame/navigate.cpp`, plus the map compiler's
-  `polylib.c` and `map.c` (q3map).
+  `polylib.c` and `map.c` (q3map). For the game cvars: `renderergl1/tr_world.c`,
+  `renderergl1/tr_shade.c` (`DrawTris`), `renderergl1/tr_curve.c`,
+  `renderergl1/tr_surface.c` (`RB_SurfaceGrid`), `qcommon/cm_test.c` (areas and PVS),
+  `server/sv_snapshot.c`, `fgame/archive.cpp` and `corepp/lz77.cpp` (the `.pth` file).
 - Single files can be read from
   `https://raw.githubusercontent.com/openmoh/openmohaa/main/code/<dir>/<file>`; a sparse
   clone is easier for searching.

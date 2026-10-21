@@ -18,7 +18,7 @@ run at once.
 | `bin/mohaa_map_launcher.py` | The launcher. `MapApp` subclasses `mohaa_launcher.App` and changes only what differs for maps: the `maps/` tree, opening and building, the map details panel, the map options in the menus, the privacy notice's wording (`_PRIVACY_SWAPS`), and its config / log / output names. What both programs share (the updater, the WebView2 folder, `PRIVACY_TEXT`, `VERSION`) stays in `mohaa_launcher.py`. |
 | `bin/mohaa_map_view.py` | Map builder. Decompiles a `.bsp`, scans the `.map`, resolves textures through the shaders, builds the placed models, collects the entity definitions and writes `<stem>_bsp_view.html` / `<stem>_map_view.html`. |
 | `bin/mohaa_map_page.py` | The viewer page template (`HTML_TEMPLATE`): HTML, CSS and the WebGL2 viewer. |
-| `bin/mohaa_bsp.py` | `.bsp` reader and decompiler. It also runs on its own, `python mohaa_bsp.py <map.bsp> [out.map]`, but without the paks it can't read texture sizes and assumes 256 x 256, so textures of other sizes get the wrong scale; the launcher's decompile uses the real sizes. |
+| `bin/mohaa_bsp.py` | `.bsp` reader and decompiler; also reads the BSP tree and vis data, tessellates curved patches as the renderer does, and reads the game's `.pth` AI path files (for the game cvars). It also runs on its own, `python mohaa_bsp.py <map.bsp> [out.map]`, but without the paks it can't read texture sizes and assumes 256 x 256, so textures of other sizes get the wrong scale; the launcher's decompile uses the real sizes. |
 | `bin/mohaa_entdefs.py` | Entity definitions: editor colour, box, spawnflag names and description per class, read from the `/*QUAKED*/` headers in the paks, with a built-in table generated from OpenMoHAA's game code as the fallback. |
 
 ## How a map gets built
@@ -38,8 +38,10 @@ run at once.
    adds what the page can't read for itself: every texture (the picture the game draws,
    or the editor picture for caulk, clips, triggers, sky and other tool textures, scaled
    to Options -> Texture size, 256 by default), the placed models as meshes, the sky
-   boxes, the entity definitions of the classes used, and for a `.bsp` the exact bounds
-   of every brush entity and the game's lighting (below).
+   boxes, the entity definitions of the classes used, for a `.bsp` the exact bounds of
+   every brush entity, the game's lighting (below) and what `r_showtris` needs (the BSP
+   tree, leafs, vis lump and the lines of every surface the game draws), and the map's
+   `.pth` path file when there is one (Game cvars, below).
 5. **Show.** Same as the Model Viewer: the embedded pane with `#embed&theme=...`, or the
    default browser. The page sends `mohaa-close` when Esc closes the map.
 
@@ -48,7 +50,12 @@ run at once.
 - **Brushes** are rebuilt from their planes (a large square on each plane, cut down by
   the brush's other planes, as `polylib.c` does). Brushes of an entity with an origin
   are stored around (0,0,0) and are moved back; an origin brush is added back where the
-  entity's pivot isn't the centre of its brushes (a door's hinge).
+  entity's pivot isn't the centre of its brushes (a door's hinge). It takes the shape
+  EA's own sources give it (`ORIGIN_COLUMNS`): for a `func_ladder` (always) and a
+  `func_rotatingdoor`, a thin column from the bottom of the entity up through the origin
+  and as far again above it, 4 or 8 units across (the climbing line, the hinge); for
+  anything else, a 16-unit cube. Either way it is centred on the origin, so a recompile
+  gives the same origin.
 - **Texture alignment.** A compiled brush side keeps only its shader, so each visible
   face is matched to the draw surface the game renders on that plane, and the
   shift / rotation / scale are fitted to that surface's texture coordinates
@@ -243,6 +250,40 @@ run at once.
   launcher). Both windows read `MAP_VIEWER_KEYS` in mohaa_map_view.py. The page's window
   is the Model Viewer's (`KEYS_JS` / `KEYS_CSS` in mohaa_view.py), the launcher's is
   `KeyMapWindow` in mohaa_launcher.py.
+- **Game cvars** (Display > "game cvars", below backdrop, or `` ` ``): a few of the game's
+  debugging cvars, doing in the page what they do in game. A click on a row sets it (again:
+  back to the game's default); the filter box is also the console (`r_showtris 2` then
+  Enter; a name alone tells its value and default). The list's foot shows the camera's
+  cluster and area, what is drawn from there (counted in every direction: the game also
+  drops what is outside the view), and the path file's source; the cvars set are named
+  beside the button and remembered. `CVAR_DEFAULTS` / `CVAR_ROWS` in the page hold them.
+  - `r_showtris 1 / 2 / 3` (`.bsp` only) outlines what the renderer draws from the camera
+    (`DrawTris`, `tr_shade.c`): 1 behind walls, 2 through them with axis crosses, 3 the
+    crosses alone. The page walks the `.bsp`'s tree the way `tr_world.c` does: the
+    camera's cluster (`R_PointInLeaf`), its row of the vis lump and the areas joined to
+    its own (`R_MarkLeaves`), the farplane (`farplane`, `farplane_cull`), faces turned
+    away dropped with 8 units of slack (`R_CullSurface`), curved patches at the rows and
+    columns their distance allows (`RB_SurfaceGrid` with `r_lodCurveError` 250, on the
+    grid `R_SubdividePatchToGrid` makes from the patch's own subdivisions x
+    `r_subdivisions` / 10, else `r_subdivisions` 3; ported as `subdivide_patch` in
+    mohaa_bsp.py), terrain blocks
+    and static props from the kept leafs, and the brush entities and models the server
+    sends (`sv_snapshot.c`). A leaf with no cluster (outside the map) keeps everything; a
+    `.bsp` without vis data sees every cluster. The overlay ignores the Show buttons: it is
+    the game's view.
+  - `cm_noAreas 1` opens every area portal. Without it the level is as it starts: doors
+    shut, except `func_door`, `func_rotatingdoor` and `script_door` with spawnflags 1
+    (START_OPEN), whose portal is open (flooded as `CM_FloodAreaConnections` does).
+  - `ai_showroutes 1` (with `ai_showroutes_distance` and `ai_fallheight`) draws the
+    connections in the map's `.pth` as `DrawAllConnections` (`navigate.cpp`) draws them:
+    green both ways, a red arrowhead one way, a red X on a node with none, a blue circle on
+    a DONT_LINK node. The `.pth` is `maps/<map>.pth` in the paks (else beside the file),
+    unpacked (`CSVG` + LZ77, `lz77.cpp`) and read as `PathSearch::ArchiveLoadNodes` reads
+    it, typed (the game's own files) or untyped (OpenMoHAA's); node i is the map's i-th
+    `info_pathnode`, and a count mismatch is flagged. A path node's info card lists its
+    connections.
+  - The cvars' lines are cut at the near plane in the vertex shader (`clipEnd`), since
+    SwiftShader drops a line with one end behind the camera.
 - **Remembered** per browser: theme, backdrop, display / filter choices, camera
   settings, and the camera position for each map (keyed by the map's path inside the
   paks, or its file name). The embedded pane runs WebView2 in private mode, so there
@@ -309,7 +350,8 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
   outside the page, and, in the launcher's pane, on any click on the launcher: a key or
   button let go outside the page never reaches it, and the camera used to keep moving.
 - `V` switches cameras, `R` returns to the player start, `B` toggles Full Brightness,
-  `K` Simple Sky, `M` Simple models, `L` opens the legend and `T` switches the theme. The
+  `K` Simple Sky, `M` Simple models, `L` opens the legend, `` ` `` the game cvars list and
+  `T` switches the theme. The
   FOV slider runs from 60 to 150. Press `H` in the viewer for all of them (Keyboard
   shortcuts, above).
 
@@ -335,8 +377,16 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
 - Clouds: `tcMod turb` and the entity-driven tcMods, `animMap` frames after the first,
   and a second texture bundle aren't drawn; the noise waveform is a smooth stand-in for
   the engine's.
-- `.pth`, `.min`, `.dcl` and `.vis` files are listed in the tree but not opened yet;
-  `.scr` scripts open in the text editor.
+- `.min`, `.dcl` and `.vis` files are listed in the tree but not opened yet; `.scr`
+  scripts open in the text editor. A map's `.pth` is read by its page (ai_showroutes),
+  not opened from the tree on its own.
 - Triangle soups in a `.bsp` (rare in MOHAA maps) are counted but not decompiled.
-- **Planned:** reading a map's other files: its `.pth` path data, its `.min` file, and
-  its `.scr` level scripts, to show the models and changes a script adds at run time.
+- `r_showtris` draws terrain at full detail (the game thins it out with distance,
+  `ter_error` / `ter_maxlod`) and models at full detail (no model LOD). Patches aren't
+  stitched where two meet (`R_StitchAllPatches`, `R_FixSharedVertexLodError`), so a seam
+  between patches of different detail can differ from the game's. The sky's cloud dome
+  isn't outlined. Doors are as the level starts (no scripts run), and entities stand where
+  the `.map` puts them. The overlay and its counts cover every direction around the camera.
+- **Planned:** reading a map's other files: its `.min` file, and its `.scr` level
+  scripts, to show the models and changes a script adds at run time. More of the game's
+  debugging cvars, once checked in game.

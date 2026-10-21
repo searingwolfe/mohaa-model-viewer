@@ -127,6 +127,9 @@ class Bsp:
                 "shader": t[0], "type": t[2], "firstVert": t[3], "numVerts": t[4],
                 "firstIndex": t[5], "numIndexes": t[6], "lightmapNum": t[7],
                 "patchWidth": t[24], "patchHeight": t[25], "subdivisions": t[26],
+                # lightmapVecs: a planar surface's plane normal is the third; a patch's
+                # first two are the corners of its level-of-detail group (tr_bsp.c)
+                "vecs": t[15:24],
             })
         self._verts = self._trim(LUMP_DRAWVERTS, 44)
         self.num_verts = len(self._verts) // 44
@@ -192,6 +195,40 @@ class Bsp:
     def lightmap_count(self):
         """How many 128 x 128 lightmap pages the file holds."""
         return len(self.lump(LUMP_LIGHTMAPS)) // (LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3)
+
+    def vis_tree(self):
+        """The renderer's BSP tree and visibility, as tr_bsp.c loads them
+        (R_LoadNodesAndLeafs, R_LoadMarksurfaces, R_LoadVisibility, R_LoadTerrainIndexes,
+        R_LoadStaticModelIndexes):
+          nodes        (plane number, front child, back child, mins, maxs); a negative
+                       child is leaf -(child + 1)
+          leafs        (cluster, area, mins, maxs, first and count of its surfaces, of its
+                       terrain patches and of its static models); version 17 leafs have
+                       no static models
+          leafsurfaces the surface numbers the leafs list
+          vis          (number of clusters, bytes per cluster, one bit row per cluster of
+                       the clusters it can see), or None for a map compiled without vis
+          terrain      the terrain patch numbers the leafs list
+          statics      the static model numbers the leafs list"""
+        nodes = list(struct.iter_unpack("<9i", self._trim(LUMP_NODES, 36)))
+        if self.version > 17:
+            leafs = [t[:10] + t[12:16] for t in struct.iter_unpack("<16i", self._trim(LUMP_LEAFS, 64))]
+        else:
+            leafs = [t[:10] + t[12:14] + (0, 0) for t in struct.iter_unpack("<14i", self._trim(LUMP_LEAFS, 56))]
+        vis = None
+        raw = self.lump(LUMP_VISIBILITY)
+        if len(raw) >= 8:
+            ncl, cb = struct.unpack_from("<2i", raw, 0)
+            if ncl > 0 and cb > 0 and 8 + ncl * cb <= len(raw):
+                vis = (ncl, cb, raw[8:8 + ncl * cb])
+        statics = []
+        if self.version > 17:
+            statics = [v[0] for v in struct.iter_unpack("<H", self._trim(LUMP_STATICMODELINDEXES, 2))]
+        return {"nodes": nodes, "leafs": leafs,
+                "leafsurfaces": [v[0] for v in struct.iter_unpack("<i", self._trim(LUMP_LEAFSURFACES, 4))],
+                "vis": vis,
+                "terrain": [v[0] for v in struct.iter_unpack("<h", self._trim(LUMP_TERRAININDEXES, 2))],
+                "statics": statics}
 
     @staticmethod
     def _terra_patch(rec):
@@ -782,16 +819,28 @@ def _assign_owners(pidx, origin, face_recs, ei, owners):
         owners[si] = (ei, best[5], best[4]) if best else (ei, -1, -1)
 
 
-def _origin_brush(o):
-    """A 16-unit common/origin cube around o, as written by MOHRadiant."""
+# EA's own map sources give a ladder's and a rotating door's origin brush the shape of the
+# axis it marks, and MOHRadiant shows them that way: a thin column from the bottom of the
+# entity up through the origin and as far again above it (the ladder's climbing line, which
+# FuncLadder puts the player 16 units in front of, and the door's hinge). In mohdm6, mohdm7,
+# obj_team2, obj_team4 and m4l0 every ladder and rotating door has one, 4 units across for
+# a ladder and mostly 8 for a door; this rule gives back 56 of the 58 in the first four
+# exactly, and the other two a unit taller (their centre was on a half unit). Any other
+# origin brush is a 16-unit cube.
+ORIGIN_COLUMNS = {"func_ladder": 4.0, "func_rotatingdoor": 8.0}
+
+
+def _origin_brush(o, half=(8.0, 8.0, 8.0)):
+    """A common/origin box around o that reaches half[k] each way along axis k: by
+    default a 16-unit cube, as MOHRadiant writes one."""
     x, y, z = o
-    h = 8
-    faces = [((x - h, y - h, z + h), (x - h, y + h, z + h), (x + h, y + h, z + h)),   # top
-             ((x + h, y + h, z - h), (x - h, y + h, z - h), (x - h, y - h, z - h)),   # bottom
-             ((x + h, y - h, z + h), (x + h, y + h, z + h), (x + h, y + h, z - h)),   # +x
-             ((x - h, y + h, z + h), (x - h, y - h, z + h), (x - h, y - h, z - h)),   # -x
-             ((x + h, y + h, z + h), (x - h, y + h, z + h), (x - h, y + h, z - h)),   # +y
-             ((x - h, y - h, z + h), (x + h, y - h, z + h), (x + h, y - h, z - h))]   # -y
+    hx, hy, hz = half
+    faces = [((x - hx, y - hy, z + hz), (x - hx, y + hy, z + hz), (x + hx, y + hy, z + hz)),   # top
+             ((x + hx, y + hy, z - hz), (x - hx, y + hy, z - hz), (x - hx, y - hy, z - hz)),   # bottom
+             ((x + hx, y - hy, z + hz), (x + hx, y + hy, z + hz), (x + hx, y + hy, z - hz)),   # +x
+             ((x - hx, y + hy, z + hz), (x - hx, y - hy, z + hz), (x - hx, y - hy, z - hz)),   # -x
+             ((x + hx, y + hy, z + hz), (x - hx, y + hy, z + hz), (x - hx, y + hy, z - hz)),   # +y
+             ((x - hx, y - hy, z + hz), (x + hx, y - hy, z + hz), (x + hx, y - hy, z - hz))]   # -y
     lines = ["{"]
     for p0, p1, p2 in faces:
         lines.append("( %s ) ( %s ) ( %s ) common/origin 0 0 0 0.5 0.5 %d 0 0"
@@ -915,11 +964,18 @@ def decompile(bsp, tex_size=None, static_classname=None, log=None):
                 bn += 1
         # The compiler gives every brush entity an origin: an origin brush's centre,
         # else the centre of its brushes. Only the first kind needs an origin brush
-        # in the source (a door's hinge, say); the second is recreated on compile.
+        # in the source (a door's hinge, say); the second is recreated on compile. A
+        # ladder always gets its column (ORIGIN_COLUMNS), which marks where the player
+        # climbs; the model's bounds are around the origin, so -mins[2] is how far the
+        # entity reaches below it.
         if origin != (0.0, 0.0, 0.0) and bn and cls != "worldspawn":
             mdl = bsp.models[[mi for mi in models if mi > 0][0]]
             off = [abs((mdl["mins"][k] + mdl["maxs"][k]) * 0.5) for k in range(3)]
-            if max(off) > 1.5:
+            width, low = ORIGIN_COLUMNS.get(cls), -mdl["mins"][2]
+            if width and low >= 1 and (max(off) > 1.5 or cls == "func_ladder"):
+                out.append("// brush %d" % bn)
+                out.extend(_origin_brush(origin, (width / 2, width / 2, low)))
+            elif max(off) > 1.5:
                 out.append("// brush %d" % bn)
                 out.extend(_origin_brush(origin))
         out.append("}")
@@ -1301,6 +1357,284 @@ class LightGrid:
         if m > 255.0:
             v = [c * 255.0 / m for c in v]
         return [int(min(255.0, c)) for c in v]
+
+
+# ------------------------------------------------------------------------------
+#  Curved patches as the game draws them (renderergl1/tr_curve.c)
+# ------------------------------------------------------------------------------
+MAX_GRID_SIZE = 65
+R_SUBDIVISIONS = 3.0             # the r_subdivisions cvar's default (tr_init.c)
+
+
+def _half(a, b):
+    return ((a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5)
+
+
+def patch_subdivide_value(surface):
+    """How far a patch's curves may stray from a straight row before ParseMesh's grid
+    gets more rows: the surface's own subdivisions scaled by r_subdivisions / 10, else
+    r_subdivisions itself."""
+    s = surface.get("subdivisions") or 0.0
+    return s * (R_SUBDIVISIONS / 10.0) if s else R_SUBDIVISIONS
+
+
+def subdivide_patch(width, height, pts, subdivide):
+    """R_SubdividePatchToGrid: the grid the game turns a patch's control points into
+    when the map loads. pts are the width x height control points row by row, as the
+    .bsp stores them. Returns (w, h, grid points row by row, the level-of-detail error
+    of each column, the error of each row): RB_SurfaceGrid leaves out the inner columns
+    and rows whose error is above r_lodCurveError / distance. (The stitching the
+    renderer adds afterwards where two patches meet isn't done here.)"""
+    ctrl = [[tuple(pts[j * width + i]) for i in range(width)] for j in range(height)]
+    err = [[0.0] * MAX_GRID_SIZE, [0.0] * MAX_GRID_SIZE]
+    for d in range(2):
+        j = 0
+        while j + 2 < width:
+            # how far the curve's midpoints stray from the straight line, at worst
+            max_len = 0.0
+            for i in range(height):
+                a, b, c = ctrl[i][j], ctrl[i][j + 1], ctrl[i][j + 2]
+                mid = [(a[k] + b[k] * 2 + c[k]) * 0.25 - a[k] for k in range(3)]
+                dv = [c[k] - a[k] for k in range(3)]
+                ln = math.sqrt(dv[0] * dv[0] + dv[1] * dv[1] + dv[2] * dv[2])
+                if ln:
+                    dv = [x / ln for x in dv]
+                dd = mid[0] * dv[0] + mid[1] * dv[1] + mid[2] * dv[2]
+                off = [mid[k] - dv[k] * dd for k in range(3)]
+                max_len = max(max_len, off[0] * off[0] + off[1] * off[1] + off[2] * off[2])
+            max_len = math.sqrt(max_len)
+            if max_len < 0.1:                # all on the line: the column can go
+                err[d][j + 1] = 999
+            elif width + 2 > MAX_GRID_SIZE or max_len <= subdivide:
+                err[d][j + 1] = 1.0 / max_len
+            else:
+                # two more columns, the peak replaced; then check the same span again
+                err[d][j + 2] = 1.0 / max_len
+                width += 2
+                for i in range(height):
+                    row = ctrl[i]
+                    prev, nxt = _half(row[j], row[j + 1]), _half(row[j + 1], row[j + 2])
+                    row[j + 1:j + 2] = [prev, _half(prev, nxt), nxt]
+                continue
+            j += 2
+        ctrl = [[ctrl[r][i] for r in range(height)] for i in range(width)]
+        width, height = height, width
+    # put the approximating points on the curve (PutPointsOnCurve)
+    for i in range(width):
+        for j in range(1, height, 2):
+            ctrl[j][i] = _half(_half(ctrl[j][i], ctrl[j + 1][i]), _half(ctrl[j][i], ctrl[j - 1][i]))
+    for j in range(height):
+        row = ctrl[j]
+        for i in range(1, width, 2):
+            row[i] = _half(_half(row[i], row[i + 1]), _half(row[i], row[i - 1]))
+    # drop the columns and rows that are straight lines; as in the engine, the one that
+    # moves into a dropped one's place isn't looked at again
+    i = 1
+    while i < width - 1:
+        if err[0][i] == 999:
+            for row in ctrl:
+                del row[i]
+            del err[0][i]
+            err[0].append(0.0)
+            width -= 1
+        i += 1
+    i = 1
+    while i < height - 1:
+        if err[1][i] == 999:
+            del ctrl[i]
+            del err[1][i]
+            err[1].append(0.0)
+            height -= 1
+        i += 1
+    # the longer side across (Transpose, InvertErrorTable, InvertCtrl)
+    if height > width:
+        ctrl = [[ctrl[r][i] for r in range(height)] for i in range(width)]
+        e0, e1 = err[0][:], err[1][:]
+        for i in range(width):
+            err[1][i] = e0[i]
+        for i in range(height):
+            err[0][i] = e1[height - 1 - i]
+        width, height = height, width
+        for row in ctrl:
+            row[:width] = row[:width][::-1]
+    return width, height, [p for row in ctrl for p in row[:width]], err[0][:width], err[1][:height]
+
+
+# ------------------------------------------------------------------------------
+#  AI path files (maps/<map>.pth, fgame/navigate.cpp): the path nodes and the
+#  connections the game worked out between them, which ai_showroutes draws
+# ------------------------------------------------------------------------------
+PATHFILE_VERSION = 103
+PATH_DONT_LINK = 1
+
+
+def _lz77_unpack(src, out_len):
+    """cLZ77::Decompress (corepp/lz77.cpp), the LZO1X-1 format the game's archives are
+    packed with."""
+    out = bytearray()
+    ip = 0
+
+    def count(base):
+        nonlocal ip
+        v = base
+        while src[ip] == 0:
+            v += 255
+            ip += 1
+        v += src[ip]
+        ip += 1
+        return v
+
+    def back(dist, cnt):
+        p = len(out) - dist
+        if p < 0:
+            raise ValueError("bad back reference")
+        if dist >= cnt:
+            out.extend(out[p:p + cnt])
+        else:                                 # overlapping: a repeating run
+            for k in range(cnt):
+                out.append(out[p + k])
+
+    t = src[ip]
+    ip += 1
+    if t > 17:                                # the stream opens with t - 17 literals
+        t -= 17
+        out += src[ip:ip + t]
+        ip += t
+        t = src[ip]
+        ip += 1
+    literal_state = True
+    while True:
+        if literal_state:
+            literal_state = False
+            if t <= 15:                       # a run of literals
+                if t == 0:
+                    t = count(15)
+                out += src[ip:ip + t + 3]
+                ip += t + 3
+                t = src[ip]
+                ip += 1
+                if t <= 15:                   # 3 bytes from 2049 or more back
+                    back(2049 + (t >> 2) + (src[ip] << 2), 3)
+                    ip += 1
+                    t = src[ip - 2] & 3
+                    if t == 0:
+                        t = src[ip]
+                        ip += 1
+                        literal_state = True
+                        continue
+                    out += src[ip:ip + t]
+                    ip += t
+                    t = src[ip]
+                    ip += 1
+                    continue
+        if t >= 64:                           # 3 to 8 bytes, up to 2048 back
+            back(1 + ((t >> 2) & 7) + (src[ip] << 3), (t >> 5) + 1)
+            ip += 1
+        elif t >= 32:                         # up to 16384 back
+            t &= 31
+            if t == 0:
+                t = count(31)
+            s = src[ip] | (src[ip + 1] << 8)
+            ip += 2
+            back(1 + (s >> 2), t + 2)
+        elif t >= 16:                         # 16384 to 49151 back, or the end
+            far = (t & 8) << 11
+            t &= 7
+            if t == 0:
+                t = count(7)
+            s = src[ip] | (src[ip + 1] << 8)
+            ip += 2
+            dist = far + (s >> 2)
+            if dist == 0:
+                break
+            back(dist + 0x4000, t + 2)
+        else:                                 # 2 bytes, up to 1024 back
+            back(1 + (t >> 2) + (src[ip] << 2), 2)
+            ip += 1
+        t = src[ip - 2] & 3                   # 0 to 3 literals follow a match
+        if t == 0:
+            t = src[ip]
+            ip += 1
+            literal_state = True
+            continue
+        out += src[ip:ip + t]
+        ip += t
+        t = src[ip]
+        ip += 1
+    if len(out) != out_len:
+        raise ValueError("unpacked %d bytes, expected %d" % (len(out), out_len))
+    return bytes(out)
+
+
+def read_path_file(data):
+    """The path nodes from a .pth (PathSearch::ArchiveSaveNodes, PathNode::ArchiveStatic):
+    {"version", "info", "maptime", "failed", "nodes": [{"origin", "flags",
+    "children": [(node, fallheight, pos1, pos2), ...]}, ...]}. Node i is the map's i-th
+    info_pathnode, its origin dropped to the floor; a connection runs from pos1 to pos2.
+    The game's own files tag every value with its type (archive.cpp ARCHIVE_USE_TYPES),
+    the ones OpenMoHAA writes don't; both are read. Raises ValueError for anything else."""
+    try:
+        if data[:4] == b"CSVG":               # packed (ArchiveFile::Compress)
+            data = _lz77_unpack(data[8:], struct.unpack_from("<I", data, 4)[0])
+        typed = data[:8] == b"\x06\x00\x00\x00MHAA"
+        if not typed and data[:4] != b"MHAA":
+            raise ValueError("not a MOHAA archive")
+        pos = 0
+
+        def val(kind, fmt):
+            nonlocal pos
+            if typed:
+                got = struct.unpack_from("<i", data, pos)[0]
+                if got != kind:
+                    raise ValueError("expected value type %d at byte %d, found %d" % (kind, pos, got))
+                pos += 4
+            v = struct.unpack_from(fmt, data, pos)
+            pos += struct.calcsize(fmt)
+            return v if len(v) > 1 else v[0]
+
+        def string():
+            nonlocal pos
+            n = val(14, "<I")
+            if n > len(data) - pos:
+                raise ValueError("string past the end")
+            s = data[pos:pos + n].decode("latin-1", "replace")
+            pos += n
+            return s
+
+        val(6, "<I")                          # "MHAA"
+        arc_version = val(6, "<I")
+        info = string()
+        val(5, "<i")                          # number of objects
+        version = val(5, "<i")
+        if version != PATHFILE_VERSION:
+            raise ValueError("path file version %d (the game reads %d)" % (version, PATHFILE_VERSION))
+        maptime = string()
+        failed = val(5, "<i")
+        count = val(5, "<i")
+        val(5, "<i")
+        val(5, "<i")
+        if not 0 <= count <= 4096:
+            raise ValueError("%d path nodes" % count)
+        nodes = []
+        for _i in range(count):
+            val(23, "<i")                     # the node's object number
+            origin = val(1, "<3f")
+            val(1, "<3f")                     # centroid
+            flags = val(5, "<i")
+            nch = val(5, "<i")
+            if not 0 <= nch <= 4096:
+                raise ValueError("a node with %d connections" % nch)
+            children = []
+            for _k in range(nch):
+                to = val(9, "<h")
+                fall = val(9, "<h")
+                val(11, "<f")                 # distance
+                val(2, "<2f")                 # direction
+                children.append((to, fall, val(3, "<3f"), val(3, "<3f")))
+            nodes.append({"origin": origin, "flags": flags, "children": children})
+    except (struct.error, IndexError) as e:
+        raise ValueError("damaged path file (%s)" % e)
+    return {"version": arc_version, "info": info, "maptime": maptime, "failed": failed, "nodes": nodes}
 
 
 def load(path):
