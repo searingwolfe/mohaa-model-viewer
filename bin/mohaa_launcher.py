@@ -664,6 +664,7 @@ class KeyMapWindow:
         self.W = max(23 * U + 28, min(sw - 80, 1200))         # window width
         self.colh = max(170, min(sh - 90, 900) - int(6.25 * U) - 150)
         self._build()
+        self._fit_width()
         self._set_tab(max(0, min(tab, len(tabs) - 1)))
         self._place(sw, sh)
 
@@ -785,9 +786,10 @@ class KeyMapWindow:
     def _build(self):
         C, U, app = self.C, self.U, self.app
         w = self.w = tk.Toplevel(app); w.title("Keyboard shortcuts")
+        w.withdraw()                            # built out of sight, shown where it belongs (_place)
         w.transient(app); w.resizable(False, False); w.configure(bg=C["panel"])
         lab = lambda p, t: tk.Label(p, text=t, bg=C["panel"], fg=C["dim"], font=self.f_chip)
-        top = tk.Frame(w, bg=C["panel"]); top.pack(side="top", fill="x", padx=12, pady=(10, 4))
+        top = self.top = tk.Frame(w, bg=C["panel"]); top.pack(side="top", fill="x", padx=12, pady=(10, 4))
         tf = tk.Frame(top, bg=C["panel"]); tf.pack(side="left")
         self.tab_btns = [self._seg(tf, t[0], lambda i=i: self._set_tab(i)) for i, t in enumerate(self.tabs)]
         self.title_l = tk.Label(top, text="", bg=C["panel"], fg=C["accent"], font=self.f_bold)
@@ -814,7 +816,7 @@ class KeyMapWindow:
         self._draw_keyboard()
         # category chips, the list, Close
         self.catf = tk.Frame(w, bg=C["panel"]); self.catf.pack(side="top", fill="x", padx=12, pady=(2, 4))
-        tk.Frame(w, bg=C["line"], height=1).pack(side="top", fill="x", padx=12)
+        self.rule = tk.Frame(w, bg=C["line"], height=1); self.rule.pack(side="top", fill="x", padx=12)
         bot = tk.Frame(w, bg=C["panel"]); bot.pack(side="bottom", fill="x", padx=12, pady=(6, 10))
         if self.old:
             self.close_btn = tk.Button(bot, text="Close", command=self.close, takefocus=0)
@@ -842,6 +844,7 @@ class KeyMapWindow:
             w.geometry(f"+{x}+{y}")
         except Exception:
             pass
+        w.deiconify()
         if not self.old:
             try: app._apply_titlebar(w)
             except Exception: pass
@@ -993,10 +996,30 @@ class KeyMapWindow:
     # ---- one tab (a table) ----------------------------------------------------------------
     def _set_tab(self, i):
         self._hide_pop()
-        self.tab = i
+        self._load_tab(i)
         if self.on_tab:
             try: self.on_tab(i)
             except Exception: pass
+        self._build_cols()
+        self._refresh()
+
+    def _fit_width(self):
+        """One window size for every tab: the window is as wide as the widest head row any
+        tab has (its title and view buttons, or its category chips and hint) and the columns
+        fill that width, so switching tabs never resizes it. The rule under the chips is set
+        to that width, which holds the window to it."""
+        need = 0
+        for i in range(len(self.tabs)):
+            self._load_tab(i)
+            self.w.update_idletasks()
+            need = max(need, self.top.winfo_reqwidth(), self.catf.winfo_reqwidth())
+        self.W = max(self.W, need + 24)
+        self.rule.configure(width=self.W - 24)
+
+    def _load_tab(self, i):
+        """Tab i's shortcuts, filed by row and by key, and its head row: the title, the view
+        buttons and the category chips."""
+        self.tab = i
         for j, b in enumerate(self.tab_btns):
             self._seg_set(b, j == i)
         T = self.tabs[i][1]
@@ -1038,8 +1061,6 @@ class KeyMapWindow:
         else:
             self.view_lab.configure(text=""); self.mod_lab.configure(text="keys with")
         self._build_cats()
-        self._build_cols()
-        self._refresh()
 
     def _set_view(self, v):
         self.view = v; self._refresh()
@@ -1087,23 +1108,32 @@ class KeyMapWindow:
         for ch in self.colsf.winfo_children():
             ch.destroy()
         n = max(1, len(self.COLS)); gap = 14
+        # The columns sit in grid columns 0, 2, 4 ... with a fixed gap between each two, so
+        # they share the width exactly. The last tab's settings are cleared first: a column
+        # it had beyond this tab's would keep its share of the width, empty.
+        for ci in range(self.colsf.grid_size()[0]):
+            self.colsf.grid_columnconfigure(ci, weight=0, uniform="", minsize=0)
         colw = (self.W - 24 - gap * (n - 1)) // n
         self.keys_w = max(110, min(150, colw * 2 // 5))
         desc_w = max(120, colw - self.keys_w - 34)
         self.colw = []
         for ci, col in enumerate(self.COLS):
             cf = tk.Frame(self.colsf, bg=C["panel"])
-            cf.grid(row=0, column=ci, sticky="nsew", padx=(0 if ci == 0 else gap, 0))
-            self.colsf.grid_columnconfigure(ci, weight=1, uniform="kxcol")
+            cf.grid(row=0, column=2 * ci, sticky="nsew")
+            self.colsf.grid_columnconfigure(2 * ci, weight=1, uniform="kxcol")
+            if ci:
+                self.colsf.grid_columnconfigure(2 * ci - 1, minsize=gap)
             tk.Label(cf, text=col["title"].upper(), bg=C["panel"], fg=C["accent"], font=self.f_head_b, anchor="w"
                      ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 3))
-            cv = tk.Canvas(cf, highlightthickness=0, bd=0, bg=C["panel"], width=colw - 18, height=self.colh, yscrollincrement=20)
-            sb = (tk.Scrollbar(cf, command=cv.yview) if self.old else ttk.Scrollbar(cf, orient="vertical", command=cv.yview))
-            cv.configure(yscrollcommand=sb.set)
+            # the scrollbar's room is kept while it is hidden, so a column is as wide either way
+            sb = (tk.Scrollbar(cf) if self.old else ttk.Scrollbar(cf, orient="vertical"))
+            sbw = sb.winfo_reqwidth() + 2
+            cv = tk.Canvas(cf, highlightthickness=0, bd=0, bg=C["panel"], width=colw - sbw, height=self.colh, yscrollincrement=20)
+            sb.configure(command=cv.yview); cv.configure(yscrollcommand=sb.set)
             cv.grid(row=1, column=0, sticky="nsew"); sb.grid(row=1, column=1, sticky="ns", padx=(2, 0))
-            cf.grid_rowconfigure(1, weight=1); cf.grid_columnconfigure(0, weight=1)
+            cf.grid_rowconfigure(1, weight=1); cf.grid_columnconfigure(0, weight=1); cf.grid_columnconfigure(1, minsize=sbw)
             inner = tk.Frame(cv, bg=C["panel"])
-            win = cv.create_window((0, 0), window=inner, anchor="nw", width=colw - 18)
+            win = cv.create_window((0, 0), window=inner, anchor="nw", width=colw - sbw)
             r = 0
             for it in col["items"]:
                 if "sub" in it:
