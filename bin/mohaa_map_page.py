@@ -150,6 +150,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  .tabs{display:flex;gap:6px;margin-bottom:6px}
  .tabs button{flex:1;padding:4px 6px;font-size:11px}
  #listBox{max-height:none}
+ /* the Find tabs' counts and hints, above the line that starts the list */
+ #listHead .co{margin-top:4px}
+ #listHead:empty{display:none}
+ /* Shift+click a list row's coloured square: hide / show that entity or that class */
+ .li .sw{cursor:pointer}
  .li{display:flex;align-items:center;gap:6px;padding:2px 5px;border-radius:4px;cursor:pointer;white-space:nowrap}
  .li:hover,.li.hot{background:var(--btn)}
  .li .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -253,6 +258,8 @@ __KEYS_CSS__
        <button class="sm" id="bFocus" title="Fly the camera to the selection (F, or double-click)">Fly to</button>
        <button class="sm" id="bSame" title="Select everything of the same kind: same class for entities, same texture for brushes (Alt+click)">Same kind</button>
        <button class="sm" id="bPath" style="display:none" title="Select the whole path through this entity: everything its &quot;target&quot; leads to and everything that leads to it (Ctrl+Alt+click)">Same path</button>
+       <button class="sm" id="bTname" style="display:none" title="Select every entity with this targetname ($, that is Shift+4)">Same targetname</button>
+       <button class="sm" id="bDoor" style="display:none" title="Open or close the selected door as in game (O)">Open door</button>
        <button class="sm" id="bHide" title="Hide the selection (Backspace). Shift+H shows everything again.">Hide</button>
        <button class="sm" id="bClear" title="Clear the selection (Esc)">Clear</button>
      </div>
@@ -321,8 +328,10 @@ __KEYS_CSS__
        <button id="tabCls" title="Every entity class in the map, like MOHRadiant's Map Info and Entities windows">Classes</button>
        <button id="tabTex" title="Every texture the map uses">Textures</button>
      </div>
-     <div id="listBox"></div>
+     <div id="listHead"></div>
    </div>
+   <!-- the list itself, under a line of its own (empty: hidden) -->
+   <div class="sect" id="listSect"><div id="listBox"></div></div>
  </div>
 </div>
 <script id="mapdata" type="application/octet-stream">__DATA__</script>
@@ -2221,8 +2230,13 @@ function drawSelection(vp){
 
 // ---- lines: wireframe, setsize boxes, target links, facing arrows ----------------------
 function boxLines(L,mn,mx,c){
-  const C=k=>[(k&1)?mx[0]:mn[0],(k&2)?mx[1]:mn[1],(k&4)?mx[2]:mn[2]];
-  for(const[a,b]of[[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7]]){const p=C(a),q=C(b);L.push(p[0],p[1],p[2],c[0],c[1],c[2],c[3],q[0],q[1],q[2],c[0],c[1],c[2],c[3]);}
+  const C=[];for(let k=0;k<8;k++)C.push([(k&1)?mx[0]:mn[0],(k&2)?mx[1]:mn[1],(k&4)?mx[2]:mn[2]]);
+  boxLinesC(L,C,c);
+}
+// a box from its eight corners (corner k: bit 1 x, 2 y, 4 z at the max end), so a door's
+// box can turn with it
+function boxLinesC(L,C,c){
+  for(const[a,b]of[[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7]]){const p=C[a],q=C[b];L.push(p[0],p[1],p[2],c[0],c[1],c[2],c[3],q[0],q[1],q[2],c[0],c[1],c[2],c[3]);}
 }
 // Lines are hidden behind walls like everything else. Only the selection's own (its box,
 // its target links, its facing arrow) show through walls, faintly, with X-ray on; they
@@ -2237,9 +2251,10 @@ function rebuildLines(){
     const sel=selE.has(X.ei);
     if(!sel&&(!view.ss||!entVisible(X.ei)))continue;
     if(!sel&&!X.hasGeo&&!X.marker&&X.model<0)continue;
-    const b=X.box,o=b.origin;
+    const b=X.box,dx=X.hasGeo?doorXf(X.ei):null,o=dx?xfP(dx,b.origin):b.origin;
     const c=sel?[sc[0],sc[1],sc[2],1]:[X.col[0],X.col[1],X.col[2],0.85];
-    boxLines(sel?H:L,[o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]],c);
+    if(dx)boxLinesC(sel?H:L,doorCorners(DOORS.get(X.ei),dx),c);      // a door that has moved: its box moved with it
+    else boxLines(sel?H:L,[o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]],c);
     if(sel){const r=6;H.push(o[0]-r,o[1],o[2],1,1,1,1,o[0]+r,o[1],o[2],1,1,1,1, o[0],o[1]-r,o[2],1,1,1,1,o[0],o[1]+r,o[2],1,1,1,1, o[0],o[1],o[2]-r,1,1,1,1,o[0],o[1],o[2]+r,1,1,1,1);}
   }
   LINKS=[];
@@ -2379,18 +2394,20 @@ function draw2D(){
 // the leafs whose cluster is in that cluster's row of the vis lump and whose area is
 // joined to the camera's. Doors cut a map into areas: the areas are flooded through the
 // open area portals (cm_test.c), a level starts with every door shut but the ones that
-// start open, and cm_noAreas 1 joins them all. From a leaf with no cluster (outside the
-// map) every leaf is kept. R_RecursiveWorldNode walks the tree, dropping the boxes past
-// the farplane, and R_AddWorldSurface drops the planar faces facing away from the camera
-// (with 8 units of slack) and the triangle soups and curved patches past the farplane; a
-// patch keeps only the rows and columns its distance allows (RB_SurfaceGrid with
-// r_lodCurveError 250). Brush entities and models are sent to the client only when a
-// cluster their box touches is in the PVS and their area is joined to the camera's
-// (sv_snapshot.c); static props are listed by the leafs. r_showtris then outlines every
-// triangle that was drawn (tr_shade.c DrawTris): 1 hidden behind walls, 2 through them,
-// with an axis cross at the origin of each model drawn (red up, green along y, blue a
-// diagonal: the engine's own slip), 3 the crosses alone. Terrain is outlined at full
-// detail (the game thins it out with distance) and models at their full detail too.
+// start open, Open door opens and shuts them as in game (see Doors), and cm_noAreas 1
+// joins them all. From a leaf with no cluster (outside the map) every leaf is kept.
+// R_RecursiveWorldNode walks the tree, dropping the boxes past the farplane, and
+// R_AddWorldSurface drops the planar faces facing away from the camera (with 8 units of
+// slack) and the triangle soups and curved patches past the farplane; a patch keeps only
+// the rows and columns its distance allows (RB_SurfaceGrid with r_lodCurveError 250).
+// Brush entities and models are sent to the client only when a cluster their box touches
+// is in the PVS and their area is joined to the camera's (sv_snapshot.c); static props
+// are listed by the leafs. A door that has moved is drawn where it is now. r_showtris
+// then outlines every triangle that was drawn (tr_shade.c DrawTris): 1 hidden behind
+// walls, 2 through them, with an axis cross at the origin of each model drawn (red up,
+// green along y, blue a diagonal: the engine's own slip), 3 the crosses alone. Terrain is
+// outlined at full detail (the game thins it out with distance) and models at their full
+// detail too.
 let GV=null;
 const DOOR_CLASSES={func_door:1,func_rotatingdoor:1,script_door:1};
 function gvInit(){
@@ -2426,21 +2443,17 @@ function gvInit(){
   // brush entities: their own surfaces
   G.bm=new Map();for(const r of V.bm||[]){let a=G.bm.get(r[0]);if(!a){a=[];G.bm.set(r[0],a);}a.push(r[1],r[2]);}
   // every entity the game sends: its clusters and areas from its box grown by a unit
-  // (SV_LinkEntity); a door that starts open opens the portal between its two areas
-  G.ent=new Map();G.portals=[];
+  // (SV_LinkEntity). A door's two areas are the ones its area portal joins while it is
+  // open; the doors keep G.portals, the pairs open now (doorPortals).
+  G.ent=new Map();G.portals=[];G.doorArea=new Map();
   const fs=D.bsp&&D.bsp.firstStatic!=null?D.bsp.firstStatic:MAP.ents.length;
   for(const X of ENTS){
     if(X.ei===0||X.ei>=fs||!X.box)continue;
     const door=DOOR_CLASSES[MAP.ents[X.ei].cls];
     if(!G.bm.has(X.ei)&&X.model<0&&!door)continue;
-    const b=X.box,o=b.origin,mn=[o[0]+b.mins[0]-1,o[1]+b.mins[1]-1,o[2]+b.mins[2]-1],mx=[o[0]+b.maxs[0]+1,o[1]+b.maxs[1]+1,o[2]+b.maxs[2]+1];
-    const leafs=[];gvBoxLeafs(G,mn,mx,leafs);
-    const cl=[];let a1=-1,a2=-1;
-    for(const l of leafs){const c=G.lf[l*14],a=G.lf[l*14+1];
-      if(a>=0){if(a1>=0&&a1!==a)a2=a;else a1=a;}
-      if(c>=0&&!cl.includes(c))cl.push(c);}
-    G.ent.set(X.ei,{cl:cl,a1:a1,a2:a2,mn:[mn[0]+1,mn[1]+1,mn[2]+1],mx:[mx[0]-1,mx[1]-1,mx[2]-1]});
-    if(door&&a1>=0&&a2>=0&&(parseInt(MAP.ents[X.ei].kvl.spawnflags||'0',10)&1))G.portals.push([a1,a2]);
+    const b=X.box,o=b.origin;
+    const E=gvLink(G,X.ei,[o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]]);
+    if(door)G.doorArea.set(X.ei,[E.a1,E.a2]);
   }
   G.key='';G.leafVis=new Uint8Array(G.nl);G.nodeVis=new Uint8Array(Math.max(1,G.nn));G.conn=null;G.camArea=-1;G.camCluster=-1;
   G.sig='';G.nIdx=0;G.nGrid=0;G.nX=0;G.stats='';
@@ -2465,6 +2478,18 @@ function gvBoxLeafs(G,mn,mx,out){
     }
     out.push(-(n+1));
   }
+}
+// Link an entity with the box mn..mx (SV_LinkEntity): the clusters and the (at most two)
+// areas of the leafs the box touches, grown by a unit on every side. A door that moves is
+// linked again as it goes.
+function gvLink(G,ei,mn,mx){
+  const leafs=[];gvBoxLeafs(G,[mn[0]-1,mn[1]-1,mn[2]-1],[mx[0]+1,mx[1]+1,mx[2]+1],leafs);
+  const cl=[];let a1=-1,a2=-1;
+  for(const l of leafs){const c=G.lf[l*14],a=G.lf[l*14+1];
+    if(a>=0){if(a1>=0&&a1!==a)a2=a;else a1=a;}
+    if(c>=0&&!cl.includes(c))cl.push(c);}
+  const E={cl:cl,a1:a1,a2:a2,mn:mn.slice(),mx:mx.slice()};
+  G.ent.set(ei,E);return E;
 }
 function gvPointLeaf(G,p){
   if(!G.nn)return 0;
@@ -2614,7 +2639,9 @@ function gvUpdate(){
     const E=G.ent.get(ei);if(boxFar&&E&&gvBeyond(f,fe,far,E.mn[0],E.mn[1],E.mn[2],E.mx[0],E.mx[1],E.mx[2]))continue;
     let any=false;
     for(let r=0;r<ranges.length;r+=2)for(let s=ranges[r];s<ranges[r]+ranges[r+1]&&s<G.ns;s++)if(add(s))any=true;
-    if(any){const o=ENTS[ei].origin||[0,0,0];cross(o,I3,1);nbm++;sig=(Math.imul(sig,31)+ei*5+2)|0;}
+    // a door that has moved: its origin where it is now, its axes turned with it
+    if(any){const dx=doorXf(ei),o=ENTS[ei].origin||[0,0,0];
+      cross(dx?xfP(dx,o):o,dx&&dx.yaw?anglesAxis([0,dx.yaw,0]):I3,1);nbm++;sig=(Math.imul(sig,31)+ei*5+2)|0;}
   }
   // models: entities the server sends, static props their leafs list
   const fs=D.bsp&&D.bsp.firstStatic!=null?D.bsp.firstStatic:MAP.ents.length;
@@ -2808,6 +2835,340 @@ function drawRoutes(vp){
   gl.disable(gl.BLEND);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(false);
   gl.bindVertexArray(B.vRt);gl.drawArrays(gl.LINES,0,ROUTES.verts);
   gl.bindVertexArray(null);gl.depthMask(true);
+}
+
+// ============================================================================
+//  Doors: Open door (O) opens a func_rotatingdoor or func_door as in game
+// ============================================================================
+// doors.cpp and mover.cpp. Each door keeps the game's states: closed, opening, open and
+// closing. Open door does what the use key does (Door::DoorUse): a shut or closing door
+// opens, an open or opening one closes. Doors of one class whose boxes touch (a unit
+// apart) open and close as one, led by the first of them in the .map, the master
+// (Door::LinkDoors); DOOR_DONT_LINK (4) keeps a door from leading others. A
+// func_rotatingdoor turns "openangle" degrees (90) about its origin: with "alwaysaway" 1
+// (the default) to the side away from whoever opens it, here the camera, and with 0
+// always the same way, the side its box lies toward (RotatingDoor::DoOpen). A func_door
+// slides along "angle" (-1 up, -2 down) by its size that way less "lip" (8). A move goes
+// at an even speed from wherever the door is (Mover::MoveTo) and a whole one takes "time"
+// seconds or "doortype" wood 1 / metal 1.5 (wood unless set), whichever key comes last;
+// on a func_door "speed" (units a second) overrides both, on a func_rotatingdoor it is
+// the rate itself (1 / time). Once open, the master closes the group "wait" seconds
+// later (3; never with TOGGLE (32), or with "wait" -1 or 0). The master opens its area
+// portal as it starts to open from shut and closes it once it is shut again, which
+// r_showtris follows. A master that starts open (START_OPEN, 1) spawns with its portal
+// open but stays where the .map has it, as in game, until it is closed. A script_door
+// moves only when its map script tells it to, so it can't be opened here.
+const DOOR_FRAME=50;                         // ms: one server frame (sv_fps 20), the shortest move
+let DOORS=null;                              // entity -> door
+const DOORS_BUSY=new Set();                  // doors with a move or an auto-close to come
+const PORTAL_REF=new Map();                  // 'a1,a2' -> how many doors hold it open (CM_AdjustAreaPortalState)
+function doorNum(v){const f=parseFloat(v);return isFinite(f)?f:0;}           // as atof
+function doorMovedir(a){return a===-1?[0,0,1]:a===-2?[0,0,-1]:[Math.cos(a*Math.PI/180),Math.sin(a*Math.PI/180),0];}  // G_GetMovedir
+function angleDist(a){a=((a%360)+360)%360;return a>180?a-360:a;}            // angledist: -180 .. 180
+function doorsInit(){
+  DOORS=new Map();DOORS_BUSY.clear();PORTAL_REF.clear();
+  const byCls=new Map();
+  for(let ei=1;ei<MAP.ents.length;ei++){
+    const X=ENTS[ei],cls=MAP.ents[ei].cls;
+    if(!DOOR_CLASSES[cls]||!X.hasGeo||!X.box)continue;
+    const d=doorNew(ei);DOORS.set(ei,d);X.anchor0=X.anchor?X.anchor.slice():null;
+    if(!byCls.has(cls))byCls.set(cls,[]);byCls.get(cls).push(d);
+  }
+  for(const list of byCls.values())doorsLink(list);
+}
+// A door's settings from its keys, in the order the game reads them (after its constructor:
+// Door, RotatingDoor, SlidingDoor).
+function doorNew(ei){
+  const e=MAP.ents[ei],X=ENTS[ei],b=X.box,sf=parseInt(e.kvl.spawnflags||'0',10)|0;
+  const kind=e.cls==='func_rotatingdoor'?'rot':e.cls==='func_door'?'slide':'script';
+  const d={ei:ei,kind:kind,sf:sf,master:ei,next:-1,chain:[ei],state:(sf&1)?'open':'closed',prev:'',
+    a:0,mv:null,closeAt:null,dirOpened:0,o:b.origin.slice(),mins:b.mins.slice(),maxs:b.maxs.slice(),
+    how:'doortype wood, the default',wait:(sf&32)?0:3,waitKey:false,angle:90,away:true,lip:8,base:0,
+    yawKey:0,dir:[0,1,0],move:[1,0,0],gm:null};
+  d.prev=d.state;
+  let rate=1;                                // Door::speed: 1 / traveltime
+  for(const[k0,v]of e.kv){const k=k0.toLowerCase();
+    if(k==='time'){const t=Math.max(DOOR_FRAME/1000,doorNum(v));rate=1/t;d.how='"time" '+fnum(t);}
+    else if(k==='doortype'){if(v==='wood'||v==='metal'){rate=v==='wood'?1:1/1.5;d.how='doortype '+v;}}
+    else if(k==='speed'){if(kind==='slide')d.base=doorNum(v);else{rate=doorNum(v);d.how='"speed" '+fnum(rate);}}
+    else if(k==='wait'){d.wait=doorNum(v);d.waitKey=true;}
+    else if(k==='openangle'&&kind==='rot')d.angle=doorNum(v);
+    else if(k==='alwaysaway')d.away=(parseInt(v,10)|0)!==0;
+    else if(k==='lip'&&kind==='slide')d.lip=doorNum(v);
+    else if(k==='angle'){d.yawKey=doorNum(v);const m=doorMovedir(d.yawKey);d.move=m;d.dir=[-m[1],m[0],m[2]];}
+  }
+  // the way to the middle of its box from its origin
+  d.mmo=vnorm([(d.mins[0]+d.maxs[0])/2,(d.mins[1]+d.maxs[1])/2,(d.mins[2]+d.maxs[2])/2])||[0,0,0];
+  if(kind==='rot'){d.vel=Math.abs(rate*d.angle);d.full=Math.abs(angleDist(d.angle));}     // degrees a second
+  else{const sz=[d.maxs[0]-d.mins[0],d.maxs[1]-d.mins[1],d.maxs[2]-d.mins[2]];
+    d.total=Math.max(0,Math.abs(vdot(d.move,sz))-d.lip);                                // SlidingDoor::Setup
+    if(d.base){rate=d.total?d.base/d.total:0;d.how='"speed" '+fnum(d.base);}
+    d.vel=rate*d.total;d.full=d.total;}                                                   // units a second
+  d.secs=Math.max(DOOR_FRAME/1000,d.vel>0?d.full/d.vel:0);
+  return d;
+}
+// Door::DoorTouches, on the boxes the game links them with (a unit bigger all round)
+function doorTouch(a,b){
+  for(let k=0;k<3;k++){
+    if(b.o[k]+b.mins[k]-1>a.o[k]+a.maxs[k]+1)return false;
+    if(b.o[k]+b.maxs[k]+1<a.o[k]+a.mins[k]-1)return false;}
+  return true;
+}
+// Door::LinkDoors, door by door in the .map's order: an unlinked door that some later door
+// touches leads a chain of the touching doors after it; a door only an earlier door touches
+// is left alone. A master that starts open opens its area portal.
+function doorsLink(list){
+  list.forEach((d,i)=>{
+    if(d.next>=0)return;                     // linked by an earlier door
+    d.master=d.ei;
+    if(d.sf&4){d.next=d.ei;return;}          // DOOR_DONT_LINK
+    let n=0;for(let j=i+1;j<list.length;j++)if(doorTouch(d,list[j]))n++;
+    if(!n&&list.some(x=>x!==d&&doorTouch(d,x)))return;
+    let ent=d;const chain=[];
+    for(let j=i;j<list.length;j++){const x=list[j];
+      if(!doorTouch(ent,x)||x.next>=0)continue;   // (a door linked twice stops the game: skipped)
+      ent.next=x.ei;ent=x;x.master=d.ei;chain.push(x.ei);}
+    ent.next=d.ei;d.chain=chain;
+    if(d.sf&1)doorPortal(d,true);
+  });
+}
+// The area portals the doors hold open, for r_showtris: each door's two areas (from where
+// the .map has it), counted as the game counts them.
+function doorPortal(d,open){
+  const a=GV&&GV.doorArea.get(d.ei);if(!a||a[0]<0||a[1]<0)return;
+  const k=Math.min(a[0],a[1])+','+Math.max(a[0],a[1]);
+  PORTAL_REF.set(k,(PORTAL_REF.get(k)||0)+(open?1:-1));
+  GV.portals=[];for(const[key,n]of PORTAL_REF)if(n>0)GV.portals.push(key.split(',').map(Number));
+  GV.key='';GV.dirty=true;
+}
+// ---- the game's door events -------------------------------------------------------------
+function doorShut(d){return d.state==='closed'||d.state==='closing';}
+function doorOpen(d,t,from){                     // Door::Open; from: where the opener is
+  if(d.state==='opening')return;
+  if(d.state==='open'){if(d.wait>0){d.closeAt=t+d.wait*1000;DOORS_BUSY.add(d);}return;}   // waits its full time again
+  d.prev=d.state;d.state='opening';
+  if(d.kind==='rot'){                            // RotatingDoor::DoOpen (only a shut door picks its side)
+    if(d.prev==='closed'){
+      const px=from[0]-d.o[0],py=from[1]-d.o[1],l=Math.hypot(px,py),qx=l>0?px/l:0,qy=l>0?py/l:0;
+      if(d.away){d.dirOpened=qx*d.dir[1]-qy*d.dir[0];if(vdot(d.dir,d.mmo)>0)d.dirOpened=-d.dirOpened;}
+      else d.dirOpened=vdot(d.dir,d.mmo);
+    }
+    const to=d.dirOpened<0?d.angle:-d.angle;
+    if(d.a+360<=to)d.a+=360;else if(d.a-360>=to)d.a-=360;
+    doorMove(d,t,to,1);
+  }else doorMove(d,t,d.total,1);                 // SlidingDoor::DoOpen
+  if(d.master===d.ei){
+    for(const s of d.chain)if(s!==d.ei)doorOpen(DOORS.get(s),t,from);
+    if(d.prev==='closed')doorPortal(d,true);
+  }
+}
+function doorMove(d,t,to,end){                   // Mover::MoveTo: an even speed, from where it is
+  const delta=d.kind==='rot'?angleDist(to-d.a):to-d.a;
+  let dur=d.vel>0?Math.abs(delta)/d.vel*1000:0, snap=false;
+  if(dur<DOOR_FRAME){dur=DOOR_FRAME;snap=true;}  // nothing to do, or quicker than a frame: there at the frame's end
+  d.mv={a0:d.a,a1:d.a+delta,to:to,t0:t,t1:t+dur,end:end,snap:snap};
+  DOORS_BUSY.add(d);
+}
+function doorOpenEnd(d,t){                       // Door::OpenEnd
+  d.prev=d.state;d.state='open';
+  if(d.sf&32)return;                             // TOGGLE: it waits to be used again
+  if(d.wait>0&&d.master===d.ei){d.closeAt=t+d.wait*1000;DOORS_BUSY.add(d);}
+}
+function doorClose(d,t){                         // Door::Close
+  d.closeAt=null;
+  d.prev=d.state;d.state='closing';
+  doorMove(d,t,0,2);                             // back to its start angle or position
+  if(d.master===d.ei)for(const s of d.chain)if(s!==d.ei)doorClose(DOORS.get(s),t);
+}
+function doorCloseEnd(d,t){                      // Door::CloseEnd
+  if(d.master===d.ei)doorPortal(d,false);
+  d.prev=d.state;d.state='closed';
+}
+// Run the doors up to now (ms): the moves that end and the closes that fall due, each at
+// its own time (so a page left in the background catches up in order), then where each
+// moving door is. True when anything changed.
+function doorsAdvance(now){
+  let changed=false,states=false;
+  for(;;){
+    let d=null,at=Infinity,close=false;
+    for(const x of DOORS_BUSY){
+      if(x.mv&&x.mv.t1<=now&&x.mv.t1<at){d=x;at=x.mv.t1;close=false;}
+      if(x.closeAt!=null&&x.closeAt<=now&&x.closeAt<at){d=x;at=x.closeAt;close=true;}
+    }
+    if(!d)break;
+    changed=states=true;
+    if(close){d.closeAt=null;doorClose(d,at);}
+    else{const m=d.mv;d.mv=null;d.a=m.to;doorPose(d);(m.end===1?doorOpenEnd:doorCloseEnd)(d,at);}
+  }
+  for(const d of [...DOORS_BUSY]){
+    if(d.mv&&!d.mv.snap){const m=d.mv,a=m.a0+(m.a1-m.a0)*Math.min(1,Math.max(0,(now-m.t0)/(m.t1-m.t0)));
+      if(a!==d.a){d.a=a;doorPose(d);changed=true;}}
+    if(!d.mv&&d.closeAt==null)DOORS_BUSY.delete(d);
+  }
+  if(states)doorBtnRender();
+  return changed;
+}
+// ---- where a door is now ----------------------------------------------------------------
+// A turn about its origin by yaw degrees (func_rotatingdoor) or a shift along its "angle"
+// (func_door); null for a door where the .map has it.
+function doorXf(ei){
+  const d=DOORS&&DOORS.get(ei);if(!d||!d.a)return null;
+  if(d.kind==='rot'){const r=d.a*Math.PI/180,c=Math.cos(r),s=Math.sin(r);return{R:[c,-s,0,s,c,0,0,0,1],o:d.o,t:[0,0,0],yaw:d.a};}
+  return{R:[1,0,0,0,1,0,0,0,1],o:d.o,t:[d.move[0]*d.a,d.move[1]*d.a,d.move[2]*d.a],yaw:0};
+}
+function xfP(X,p){const o=X.o,R=X.R,x=p[0]-o[0],y=p[1]-o[1],z=p[2]-o[2];
+  return[o[0]+X.t[0]+R[0]*x+R[1]*y+R[2]*z,o[1]+X.t[1]+R[3]*x+R[4]*y+R[5]*z,o[2]+X.t[2]+R[6]*x+R[7]*y+R[8]*z];}
+function xfN(X,n){const R=X.R;return[R[0]*n[0]+R[1]*n[1]+R[2]*n[2],R[3]*n[0]+R[4]*n[1]+R[5]*n[2],R[6]*n[0]+R[7]*n[1]+R[8]*n[2]];}
+// positions src (where the .map has them) put into dst from float k on, moved by X
+function xfSpan(X,src,dst,k){
+  if(!X){dst.set(src,k);return;}
+  const o=X.o,R=X.R,tx=o[0]+X.t[0],ty=o[1]+X.t[1],tz=o[2]+X.t[2];
+  for(let i=0;i<src.length;i+=3){const x=src[i]-o[0],y=src[i+1]-o[1],z=src[i+2]-o[2];
+    dst[k+i]=tx+R[0]*x+R[1]*y+R[2]*z;dst[k+i+1]=ty+R[3]*x+R[4]*y+R[5]*z;dst[k+i+2]=tz+R[6]*x+R[7]*y+R[8]*z;}
+}
+// the eight corners of a door's box (origin + setsize), corner k as in boxLines, moved by X
+function doorCorners(d,X){const o=d.o,out=[];
+  for(let k=0;k<8;k++){const p=[o[0]+((k&1)?d.maxs[0]:d.mins[0]),o[1]+((k&2)?d.maxs[1]:d.mins[1]),o[2]+((k&4)?d.maxs[2]:d.mins[2])];
+    out.push(X?xfP(X,p):p);}
+  return out;}
+function ptsBounds(pts){const mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+  for(const p of pts)for(let k=0;k<3;k++){if(p[k]<mn[k])mn[k]=p[k];if(p[k]>mx[k])mx[k]=p[k];}
+  return{mins:mn,maxs:mx};}
+function runsOf(sorted){const out=[];for(const v of sorted){const r=out[out.length-1];if(r&&r[1]===v)r[1]++;else out.push([v,v+1]);}return out;}
+// The parts of a door that move, each with a copy of where the .map has it: its .map faces
+// (one run of vertices), the game's polygons for it (LIT) and its r_showtris surfaces.
+function doorGeom(d){
+  if(d.gm)return d.gm;
+  const g={prims:primsOfEnt(d.ei),faces:[],pl:[],sc:null,lit:[],gv:null};
+  let v0=Infinity,v1=-Infinity;
+  for(const pi of g.prims){const p=SC.prims[pi];
+    for(let f=p.f0;f<p.f1;f++){g.faces.push(f);g.pl.push(SC.facePlane[f]?SC.facePlane[f].slice():null);
+      v0=Math.min(v0,SC.faceV0[f]);v1=Math.max(v1,SC.faceV0[f]+SC.faceVN[f]);}}
+  if(v0<v1)g.sc={v0:v0,v1:v1,P:SC.pos.slice(v0*3,v1*3)};
+  if(LIT){const vs=new Set();for(const u of LIT.units)if(u.ei===d.ei)for(let k=u.i0;k<u.i0+u.n;k++)vs.add(LIT.tri[k]);
+    g.lit=runsOf([...vs].sort((a,b)=>a-b)).map(([a,b])=>({v0:a,v1:b,P:LIT.pos.slice(a*3,b*3)}));}
+  const G=GV,R=G&&G.bm.get(d.ei);
+  if(R){const S=[];let p0=Infinity,p1=-Infinity,l0=Infinity,l1=-Infinity;
+    for(let r=0;r<R.length;r+=2)for(let s=R[r];s<R[r]+R[r+1]&&s<G.ns;s++){
+      const o=s*8,k=G.si[o];if(!k)continue;let a=Infinity,b=-Infinity;
+      if(k===3){a=G.si[o+3];b=a+G.si[o+4]*G.si[o+5];}
+      else{const m0=G.si[o+3],mc=G.si[o+4];
+        for(let m=m0;m<m0+mc;m++){const v=G.l[m];if(v<a)a=v;if(v+1>b)b=v+1;}
+        if(mc){l0=Math.min(l0,m0);l1=Math.max(l1,m0+mc);}}
+      if(!(a<b))continue;
+      S.push({s:s,k:k,a:a,b:b,f:G.sf.slice(s*10,s*10+10)});p0=Math.min(p0,a);p1=Math.max(p1,b);}
+    if(S.length)g.gv={S:S,p0:p0,p1:p1,P:G.v.slice(p0*3,p1*3),l0:l0,l1:l1};}
+  return d.gm=g;
+}
+// Put a door where it is now (d.a): its faces, with the planes and boxes that picking and
+// the see-through test read, the game's polygons and r_showtris's surfaces; its box,
+// label and links follow on the next frame.
+function doorPose(d){
+  if(!gl)return;
+  const X=doorXf(d.ei),g=doorGeom(d);
+  if(g.sc){const s=g.sc;xfSpan(X,s.P,SC.pos,s.v0*3);
+    gl.bindBuffer(gl.ARRAY_BUFFER,B.pos);gl.bufferSubData(gl.ARRAY_BUFFER,s.v0*12,SC.pos.subarray(s.v0*3,s.v1*3));}
+  g.faces.forEach((f,i)=>{const p=g.pl[i];if(!p)return;
+    if(!X){SC.facePlane[f]=p.slice();return;}
+    const n=xfN(X,p),q=xfP(X,[p[0]*p[3],p[1]*p[3],p[2]*p[3]]);SC.facePlane[f]=[n[0],n[1],n[2],vdot(n,q)];});
+  for(const pi of g.prims){const p=SC.prims[pi],mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+    for(let f=p.f0;f<p.f1;f++)for(let v=SC.faceV0[f],ve=v+SC.faceVN[f];v<ve;v++)
+      for(let k=0;k<3;k++){const w=SC.pos[v*3+k];if(w<mn[k])mn[k]=w;if(w>mx[k])mx[k]=w;}
+    if(isFinite(mn[0])){p.mins=mn;p.maxs=mx;}}
+  if(g.lit.length){gl.bindBuffer(gl.ARRAY_BUFFER,B.lPos);
+    for(const s of g.lit){xfSpan(X,s.P,LIT.pos,s.v0*3);gl.bufferSubData(gl.ARRAY_BUFFER,s.v0*12,LIT.pos.subarray(s.v0*3,s.v1*3));}}
+  if(g.gv)doorGv(d,g.gv,X);
+  const E=ENTS[d.ei];if(E.anchor0)E.anchor=X?xfP(X,E.anchor0):E.anchor0.slice();
+  lineDirty=true;
+}
+// r_showtris: the door's points, its faces' planes (the facing-away test), patch centres
+// and boxes, its lines (when already uploaded), and the server's link of it, from the
+// box its turned setsize makes (SV_LinkEntity: CalculateRotatedBounds2).
+function doorGv(d,gg,X){
+  const G=GV;
+  xfSpan(X,gg.P,G.v,gg.p0*3);
+  for(const S of gg.S){const q=S.s*10,f=S.f;
+    if(!X){G.sf.set(f,q);continue;}
+    if(S.k===1){const n=xfN(X,f),p=xfP(X,[f[0]*f[3],f[1]*f[3],f[2]*f[3]]);G.sf[q]=n[0];G.sf[q+1]=n[1];G.sf[q+2]=n[2];G.sf[q+3]=vdot(n,p);}
+    else if(S.k===3){const c=xfP(X,[f[0],f[1],f[2]]);G.sf[q]=c[0];G.sf[q+1]=c[1];G.sf[q+2]=c[2];}
+    const mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+    for(let v=S.a;v<S.b;v++)for(let k=0;k<3;k++){const w=G.v[v*3+k];if(w<mn[k])mn[k]=w;if(w>mx[k])mx[k]=w;}
+    G.sf.set(mn,q+4);G.sf.set(mx,q+7);}
+  if(B.gvS&&gg.l1>gg.l0){const P=G.v,L=G.l,out=new Float32Array((gg.l1-gg.l0)*6);
+    for(let m=gg.l0;m<gg.l1;m++){const i=L[m]*3,j=L[m^1]*3,k=(m-gg.l0)*6;
+      out[k]=P[i];out[k+1]=P[i+1];out[k+2]=P[i+2];out[k+3]=P[j];out[k+4]=P[j+1];out[k+5]=P[j+2];}
+    gl.bindBuffer(gl.ARRAY_BUFFER,B.gvS);gl.bufferSubData(gl.ARRAY_BUFFER,gg.l0*24,out);}
+  const b=ptsBounds(doorCorners(d,X));gvLink(G,d.ei,b.mins,b.maxs);
+  G.dirty=true;
+}
+// ---- Open door: the Selection button and O ----------------------------------------------
+function selDoors(){const out=[];if(DOORS)for(const ei of selectedEnts()){const d=DOORS.get(ei);if(d)out.push(d);}return out;}
+function doorWay(d){return d.move[2]>0.5?'up':d.move[2]<-0.5?'down':'toward yaw '+fnum(d.yawKey);}
+function doorCloses(m){
+  if(m.sf&32)return 'it stays open until it is used again (TOGGLE)';
+  if(m.wait>0)return 'it closes by itself '+fnum(m.wait)+' s after it has opened';
+  return 'it stays open ("wait" '+fnum(m.wait)+')';
+}
+function doorTip(d,m,opening){
+  if(!opening)return 'Close it, as the use key does in game (O)';
+  let s='Open it as in game: it '+(d.kind==='rot'?'swings '+fnum(d.full)+'° '+(d.away?'away from the camera':'always the same way ("alwaysaway" 0)'):
+    'slides '+fnum(d.total)+' units '+doorWay(d))+' in '+fnum(d.secs)+' s';
+  if(m.chain.length>1)s+=', with the '+(m.chain.length-1)+' door'+(m.chain.length>2?'s':'')+' linked to it';
+  s+='; '+doorCloses(m);
+  const by=doorOpener(d);if(by!=='the use key')s+='. In game it is opened by '+by;
+  return s+' (O)';
+}
+function doorBtnRender(){
+  const b=$('bDoor');if(!b)return;
+  const ds=selDoors();
+  if(!ds.length){b.style.display='none';return;}
+  b.style.display='';
+  const mv=ds.filter(d=>d.kind!=='script');
+  if(!mv.length){b.disabled=true;b.textContent='Open door';
+    b.title='A script_door moves only when its map script tells it to (its openthread and closethread), so it can\'t be opened here';return;}
+  const ms=[...new Set(mv.map(d=>DOORS.get(d.master)))], opening=ms.some(doorShut);
+  const txt=(opening?'Open':'Close')+' door'+(ms.length>1?'s':''),
+    tip=ms.length>1?(opening?'Open':'Close')+' the '+ms.length+' selected doors as in game (O)':doorTip(mv[0],ms[0],opening);
+  b.disabled=false;if(b.textContent!==txt)b.textContent=txt;if(b.title!==tip)b.title=tip;
+}
+// Open door: what the use key does (DoorUse to the master, then DoorFire): shut or closing
+// doors open, from where the camera is; when every one is open or opening, they close.
+function doorUse(){
+  const all=selDoors(),ds=all.filter(d=>d.kind!=='script');
+  if(!ds.length){flash(all.length?'A script_door moves only when its map script tells it to, so it can\'t be opened here':
+    'Select a func_rotatingdoor or func_door first: O opens and closes it');return;}
+  const now=performance.now();doorsAdvance(now);
+  const ms=[...new Set(ds.map(d=>DOORS.get(d.master)))], opening=ms.some(doorShut);
+  for(const m of ms){if(opening)doorOpen(m,now,cam.pos);else{m.sf&=~1;doorClose(m,now);}}
+  doorBtnRender();requestDraw();
+  if(ms.length===1){const m=ms[0],n=m.chain.length-1;
+    flash((opening?'Opening ':'Closing ')+entName(ds[0].ei)+(n?' and the '+n+' door'+(n>1?'s':'')+' linked to it':'')+(opening?' · '+doorCloses(m):''));}
+  else flash((opening?'Opening ':'Closing ')+ms.reduce((s,m)=>s+m.chain.length,0)+' doors');
+}
+// the Door part of a door's info card
+function doorOpener(d){
+  const hp=doorNum(MAP.ents[d.ei].kvl.health);
+  let s=hp?'being shot (health '+fnum(hp)+')':(d.sf&128)?'a trigger or script only (TARGETED)':(d.sf&64)?'a player coming near it (AUTO_OPEN)':'the use key';
+  if(d.sf&8)s+=', not players (NOT_PLAYERS)';
+  if(d.sf&16)s+=', not AI (NOT_MONSTERS)';
+  return s;
+}
+function doorInfo(ei){
+  const d=DOORS&&DOORS.get(ei);if(!d)return '';
+  let h='<h4>Door</h4>';
+  if(d.kind==='script')return h+'<div class="note">A script_door moves only when its map script tells it to (its initthread, openthread and closethread keys), so Open door can\'t move it here.</div>';
+  const m=DOORS.get(d.master),rows=[];
+  rows.push(['opens',esc(d.kind==='rot'?'swings '+fnum(d.full)+'° about its origin, '+(d.away?'away from whoever opens it ("alwaysaway" 1, the default)':'always to the same side ("alwaysaway" 0)'):
+    'slides '+fnum(d.total)+' units '+doorWay(d)+' (its size that way, less "lip" '+fnum(d.lip)+')')]);
+  rows.push(['takes',esc(fnum(d.secs)+' s ('+d.how+')')]);
+  rows.push(['closes',esc((m.sf&32)?'only when it is used again (TOGGLE)':m.wait>0?fnum(m.wait)+' s after it has opened ('+(m.waitKey?'"wait"':'the default "wait"')+')':
+    'never by itself ("wait" '+fnum(m.wait)+')')]);
+  rows.push(['opened by',esc(doorOpener(d))]);
+  if(m.chain.length>1)rows.push(['linked',d.master===ei?'it leads '+m.chain.filter(x=>x!==ei).map(linkEnt).join(', ')+': they open and close together':
+    'it opens and closes with '+linkEnt(m.ei)+', the master (the first of the touching doors in the .map)']);
+  const a=GV&&GV.doorArea.get(m.ei);
+  if(a&&a[0]>=0&&a[1]>=0)rows.push(['area portal',esc('joins areas '+a[0]+' and '+a[1]+' while it is open (r_showtris)')]);
+  return h+kvTable(rows)+'<div class="note">Open door (O) under Selection opens it the way the use key does in game, from where the camera is.</div>';
 }
 
 // ============================================================================
@@ -3149,6 +3510,23 @@ function selectPath(h,add){
   flash('Path through '+entName(ei)+': '+n+' selected, '+p.before.size+' before it and '+p.after.size+' after it'+
     (p.loop?' (it loops)':'')+(hid?', '+hid+' hidden':''));
 }
+// The entity Same path and Same targetname act on: the one selected, else the one last
+// clicked (when it is still selected).
+function selFocusEnt(){
+  const ents=[...selectedEnts()];
+  return ents.length===1?ents[0]:(lastHit&&lastHit.ent>0&&SEL.has('e'+lastHit.ent))?lastHit.ent:-1;
+}
+// Same targetname ($): every entity with that entity's targetname, the group a script
+// reaches as $name.
+function selectSameTargetname(ei){
+  const tn=(ei>0&&!isWorldlike(ei))?MAP.ents[ei].kvl.targetname:'';
+  if(!tn){flash('Select an entity that has a targetname: $ then selects every entity with the same one');return;}
+  const l=ENTS.tn.get(tn)||[];
+  SEL.clear();let n=0;for(const i of l)if(entShown(i)){SEL.add('e'+i);n++;}
+  if(!SEL.size)SEL.add('e'+ei);
+  selectionChanged();
+  flash(l.length<2?'No other entity is named $'+tn:n+' x $'+tn+' selected'+(l.length>n?', '+(l.length-n)+' hidden':''));
+}
 function selectByTexture(ti,add){
   if(!add)SEL.clear();let n=0;
   for(const f of matFaces[ti]||[]){if(faceVis&&!faceVis[f])continue;const ei=SC.faceEnt[f];
@@ -3160,8 +3538,9 @@ function selBounds(){
   const mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
   const grow=(a,b)=>{for(let k=0;k<3;k++){mn[k]=Math.min(mn[k],a[k]);mx[k]=Math.max(mx[k],b[k]);}};
   for(const pi of selectedPrims()){const p=SC.prims[pi];if(isFinite(p.mins[0]))grow(p.mins,p.maxs);}
-  for(const ei of selectedEnts()){const X=ENTS[ei],b=X.box;
-    if(b){const o=b.origin;grow([o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]]);}
+  for(const ei of selectedEnts()){const X=ENTS[ei],b=X.box,dx=X.hasGeo?doorXf(ei):null;
+    if(dx){const q=ptsBounds(doorCorners(DOORS.get(ei),dx));grow(q.mins,q.maxs);}
+    else if(b){const o=b.origin;grow([o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]]);}
     else if(X.anchor)grow(X.anchor,X.anchor);}
   return isFinite(mn[0])?{mins:mn,maxs:mx}:null;
 }
@@ -3183,10 +3562,11 @@ function undoHide(){
   const step=HIDE_UNDO.pop();
   if(!step){flash('Nothing to undo: Ctrl+Z undoes a Hide or Show all');return;}
   const n=step.e.length+step.p.length;
-  if(step.all){for(const i of step.e)hidEnt.add(i);for(const i of step.p)hidPrim.add(i);}
+  // a Show all, or a Shift+click on a list square that showed hidden entities again
+  if(step.all||step.show){for(const i of step.e)hidEnt.add(i);for(const i of step.p)hidPrim.add(i);}
   else{for(const i of step.e)hidEnt.delete(i);for(const i of step.p)hidPrim.delete(i);}
   rebuildWorld();updateSelPanel();
-  flash((step.all?'Undo Show all: '+n+' hidden again':'Undo Hide: '+n+' shown again')+(HIDE_UNDO.length?' (Ctrl+Z again for the step before)':''));
+  flash((step.all?'Undo Show all: '+n+' hidden again':step.show?'Undo Show: '+n+' hidden again':'Undo Hide: '+n+' shown again')+(HIDE_UNDO.length?' (Ctrl+Z again for the step before)':''));
 }
 
 // ============================================================================
@@ -3237,7 +3617,10 @@ function loop(t){
     if(yf){moveBy(a.f,yf*moveSpeed*fast*dt*1.5);moved=true;}
     if(xf){lookBy(xf*dt*150,0);moved=true;}
   }
+  // doors on the move, or waiting to close
+  const doors=DOORS_BUSY.size?doorsAdvance(performance.now()):false;
   if(moved){camChanged();draw();}
+  else if(doors)draw();
 }
 // Turn the view dx degrees right and dy degrees down as seen on the screen. With the camera
 // tilted (Q / E), the screen's right and down are tilted too, so the turn is rotated by the
@@ -3394,6 +3777,8 @@ window.addEventListener('keydown',e=>{
     case 'k':toggleSimpleSky();break;
     case 'm':toggleSimpleModels();break;
     case 'f':focusSelection();break;
+    case '$':selectSameTargetname(selFocusEnt());break;     // Shift+4: $targetname
+    case 'o':doorUse();break;
     case 'v':setCamMode(camMode==='free'?'rad':'free');break;
     case 'r':resetCam();break;
     case 'x':stopCamera();flash('Camera stopped');break;
@@ -3503,6 +3888,8 @@ function buildPanel(){
   $('bClear').onclick=()=>{SEL.clear();selectionChanged();};$('bUnhide').onclick=unhideAll;$('bUndoHide').onclick=undoHide;
   $('bSame').onclick=()=>{if(lastHit)selectSameKind(lastHit,false);};
   $('bPath').onclick=()=>{const ei=+$('bPath').dataset.ei;if(ei>0)selectPath({ent:ei,face:-1,prim:-1,point:null},false);};
+  $('bTname').onclick=()=>selectSameTargetname(selFocusEnt());
+  $('bDoor').onclick=doorUse;
   $('infoClose').onclick=hideInfo;$('infoCopy').onclick=()=>copyText($('infoBody').innerText);
   $('tabFind').onclick=()=>setTab('find');$('tabCls').onclick=()=>setTab('cls');$('tabTex').onclick=()=>setTab('tex');
   const fi=$('findIn');let ft=null;
@@ -3574,9 +3961,15 @@ function updateSelPanel(){
   const ents=[...selectedEnts()], prims=selectedPrims();
   // Same path: the path through the one selected entity (else the last one clicked), when
   // its "target" leads somewhere or something targets it (as Ctrl+Alt+click)
-  const pe=ents.length===1?ents[0]:(lastHit&&lastHit.ent>0&&SEL.has('e'+lastHit.ent))?lastHit.ent:-1;
+  const pe=selFocusEnt();
   const pp=(pe>0&&!isWorldlike(pe))?pathOf(pe):null;
   $('bPath').style.display=(pp&&(pp.before.size||pp.after.size))?'':'none';$('bPath').dataset.ei=pe;
+  // Same targetname: when other entities share its targetname
+  const tn=(pe>0&&!isWorldlike(pe))?MAP.ents[pe].kvl.targetname:'', tl=tn?(ENTS.tn.get(tn)||[]):[];
+  $('bTname').style.display=tl.length>1?'':'none';
+  if(tl.length>1)$('bTname').title='Select every entity named $'+tn+': '+tl.length+' of them ($, that is Shift+4)';
+  // Open door / Close door: when a door is selected
+  doorBtnRender();
   let s='';
   if(n===1&&ents.length===1){const ei=ents[0],e=MAP.ents[ei],X=ENTS[ei];
     s=e.kvl.classname+(e.kvl.targetname?'  $'+e.kvl.targetname:'')+'\nentity '+ei;
@@ -3607,51 +4000,113 @@ function texCounts(){if(_texCounts)return _texCounts;const m=new Map();for(let f
   for(const R of MODELS)for(const s of R.surfs)m.set(s.ti,(m.get(s.ti)||0)+R.inst.length);
   _texCounts=[...m.entries()].sort((a,b)=>TEX[a[0]].n<TEX[b[0]].n?-1:1);return _texCounts;}
 const openCls=new Set();
+// the entities of each class, in map order (worldspawn first)
+function classLists(){
+  const cnt=new Map();for(let ei=0;ei<MAP.ents.length;ei++){const c=MAP.ents[ei].kvl.classname||'?';if(!cnt.has(c))cnt.set(c,[]);cnt.get(c).push(ei);}
+  return cnt;
+}
+// Each tab's counts and hints go above the line (#listHead, in the Find section); the list
+// goes under it, in a section of its own that is hidden while it has nothing to show.
 function renderList(){
-  const box=$('listBox');const rows=[];
+  const box=$('listBox');const head=[],rows=[];
   // hidden (by Hide or a Show button) in red; a class with only some of its entities
   // hidden in yellow
   const shown=ei=>ei===0||entVisible(ei);
   const entRow=(ei,sub)=>{const e=MAP.ents[ei],X=ENTS[ei],sel=SEL.has('e'+ei)||(ei===0),hid=!shown(ei);
     const where=X.anchor?fvec(X.anchor):'';
-    return '<div class="li'+(sub?' sub':'')+(sel?' sel':'')+(hid?' hid':'')+'" data-e="'+ei+'"'+(hid?' title="hidden"':'')+'><span class="sw" style="background:rgb('+X.col.map(v=>Math.round(v*255)).join(',')+')"></span><span class="nm">'+
+    return '<div class="li'+(sub?' sub':'')+(sel?' sel':'')+(hid?' hid':'')+'" data-e="'+ei+'"'+(hid?' title="hidden"':'')+'><span class="sw" style="background:rgb('+X.col.map(v=>Math.round(v*255)).join(',')+')"'+
+      (ei?' title="Shift+click: '+(hid?'show':'hide')+' this entity"':'')+'></span><span class="nm">'+
       esc(sub?(e.kvl.targetname?'$'+e.kvl.targetname:'entity '+ei):(e.kvl.classname||'?')+(e.kvl.targetname?'  $'+e.kvl.targetname:''))+'</span><span class="ct">'+esc(where)+'</span></div>';};
   if(curTab==='find'){
     runFind($('findIn').value);
-    if(!$('findIn').value.trim())rows.push('<div class="co">Type above to search every key and value (classname, targetname, target, model, spawnflags...) and every texture name. Enter selects everything found.</div>');
-    else if(!findRes.length)rows.push('<div class="co">Nothing matches.</div>');
+    if(!$('findIn').value.trim())head.push('<div class="co">Type above to search every key and value (classname, targetname, target, model, spawnflags...) and every texture name. Enter selects everything found.</div>');
+    else if(!findRes.length)head.push('<div class="co">Nothing matches.</div>');
+    else head.push('<div class="co">'+findRes.length+' found · Enter selects them all</div>');
     let n=0;for(const r of findRes){if(++n>600){rows.push('<div class="co">... '+(findRes.length-600)+' more (Enter selects them all)</div>');break;}
       if(r.e!=null)rows.push(entRow(r.e,false));
       else rows.push(texRow(r.t,r.c));}
   }else if(curTab==='cls'){
-    const cnt=new Map();for(let ei=0;ei<MAP.ents.length;ei++){const c=MAP.ents[ei].kvl.classname||'?';if(!cnt.has(c))cnt.set(c,[]);cnt.get(c).push(ei);}
+    const cnt=classLists();
     const names=[...cnt.keys()].sort((a,b)=>a.toLowerCase()<b.toLowerCase()?-1:1);
-    rows.push('<div class="co" style="margin-bottom:4px">'+MAP.ents.length+' entities · '+names.length+' classes · click a class to select them all and list them</div>');
+    head.push('<div class="co">'+MAP.ents.length+' entities · '+names.length+' classes</div>');
+    head.push('<div class="co">· click a class to list them & select all</div>');
+    head.push('<div class="co">· shift-click a colored square to hide them</div>');
     for(const c of names){const l=cnt.get(c),open=openCls.has(c),X=ENTS[l[0]];
       const nh=l.reduce((s,ei)=>s+(shown(ei)?0:1),0), st=!nh?'':nh===l.length?' hid':' part';
-      rows.push('<div class="li'+st+'" data-c="'+esc(c)+'"'+(nh?' title="'+(nh===l.length?'all hidden':nh+' of '+l.length+' hidden')+'"':'')+'><span class="ar" data-o="'+esc(c)+'">'+(open?'▾':'▸')+'</span><span class="sw" style="background:rgb('+(X.ccol||X.col).map(v=>Math.round(v*255)).join(',')+')"></span><span class="nm">'+esc(c)+'</span><span class="ct">'+(nh?nh+' / ':'')+l.length+'</span></div>');
+      rows.push('<div class="li'+st+'" data-c="'+esc(c)+'"'+(nh?' title="'+(nh===l.length?'all hidden':nh+' of '+l.length+' hidden')+'"':'')+'><span class="ar" data-o="'+esc(c)+'">'+(open?'▾':'▸')+'</span><span class="sw" style="background:rgb('+(X.ccol||X.col).map(v=>Math.round(v*255)).join(',')+')"'+
+        (c!=='worldspawn'?' title="Shift+click: '+(nh===l.length?'show':'hide')+' every '+esc(c)+'"':'')+'></span><span class="nm">'+esc(c)+'</span><span class="ct">'+(nh?nh+' / ':'')+l.length+'</span></div>');
       if(open)for(const ei of l.slice(0,500))rows.push(entRow(ei,true));}
   }else{
     const used=texCounts();
-    rows.push('<div class="co" style="margin-bottom:4px">'+used.length+' textures · click one to select every brush using it</div>');
+    head.push('<div class="co">'+used.length+' textures · click one to select every brush using it</div>');
     for(const[ti,c]of used)rows.push(texRow(ti,c));
   }
+  $('listHead').innerHTML=head.join('');
   box.innerHTML=rows.join('');
+  $('listSect').style.display=rows.length?'':'none';
 }
 function texRow(ti,c){const te=TEX[ti],u=TEXURL[ti];
   return '<div class="li" data-t="'+ti+'">'+(u?'<img src="'+u+'" alt="">':'<span class="sw" style="width:18px;height:18px;background:rgb('+(te.c||[.5,.5,.5]).map(v=>Math.round(v*255)).join(',')+')"></span>')+
     '<span class="nm">'+esc(te.n.replace(/^textures\//,''))+(te.f&TF_MISSING?' <span style="color:var(--err)">(missing)</span>':'')+'</span><span class="ct">'+c+'</span></div>';}
+// The second click of a double-click on a class or texture row. The first click rebuilds the
+// list, so the row under the mouse is a new element by the second one, and the browser may
+// neither fire dblclick nor count the click as a second one (e.detail): a click on the same
+// row within the double-click time counts as well.
+let lastRowClick=null;
+function secondClick(e,key){
+  const now=performance.now(),again=e.detail>1||(!!lastRowClick&&lastRowClick.key===key&&now-lastRowClick.t<500);
+  lastRowClick=again?null:{key:key,t:now};
+  return again;
+}
 $('listBox').addEventListener('click',e=>{
+  const r=e.target.closest('.li');
+  // Shift+click a row's coloured square: hide that entity, or every entity of the class
+  // (again: show them)
+  if(e.shiftKey&&r&&e.target.closest('.sw')&&(r.hasAttribute('data-e')||r.hasAttribute('data-c'))){
+    if(r.hasAttribute('data-e'))toggleHideEnts([+r.getAttribute('data-e')],entName(+r.getAttribute('data-e')));
+    else{const c=r.getAttribute('data-c');toggleHideEnts(classLists().get(c)||[],'every '+c);}
+    return;}
   const o=e.target.closest('[data-o]');if(o){const c=o.getAttribute('data-o');if(openCls.has(c))openCls.delete(c);else openCls.add(c);renderList();return;}
-  const r=e.target.closest('.li');if(!r)return;
+  if(!r)return;
   if(r.hasAttribute('data-e')){const ei=+r.getAttribute('data-e');SEL.clear();if(ei)SEL.add('e'+ei);selectionChanged();if(ei)focusSelection();renderList();}
-  // a class row selects the class and opens (or closes) its list of entities
-  // (not on the second click of a double-click, which flies to the class)
-  else if(r.hasAttribute('data-c')){const c=r.getAttribute('data-c');selectClass(c,e.shiftKey);
-    if(e.detail<2){if(openCls.has(c))openCls.delete(c);else openCls.add(c);}renderList();}
-  else if(r.hasAttribute('data-t')){selectByTexture(+r.getAttribute('data-t'),e.shiftKey);selectionChanged();renderList();}
+  // a class row selects the class and opens (or closes) its list of entities; a
+  // double-click leaves it open and flies to the class
+  else if(r.hasAttribute('data-c')){const c=r.getAttribute('data-c'),again=secondClick(e,'c:'+c);selectClass(c,e.shiftKey);
+    if(again)openCls.add(c);else if(openCls.has(c))openCls.delete(c);else openCls.add(c);
+    renderList();if(again)focusSelection();}
+  else if(r.hasAttribute('data-t')){const ti=+r.getAttribute('data-t'),again=secondClick(e,'t:'+ti);
+    selectByTexture(ti,e.shiftKey);selectionChanged();renderList();if(again)focusSelection();}
 });
-$('listBox').addEventListener('dblclick',e=>{const r=e.target.closest('.li');if(r&&(r.hasAttribute('data-c')||r.hasAttribute('data-t')))focusSelection();});
+// Hide entities as Hide does (Ctrl+Z undoes it), or, when every one of them is hidden
+// already, show again the ones Hide hid. Those a Show button hides stay hidden: the
+// message names the button.
+function toggleHideEnts(list,label){
+  list=list.filter(ei=>ei>0);if(!list.length)return;
+  const vis=list.filter(ei=>entVisible(ei));
+  if(vis.length){
+    const step={e:[],p:[]};
+    for(const ei of vis)if(!hidEnt.has(ei)){hidEnt.add(ei);step.e.push(ei);SEL.delete('e'+ei);}
+    if(step.e.length){HIDE_UNDO.push(step);if(HIDE_UNDO.length>500)HIDE_UNDO.shift();}
+    rebuildWorld();selectionChanged();
+    flash(label+': '+step.e.length+' hidden - Shift+click the square again to show '+(step.e.length===1?'it':'them')+', Ctrl+Z undoes');
+    return;}
+  const back=list.filter(ei=>hidEnt.has(ei));
+  if(back.length){for(const ei of back)hidEnt.delete(ei);HIDE_UNDO.push({show:true,e:back,p:[]});if(HIDE_UNDO.length>500)HIDE_UNDO.shift();
+    rebuildWorld();selectionChanged();}
+  const still=list.filter(ei=>!entVisible(ei)), btn=filterNamesOf(still);
+  flash(back.length?label+': '+back.length+' shown again'+(still.length?', '+still.length+' still hidden by '+btn:'')
+    :label+': hidden by '+btn+', not by Hide');
+}
+// The Show buttons that hide these entities: by their kind, or (a brush entity) by its faces.
+function filterNamesOf(list){
+  let bits=0;const ents=new Set();
+  for(const ei of list){bits|=ENTS[ei].cat&hiddenMask;if(ENTS[ei].hasGeo)ents.add(ei);}
+  if(ents.size)for(let f=0;f<SC.nf;f++)if(ents.has(SC.faceEnt[f]))bits|=SC.faceCat[f]&hiddenMask;
+  // the buttons that are off: Entities only when all of it is (not just its Lights, say)
+  let names=FILTERS.filter(f=>(f.m&bits)&&(hiddenMask&f.m)===f.m).map(f=>f.l);
+  if(!names.length)names=FILTERS.filter(f=>f.m&bits).map(f=>f.l);
+  return names.length?'the '+names.join(' / ')+' button'+(names.length>1?'s':''):'a Show button';
+}
 function selectFindResults(){runFind($('findIn').value);SEL.clear();
   for(const r of findRes){if(r.e!=null&&r.e>0)SEL.add('e'+r.e);else if(r.t!=null)selectByTexture(r.t,true);}
   selectionChanged();flash(SEL.size+' selected');}
@@ -3783,7 +4238,8 @@ function infoEntity(ei){
     if(!b.exact&&X.hasGeo)h+='<div class="note">MOHAA keeps no readable setsize for brush entities, so this is the box around its brushes measured from where the compiler puts its origin. Open the .bsp instead of the .map for the exact box.</div>';
     // script lines
     const name=tn?'$'+tn:'local.ent';
-    const ang=(e.kvl.angles||e.kvl.angle)?fvec(entAngles(e.kvl)):null;
+    // a door's "angle" is the way it opens (Door::SetDir), not a turn of the door
+    const ang=(e.kvl.angles||(e.kvl.angle&&!DOOR_CLASSES[cls]))?fvec(entAngles(e.kvl)):null;
     let sc='';
     if(cls.startsWith('trigger_')){
       sc='local.trig = spawn '+cls+(tn?' "targetname" "'+tn+'"':'')+'\nlocal.trig.origin = '+fvec(o)+'\nlocal.trig setsize '+fvec(b.mins)+' '+fvec(b.maxs);
@@ -3811,6 +4267,7 @@ function infoEntity(ei){
     h+='<div class="note"><a data-path="'+ei+'">Select the whole path</a> (Ctrl+Alt+click): everything it leads to and everything that leads to it.</div>';
   }
   if(e.cls==='info_pathnode')h+=pathNodeInfo(ei);
+  h+=doorInfo(ei);
   // textures of a brush entity
   if(X.hasGeo){const cnt=new Map();for(const pi of primsOfEnt(ei)){const p=SC.prims[pi];for(let f=p.f0;f<p.f1;f++){const t=SC.faceTex[f];cnt.set(t,(cnt.get(t)||0)+1);}}
     if(cnt.size){h+='<h4>Textures</h4>'+kvTable([...cnt.entries()].map(([t,c])=>[c+'x','<a data-tex="'+t+'">'+esc(TEX[t].n.replace(/^textures\//,''))+'</a>']));}}
@@ -4001,6 +4458,7 @@ async function main(){
     prepSeeThrough();
     if(D.lit){setLoad('Lighting the game\'s polygons…',0.6);await tick();LIT=buildLit();}
     gvInit();
+    doorsInit();
     const wk=MAP.ents[0]?MAP.ents[0].kvl:{};
     FOG.far=parseFloat(wk.farplane)||0;FOG.col=parseVec(wk.farplane_color,3)||[0.5,0.5,0.5];
     setLoad('Uploading to the graphics card…',0.8);await tick();

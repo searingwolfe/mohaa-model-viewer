@@ -48,7 +48,7 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 19
+MAP_VIEWER_REV = 21
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
 INDEX_VERSION = 7
@@ -728,6 +728,13 @@ MAP_VIEWER_KEYS = {
                 "after it (Same path); with Shift, add it",
                 ("Ctrl+Alt+Click", "path", "select the whole path through an entity: its \"target\" chain"),
                 ("Ctrl+Alt+Shift+Click", "+ path", "add the whole path through an entity to the selection")),
+            _kx("$", "select every entity with the selected one's targetname (Same targetname)",
+                ("Shift+4", "$name", "select every entity with the same targetname")),
+            _kx("O", "open / close the selected door, as in game (Open door)",
+                ("O", "door", "open / close the selected door")),
+            _kx("Shift+click", "on a coloured square in the Find lists: hide / show that entity, or every entity "
+                "of that class",
+                ("Shift+Click", "hide", "on a Find list's coloured square: hide / show that entity or class")),
             _kx("Ctrl+Shift+click|middle-click", "the clicked face's texture",
                 ("Ctrl+Shift+Click", "texture"), ("MClick", "texture")),
             _kx("N", "more info on the selection", ("N", "info")),

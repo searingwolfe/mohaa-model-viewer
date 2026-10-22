@@ -583,3 +583,61 @@ Changes to `python_installer_updater.bat` unless noted.
     taller, because their centre was on a half unit.
   - The game cvars list says when a map has no AI path nodes at all, instead of saying its
     path file is missing.
+- Map Viewer page rev 20 (`MAP_VIEWER_REV` 20, `MAP_VIEWER_REV_REQUIRED` 20): the Find
+  lists and the Selection panel.
+  - Double-clicking a class in Find > Classes leaves its list of entities open and flies to
+    the class. The first click rebuilds the list, so the browser could count the second
+    click as a new single click: that closed the list again, and the fly-to never came.
+    A second click on the same class or texture row within half a second now counts as the
+    double-click.
+  - Shift+click a coloured square in the Find lists to hide that entity, or every entity of
+    that class; Shift+click it again to show them. It goes on the Hide stack, so Ctrl+Z
+    undoes it. Entities that a Show button hides stay hidden, and the message names the
+    button.
+  - Each tab's counts and hints sit above a line, with the list in a section of its own
+    under it. The Classes tab gives the counts and two hints on separate lines, and
+    Results now shows how many were found.
+  - **Same targetname** (after Same kind and Same path, or `$`, that is Shift+4) selects
+    every entity with the selected entity's targetname: the group a script reaches as
+    `$name`. It shows when another entity shares the name. The shortcut lists (`H`, and
+    `F1` in the launcher) have `$` and the Shift+click on a square.
+- Map Viewer page rev 21 (`MAP_VIEWER_REV` 21, `MAP_VIEWER_REV_REQUIRED` 21): doors open
+  and close as in game.
+  - **Open door** (in Selection, after Same targetname, or `O`) opens the selected
+    `func_rotatingdoor` or `func_door` the way the use key does (`Door::DoorUse`,
+    `doors.cpp`). While the door is open or opening the button reads **Close door**; with
+    several doors selected it reads Open doors / Close doors.
+  - A rotating door swings `openangle` degrees (90) about its origin. With `alwaysaway` 1
+    (the default) it swings away from the camera, inwards or outwards depending on the side
+    you stand; with `alwaysaway` 0 it always swings the same way, the side its box lies
+    toward (`RotatingDoor::DoOpen`). No spawnflag picks this: OPEN_DIRECTION (2) only
+    counts for a door opened with nobody opening it. A `func_door` slides along `angle`
+    (-1 up, -2 down) by its size that way less `lip` (8) (`SlidingDoor::Setup`).
+  - A door moves at an even speed from wherever it is (`Mover::MoveTo`). A whole move takes
+    `time` seconds, or `doortype` wood 1 s / metal 1.5 s, whichever of those keys comes
+    last (wood unless set); a `func_door`'s `speed` (units a second) overrides both, and on
+    a `func_rotatingdoor` `speed` is the rate itself (1 / time).
+  - Once open it closes by itself `wait` seconds later (3 unless set), as `Door::OpenEnd`
+    does; it stays open with TOGGLE (32) or with `wait` -1 or 0. Closing a door that is
+    still opening sends it back from where it is, and opening a closing door sends it back
+    the way it went.
+  - Doors of one class whose boxes touch open and close as one, led by the first of them
+    in the .map (`Door::LinkDoors`), so both leaves of a double door swing away from the
+    camera. DOOR_DONT_LINK (4) keeps a door from leading others.
+  - Everything of the door moves with it: its faces and the game's lit polygons, the
+    selection and hover outlines, its setsize box, label and target links. It can be
+    clicked where it is, and Fly to goes to it there.
+  - `r_showtris` follows the door: its lines move and turn with it, its axis cross turns,
+    the server links it where it is, and its area portal is open from the moment it starts
+    to open until it is shut again (`gi.AdjustAreaPortalState`, counted as
+    `CM_AdjustAreaPortalState` counts them), so the rooms behind it are drawn while it is
+    open. A door that starts open (spawnflags 1) opens its portal only if it leads its
+    group, as `LinkDoors` does it, and stays where the .map has it until it is closed.
+  - A door's info card has a **Door** section: how it opens, how long that takes, when it
+    closes, what opens it in game (the use key, AUTO_OPEN, TARGETED, or being shot), the
+    doors linked to it and the areas its portal joins.
+  - A `script_door` moves only when its map script tells it to, so its button is greyed out
+    with the reason.
+  - The info card's Script lines no longer give a door the angles of its `angle` key, which
+    sets the way it opens, not its angles (`Door::SetDir`).
+  - The shortcut lists (`H`, and `F1` in the launcher) have `O`.

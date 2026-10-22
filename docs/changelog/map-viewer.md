@@ -174,9 +174,15 @@ run at once.
 - **Hide** (Backspace or the Hide button) and **Show all** (Shift+H) go on a stack that
   `Ctrl+Z` (or the Undo button beside Show all) unwinds one step at a time: a Hide shows
   those things again, a Show all hides again what it showed.
-- **Find, Classes, Textures** (the list under Find): a class row selects the class and
-  opens (or closes) the list of its entities; hidden entities (Hide, or a Show button
-  off) are red, a class with some of them hidden yellow with the hidden count.
+- **Find, Classes, Textures** (the list under Find): each tab's counts and hints sit above
+  a line, and the list is a section of its own under it. A class row selects the class and
+  opens (or closes) the list of its entities; a double-click leaves it open and flies there
+  (a second click on the same row within half a second counts as one, since the first
+  click rebuilds the list and the browser may not see a double-click). Hidden entities
+  (Hide, or a Show button off) are red, a class with some of them hidden yellow with the
+  hidden count. Shift+click a row's coloured square to hide that entity or the whole class
+  (again: show them; on the Hide stack, so Ctrl+Z undoes it); a Show button's hiding stays,
+  and the message names the button.
 - **Entity counts.** Under the map's stats: how many entities are real (the game spawns
   them as entities, each with an entity number; MOHAA has 1024 slots), simple (path
   nodes, player starts, waypoints, vehicle points, grenade hints, AI spawn points, which
@@ -201,7 +207,10 @@ run at once.
   to the selection). The Links section of an entity's info card has the same as a link,
   and the Selection panel's **Same kind** and **Same path** buttons do what Alt+click and
   Ctrl+Alt+click do (Same path shows when the selected entity has a path: its target leads
-  somewhere or something targets it).
+  somewhere or something targets it). **Same targetname** (`$`, Shift+4) selects every
+  entity with the selected one's targetname, the group a script reaches as `$name`; it
+  shows when another entity shares the name. **Open door** (`O`) shows when a door is
+  selected (Doors, below).
 - **Entity boxes** (the `setsize` on the info card): for a `.bsp`, the brush model's
   exact bounds around its origin; for a `.map`, the bounds of the entity's brushes around
   its origin brush, `origin` key, or brush centre. Point entities use a `setsize` key,
@@ -226,6 +235,25 @@ run at once.
 - **Facing arrows** are MOHRadiant's (`Brush_DrawFacingAngle`): white, 4 pixels wide,
   from the middle of the box out to 2.5 times its half-width, the head opening up and
   down; drawn as camera-facing bands each frame.
+- **Doors** (`func_rotatingdoor`, `func_door`): **Open door** in Selection, or `O`, does
+  what the use key does in game (`doors.cpp`, `mover.cpp`); while the door is open or
+  opening it reads Close door. Each door keeps the game's states (closed, opening, open,
+  closing). A rotating door turns `openangle` degrees (90) about its origin, away from the
+  camera with `alwaysaway` 1 (the default) or always the same way with 0
+  (`RotatingDoor::DoOpen`); a `func_door` slides along `angle` by its size that way less
+  `lip` (8). A whole move takes `time` seconds or `doortype` wood 1 / metal 1.5 (the last
+  of those keys wins; a `func_door`'s `speed` overrides both), at an even speed from
+  wherever the door is (`Mover::MoveTo`), and the door closes itself `wait` seconds after
+  it has opened (3; never with TOGGLE, or `wait` -1 or 0). Doors of one class whose boxes
+  touch move together, led by the first of them in the .map (`Door::LinkDoors`). The
+  `.map` faces, the game's polygons and r_showtris's points, planes and lines are put
+  where the door is now from copies of where the `.map` has them (`doorPose`), and the
+  selection, setsize box, label and links follow. The master's area portal is open from
+  the moment it starts to open until it is shut again (`doorPortal`, counted as
+  `CM_AdjustAreaPortalState` counts). The doors run on the page's clock
+  (`doorsAdvance`), so a page left in the background catches up in order. The info card
+  has a Door section. A `script_door` moves only for its map script, so its button is
+  greyed out.
 - **The legend** (`L`, the "L legend" chip, or the Legend button in a node's card; Help >
   Legend / `F2` in the launcher) explains the node colours and borders, the entity
   markers (setsize boxes included) and every editor surface the retail maps use, rain
@@ -272,8 +300,9 @@ run at once.
     `.bsp` without vis data sees every cluster. The overlay ignores the Show buttons: it is
     the game's view.
   - `cm_noAreas 1` opens every area portal. Without it the level is as it starts: doors
-    shut, except `func_door`, `func_rotatingdoor` and `script_door` with spawnflags 1
-    (START_OPEN), whose portal is open (flooded as `CM_FloodAreaConnections` does).
+    shut, except a `func_door`, `func_rotatingdoor` or `script_door` with spawnflags 1
+    (START_OPEN) that leads its group, whose portal is open (flooded as
+    `CM_FloodAreaConnections` does); Open door opens and shuts them (Doors, above).
   - `ai_showroutes 1` (with `ai_showroutes_distance` and `ai_fallheight`) draws the
     connections in the map's `.pth` as `DrawAllConnections` (`navigate.cpp`) draws them:
     green both ways, a red arrowhead one way, a red X on a node with none, a blue circle on
@@ -385,8 +414,14 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
   `ter_error` / `ter_maxlod`) and models at full detail (no model LOD). Patches aren't
   stitched where two meet (`R_StitchAllPatches`, `R_FixSharedVertexLodError`), so a seam
   between patches of different detail can differ from the game's. The sky's cloud dome
-  isn't outlined. Doors are as the level starts (no scripts run), and entities stand where
-  the `.map` puts them. The overlay and its counts cover every direction around the camera.
+  isn't outlined. Doors are as the level starts unless opened with Open door (no scripts
+  run), and other entities stand where the `.map` puts them. The overlay and its counts
+  cover every direction around the camera.
+- Doors: a fully open door doesn't cut the AI paths it blocks. In game `Door::SetState`
+  disconnects every path connection an actor's box can't sweep past the open door
+  (`Entity::DisconnectPaths`, a cylinder trace), and `ai_showroutes` stops drawing those
+  until the door starts closing. Locks, a door's `message` and its sounds aren't
+  simulated, and a door that is blocked doesn't stop.
 - **Planned:** reading a map's other files: its `.min` file, and its `.scr` level
   scripts, to show the models and changes a script adds at run time. More of the game's
   debugging cvars, once checked in game.

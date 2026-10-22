@@ -48,6 +48,11 @@ beyond Python 3, Node.js and a headless browser.
      paks (m5l1a), Spearhead's (t1l1) included, and a `.map` page (r_showtris greyed out).
      Headless Chromium draws with SwiftShader, which drops a GL line with one end behind
      the camera; the cvars' lines are cut at the near plane for it (`clipEnd`).
+   - Open door on a double door from both sides (both leaves swing away from the camera),
+     an `alwaysaway 0` door (the same way from both sides), a sliding `func_door` and a
+     TOGGLE door; it closes itself after `wait`; with `r_showtris 1` the room behind a
+     door that joins two areas is drawn only while it is open. A test can drive the doors
+     with its own clock: stop the frame loop, set `performance.now`, call `doorsAdvance`.
 
 ## Things that must change together
 
@@ -81,6 +86,8 @@ beyond Python 3, Node.js and a headless browser.
   `renderergl1/tr_shade.c` (`DrawTris`), `renderergl1/tr_curve.c`,
   `renderergl1/tr_surface.c` (`RB_SurfaceGrid`), `qcommon/cm_test.c` (areas and PVS),
   `server/sv_snapshot.c`, `fgame/archive.cpp` and `corepp/lz77.cpp` (the `.pth` file).
+  For doors: `fgame/doors.cpp`, `fgame/mover.cpp`, `fgame/g_spawn.cpp` (keys are read after
+  the constructor, in order), `server/sv_world.c` (`SV_LinkEntity`) and `qcommon/cm_test.c`.
 - Single files can be read from
   `https://raw.githubusercontent.com/openmoh/openmohaa/main/code/<dir>/<file>`; a sparse
   clone is easier for searching.
