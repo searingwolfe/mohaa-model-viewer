@@ -41,7 +41,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 21
+MAP_VIEWER_REV_REQUIRED = 29
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".cfg": "scr"}
@@ -106,14 +106,15 @@ _PRIVACY_SWAPS = (
      "        Clear %temp% files. On Windows, the embedded 3D pane (Microsoft Edge\n"
      "        WebView2) also keeps its browser files in a \"webview2\" folder beside (a)."),
     ("(theme, backdrop colour,\n"
-     "        renderer, placement angles) in the browser's local storage. The embedded\n"
-     "        pane runs in private mode and forgets them when the program closes; in\n"
-     "        your own browser they stay with that browser's data for local files.",
+     "        renderer, placement angles, game cvars) in the browser's local storage.\n"
+     "        The embedded pane runs in private mode and forgets them when the program\n"
+     "        closes; in your own browser they stay with that browser's data for local\n"
+     "        files.",
      "(theme, backdrop colour,\n"
-     "        panel options, and where you left the camera on each map) in the\n"
-     "        browser's local storage. The embedded pane runs in private mode and\n"
-     "        forgets them when the program closes; in your own browser they stay\n"
-     "        with that browser's data for local files."),
+     "        panel options, game cvars, and where you left the camera on each map) in\n"
+     "        the browser's local storage. The embedded pane runs in private mode and\n"
+     "        forgets them when the program closes; in your own browser they stay with\n"
+     "        that browser's data for local files."),
     ("(textures are embedded as data: URIs)", "(its textures are embedded in it)"),
     ("workspace, model headers\n"
      "   are bounds-checked, and generated pages escape game-file text), but no\n"
@@ -212,8 +213,7 @@ class MapApp(ML.App):
         self.bind_all("<ButtonPress-3>", self._popup_dismiss_check, add="+")
         self.bind_all("<ButtonPress-1>", self._reclaim_focus, add="+")
         self.bind_all("<ButtonPress-3>", self._reclaim_focus, add="+")
-        self.bind_all("<ButtonPress-1>", self._stop_view_camera, add="+")
-        self.bind_all("<ButtonPress-3>", self._stop_view_camera, add="+")
+        self._watch_camera_stop()      # clicks and keys in the launcher stop the map's camera
         self._page_requests = []       # from the page's messages, run on the Tk thread (_poll_log)
         self.bind("<Configure>", self._dismiss_transients, add="+")
         self.bind("<Unmap>", self._dismiss_transients, add="+")
@@ -1151,18 +1151,6 @@ class MapApp(ML.App):
             try: fn()
             except Exception as e: self._log_line(f"(viewer request: {e})", "err")
         super()._poll_log()
-
-    def _stop_view_camera(self, e):
-        """A click on the launcher stops the embedded viewer's camera: the key or mouse button
-        moving it is let go here, where the page never hears it, so it would keep moving
-        (the page's X does the same by hand)."""
-        if self._webview is None: return
-        try:
-            w = e.widget
-            if isinstance(w, str): w = self.nametowidget(w)
-            if w is self._webview or str(w).startswith(str(self._webview)): return
-        except Exception: pass
-        self._embed_js("try{if(typeof stopCamera==='function')stopCamera();}catch(e){}")
 
     # Text editors that open a file at a line, and how: {program name: args(file, line)}.
     _EDITOR_LINE = {

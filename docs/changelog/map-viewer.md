@@ -39,9 +39,10 @@ run at once.
    or the editor picture for caulk, clips, triggers, sky and other tool textures, scaled
    to Options -> Texture size, 256 by default), the placed models as meshes, the sky
    boxes, the entity definitions of the classes used, for a `.bsp` the exact bounds of
-   every brush entity, the game's lighting (below) and what `r_showtris` needs (the BSP
-   tree, leafs, vis lump and the lines of every surface the game draws), and the map's
-   `.pth` path file when there is one (Game cvars, below).
+   every brush entity, the game's lighting (below) and what `r_showtris` and
+   `r_shownormals` need (the BSP tree, leafs, vis lump, the lines of every surface the
+   game draws and the normal at each of its points, and each model's vertex normals), and
+   the map's `.pth` path file when there is one (Game cvars, below).
 5. **Show.** Same as the Model Viewer: the embedded pane with `#embed&theme=...`, or the
    default browser. The page sends `mohaa-close` when Esc closes the map.
 
@@ -95,6 +96,20 @@ run at once.
   the launcher's pane the same list goes to the Output console, in red. After a bad
   block the reader carries on past the `}` that closes it, so a damaged patch or terrain
   block doesn't cut its entity short.
+- **Keys with `$` or `#` in front** (`"$targetname" "mg42guy"`, used some 3600 times in the
+  retail maps) set the key of that name when the game has a setter for it
+  (`SpawnArgs::SpawnInternal`, g_spawn.cpp; `#` gives it as a whole number), and the page
+  reads them that way everywhere (`spawnKeys`, after the .map is read): names, labels,
+  links, Same targetname and Same path, the lists and the info card. The setters' names
+  (`SETTER_KEYS`, from the game's `EV_SETTER` events) are in mohaa_bsp.py and come with
+  the page (`D.sk`); the build reads entities the same way (`MB.kv_dict`). The first
+  written of `name`, `$name` and `#name` wins, since the game runs an entity's keys last
+  to first, except that `$model` outlasts a plain `model` (due earlier); on an actor the
+  plain key wins (Engine notes, Map entities). Without such a
+  setter (`#set`, `#group`, `$type`) the game only makes a script variable of it
+  (`self.set`), so it stays a key of its own. The info card shows the keys as written, and
+  MOHRadiant's look goes by them as written too (`edKey`); so does the decompiler, which
+  reads what the map compiler wrote.
 - **Drawing.** WebGL2. One index buffer holds every face, grouped per material and
   rebuilt when the filters change. Models are instanced; point entities without a model
   are boxes coloured as MOHRadiant colours them (below). With Full Brightness on (and
@@ -127,7 +142,10 @@ run at once.
   triggers, hints, origin brushes, areaportals, nodraw, rain, foliage clips) and the
   entity markers, with the game's lighting and sky (Full Brightness and Simple Sky off).
   Editor look is MOHRadiant's view: everything but hints, areaportals and rain, at Full
-  Brightness with Simple Sky.
+  Brightness with Simple Sky. The two looks are a row of two wide buttons at the bottom of
+  Show, like the cameras' Free-look and Radiant-look; each is on while the Show buttons,
+  the light and the sky are still as it set them (`GAME_LOOK`, `EDIT_LOOK`). Where the
+  panel is too narrow for a name and its key on one line, the key goes under the name.
 - **Trees.** A tree model carries a sprite version: a card of the whole tree
   (`deformVertexes autoSprite2`, `alphaGen oneMinusDistFade`) that the game fades in far
   away as the tree's own surfaces fade out (`alphaGen distFade`; `R_AddStaticModelSurfaces`
@@ -174,15 +192,30 @@ run at once.
 - **Hide** (Backspace or the Hide button) and **Show all** (Shift+H) go on a stack that
   `Ctrl+Z` (or the Undo button beside Show all) unwinds one step at a time: a Hide shows
   those things again, a Show all hides again what it showed.
-- **Find, Classes, Textures** (the list under Find): each tab's counts and hints sit above
-  a line, and the list is a section of its own under it. A class row selects the class and
-  opens (or closes) the list of its entities; a double-click leaves it open and flies there
-  (a second click on the same row within half a second counts as one, since the first
-  click rebuilds the list and the browser may not see a double-click). Hidden entities
-  (Hide, or a Show button off) are red, a class with some of them hidden yellow with the
-  hidden count. Shift+click a row's coloured square to hide that entity or the whole class
-  (again: show them; on the Hide stack, so Ctrl+Z undoes it); a Show button's hiding stays,
-  and the message names the button.
+- **Results, Classes, Textures, Entities** (the tabs under Find): each tab's counts and
+  hints sit above a line, and the list is a section of its own under it. A class row
+  selects the class and opens (or closes) the list of its entities; a double-click leaves
+  it open and flies there (a second click on the same row within half a second counts as
+  one, since the first click rebuilds the list and the browser may not see a
+  double-click). What is selected is green (an entity; a class or a texture once
+  everything shown that it covers is), however it was selected: a click in the view, Enter
+  in the search box, a row. Hidden entities (Hide, or a Show button off) are red, a class
+  or texture with some of its users hidden yellow with the hidden count. Shift+click a
+  row's coloured square to hide that entity or the whole class (again: show them; on the
+  Hide stack, so Ctrl+Z undoes it); a Show button's hiding stays, and the message names
+  the button.
+  - **Textures**: a click selects everything shown that uses the texture (`texUse`): each
+    world brush with a face in it, each brush entity, and each entity whose model draws it,
+    such as a static prop's (`armchairposh` on mohdm1 is only on its nine armchairs).
+    Shift+click a texture's square hides all of those, as Hide does (again: shows them).
+    The count is the faces and model surfaces using it, as before.
+  - **Entities**: the entities the game gives an entity number to, in that order, as
+    `sv_showentnums` numbers them (`gameEnts`, so they follow the game cvars' g_gametype,
+    skill, developer and sv_maxclients): "N real entities with entnums", each row its
+    targetname, else `entity` and its number, with the number on the right when the name
+    doesn't give it. The world (1022) isn't listed, nor an entity that removes itself as it
+    spawns (misc_model, func_remove), whose number stays unused. A click selects the entity
+    and flies there; the tooltip has its class, numbers and origin.
 - **Entity counts.** Under the map's stats: how many entities are real (the game spawns
   them as entities, each with an entity number; MOHAA has 1024 slots), simple (path
   nodes, player starts, waypoints, vehicle points, grenade hints, AI spawn points, which
@@ -226,7 +259,8 @@ run at once.
   origins, spline paths, grenade hints...) is its "Not found in source." stand-in: a dark
   green 16-unit cube on the origin. The viewer draws them the same way. Classes defined
   in a .tik keep their definition's colour and box. Path nodes are therefore
-  dark green, pink with a targetname, flat cyan for the friendlynodes' `_color`. A path
+  dark green, pink with a `targetname` key as written (MOHRadiant reads `$targetname` as
+  any other key, so such a node stays green), flat cyan for the friendlynodes' `_color`. A path
   node with AI flags also gets MOHRadiant's thick outline by its spawnflags, first match:
   COVER green, CORNER_LEFT yellow, CORNER_RIGHT yellow-green, SNIPER red, CRATE dark
   red, CONCEALMENT blue, DUCK cyan; black for flags that don't go together
@@ -278,13 +312,17 @@ run at once.
   launcher). Both windows read `MAP_VIEWER_KEYS` in mohaa_map_view.py. The page's window
   is the Model Viewer's (`KEYS_JS` / `KEYS_CSS` in mohaa_view.py), the launcher's is
   `KeyMapWindow` in mohaa_launcher.py.
-- **Game cvars** (Display > "game cvars", below backdrop, or `` ` ``): a few of the game's
-  debugging cvars, doing in the page what they do in game. A click on a row sets it (again:
-  back to the game's default); the filter box is also the console (`r_showtris 2` then
-  Enter; a name alone tells its value and default). The list's foot shows the camera's
-  cluster and area, what is drawn from there (counted in every direction: the game also
-  drops what is outside the view), and the path file's source; the cvars set are named
-  beside the button and remembered. `CVAR_DEFAULTS` / `CVAR_ROWS` in the page hold them.
+- **Game cvars** (Display > "game cvars", below backdrop, or `` ` ``): the game's
+  debugging cvars that a map can show, doing in the page what they do in game, in groups
+  (What the renderer draws, Lighting, Entities, AI paths, The game the entities spawn
+  for). A click on a row sets it (again: back to the game's default); the filter box is
+  also the console (`r_showtris 2` then Enter, `r_farplane_color 1 .5 0` for a colour; a
+  name alone tells its value and default). A row the map can't use is greyed out with the
+  reason. The list's foot shows the camera's cluster and area, what is drawn from there
+  (counted in every direction: the game also drops what is outside the view), and what
+  each cvar that is set found; the cvars set are named beside the button and remembered
+  (`r_lockpvs` aside: it locks where the camera is). `CVAR_DEFAULTS` / `CVAR_ROWS` in the
+  page hold them.
   - `r_showtris 1 / 2 / 3` (`.bsp` only) outlines what the renderer draws from the camera
     (`DrawTris`, `tr_shade.c`): 1 behind walls, 2 through them with axis crosses, 3 the
     crosses alone. The page walks the `.bsp`'s tree the way `tr_world.c` does: the
@@ -299,18 +337,71 @@ run at once.
     sends (`sv_snapshot.c`). A leaf with no cluster (outside the map) keeps everything; a
     `.bsp` without vis data sees every cluster. The overlay ignores the Show buttons: it is
     the game's view.
+  - `r_shownormals 1` (`.bsp` only) draws a white line 2 units long along the normal of
+    each point r_showtris would draw, over everything (`DrawNormals`, `tr_shade.c`, which
+    `RB_EndSurface` runs on every batch as it runs `DrawTris`). A face's points take its
+    plane (`lightmapVecs[2]` as `ParseFace` copies it), a triangle soup's its vertex
+    normals, a patch's the rows and columns `RB_SurfaceGrid` keeps, with the grid's normals
+    (`MakeMeshNormals` on the finished grid, ported as `grid_normals` in mohaa_bsp.py); the
+    build sends them for every point (`vn`, signed bytes) and each face's and soup's run of
+    points (`si` 5 and 6). A model's vertices take their normal turned by their first
+    weight's bone (`SkelVertGetNormal`, a static model's `pStaticNormal`; the model's `n`):
+    an entity's lines are 2 world units (`RB_SkelMesh` scales the points, not the
+    normals), a static prop's 2 of its own units, so its scale stretches them
+    (`R_RotateForStaticModel` scales the matrix). Terrain has none: `tr_terrain.c` never
+    fills them in. In game a face or patch fills its normals in only when its shader uses
+    them (`needsNormal`: an environment map, `deformVertexes`, a dot `alphaGen` or `rgbGen`,
+    `tcMod macro`), `needsLSpherical`, or there is a dynamic light in the scene
+    (`RB_SurfaceFace`, `RB_SurfaceGrid`); otherwise its lines show whatever the batch before
+    left in the tessellator. The page always shows each surface's own. The lines are made
+    the first time the cvar is on, from where the doors are then, and a door that moves
+    turns its normals with it.
   - `cm_noAreas 1` opens every area portal. Without it the level is as it starts: doors
     shut, except a `func_door`, `func_rotatingdoor` or `script_door` with spawnflags 1
     (START_OPEN) that leads its group, whose portal is open (flooded as
     `CM_FloodAreaConnections` does); Open door opens and shuts them (Doors, above).
-  - `ai_showroutes 1` (with `ai_showroutes_distance` and `ai_fallheight`) draws the
-    connections in the map's `.pth` as `DrawAllConnections` (`navigate.cpp`) draws them:
+  - `ai_showroutes 1` (with `ai_showroutes_distance` and `ai_fallheight`; the viewer starts
+    the distance at 8200, where the game's default is 1000, since it draws that many
+    without slowing down) draws the connections in the map's `.pth` as
+    `DrawAllConnections` (`navigate.cpp`) draws them:
     green both ways, a red arrowhead one way, a red X on a node with none, a blue circle on
     a DONT_LINK node. The `.pth` is `maps/<map>.pth` in the paks (else beside the file),
     unpacked (`CSVG` + LZ77, `lz77.cpp`) and read as `PathSearch::ArchiveLoadNodes` reads
     it, typed (the game's own files) or untyped (OpenMoHAA's); node i is the map's i-th
     `info_pathnode`, and a count mismatch is flagged. A path node's info card lists its
     connections.
+  - `r_lockpvs 1` keeps the leafs marked from where the camera was (`R_MarkLeaves` stops);
+    `r_novis 1` keeps every leaf. The server's marks (what it sends) and the renderer's
+    are kept apart, so with the lock the entities still follow the camera.
+  - `r_showsky 1` draws the sky box parts the game draws from here, in front of
+    everything: the sky polygons in view projected onto a box round the eye and rounded
+    out to quarters of a side (`ClipSkyPolygon`, `tr_sky.c`).
+  - `r_farplane N` (with `r_farplane_color`, `r_farplane_nocull` and `r_farplane_nofog`)
+    replaces the map's farplane distance, fog colour and culling.
+  - `r_lightmap 1` shows the lightmap in place of the texture where the game does (a
+    stage joined with the texture by `CollapseMultitexture`; `lmr` in the shader index),
+    `r_lightmap 2` the lightmaps coloured by brightness, with the brightest value. The
+    lightmaps are sent raw and brightened in the page (`R_ColorShiftLightingBytes`).
+  - `r_light_showgrid 1`: the light grid points within 256 units, in their colour.
+  - `r_showstaticbboxes 1`: a magenta box round each static model drawn from here (its
+    .tik's bounds times its scale, turned with it).
+  - `sv_showentnums 1`, `sv_showbboxes 1` to `8` and `g_entinfo 1` to `4` (with
+    `g_entinfo_max`) number and box the entities within 1000 units as the game does
+    (`Entity::DrawBoundingBox`, `Actor::ShowInfo`), counted in the order the game spawns
+    them for `g_gametype`, `skill`, `developer` and `sv_maxclients` (the last group of
+    rows); the world is 1022. An info card gives the entity number and radnum. An
+    entity's box (`gameBox`) is its `setsize` key, else its .tik's setsize, else its .tik's
+    bounds times its scale; an AI's is a standing player's, ( -15 -15 0 ) ( 15 15 94 ),
+    which `Actor::EventStart` sets after the spawn args (rev 23).
+  - `sv_showcameras 1` and `g_showflypath 1` draw the spline paths (`CreatePath`) of the
+    cameras and of `info_splinepath` chains; `func_camera.tik` isn't in the game's files,
+    so a camera is a wire stand-in.
+  - `cg_rain_drawcoverage 1`: where each `func_rain`'s drops land, cut to the map
+    script's `rain_min_dist` (512).
+  - `ai_shownodenums 1`, `ai_shownode N` (with `ai_showallnode 1`) and `g_nodecheck 1`:
+    node numbers, the nodes the game finds where you stand (a player box traced against
+    the world's brushes, as `DebugNearestNodeList` / `DebugNearestNodeList2` do), and the
+    `.pth`'s node check.
   - The cvars' lines are cut at the near plane in the vertex shader (`clipEnd`), since
     SwiftShader drops a line with one end behind the camera.
 - **Remembered** per browser: theme, backdrop, display / filter choices, camera
@@ -362,22 +453,39 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
 ## Cameras
 
 - **Free-look** is the Model Viewer's: drag to look, WASD / arrows, Space / C, Q / E
-  tilt. With the camera tilted, looking and turning follow the tilted screen, as in the
-  Model Viewer: a mouse movement (or arrow key) is rotated by the roll before it becomes
-  yaw and pitch (`lookBy`), so dragging down still looks toward the bottom of the screen.
+  tilt (Q the head to the left shoulder, E to the right, as in the Model Viewer). With
+  the camera tilted, looking and turning follow the tilted screen, as in the Model
+  Viewer: a mouse movement (or arrow key) is rotated by the roll before it becomes yaw
+  and pitch (`lookBy`), so dragging down still looks toward the bottom of the screen.
   A / D strafe along the tilted screen's right, and Space / C rise along its up (world
-  up turned about the view line by the roll; straight up and down with no tilt). End
-  levels the view and clears the tilt.
+  up turned about the view line by the roll; straight up and down with no tilt). U
+  levels the view and clears the tilt (it was End, which a browser also uses to scroll
+  the side panel to its bottom).
 - **Radiant-look** follows MOHRadiant: right-drag flies (push up = forward, sideways =
   turn, like `Cam_MouseControl`), arrows move and turn, `,` / `.` strafe, D / C rise and
-  fall, A / Z look up and down, End levels the view, PgUp / PgDn hop to the floor above /
-  below (UpFloor / DownFloor), Ctrl+arrows and Ctrl+`,` / `.` move one 64-unit grid step,
-  `[` / `]` move the cubic clip.
+  fall, A / Z look up and down, U levels the view (MOHRadiant's End), PgUp / PgDn hop to
+  the floor above / below (UpFloor / DownFloor), Ctrl+arrows and Ctrl+`,` / `.` move one
+  64-unit grid step, `[` / `]` move the cubic clip.
 - **Stopping.** `X` stops the camera (held keys, a drag, Radiant-look's flight, a fly-to).
   It also stops by itself when the page loses the keyboard or the window, while the page
   doesn't have the focus, when a drag's mouse button turns out to have been let go
-  outside the page, and, in the launcher's pane, on any click on the launcher: a key or
-  button let go outside the page never reaches it, and the camera used to keep moving.
+  outside the page, and, in the launcher's pane, on a click with any mouse button on the
+  launcher: a key or button let go outside the page never reaches it, and the camera used
+  to keep moving. A key pressed or let go in the launcher makes the page let go of its
+  keys (`releaseCameraKeys`; a drag or a fly-to goes on), and on Windows the launcher reads
+  the keyboard itself, so letting go of the last camera key lets go of them wherever its
+  key-up went (`App._watch_camera_stop`). Once stopped, a key still held stays let go: its
+  auto-repeats don't take it up again, only a new press does. A right-click that opens the
+  browser's own menu (anywhere in the page but the 3D view) stops it too, since that menu
+  takes the keyboard while it is open.
+- **Go to and angles** (under the sliders): `go to: x y z` flies the camera to a position
+  typed or pasted (Enter; brackets and commas are fine), and **Copy pos** copies where it
+  is as `( x y z )`. `angles: pitch yaw roll` turns it where it stands to angles as the
+  game takes them (`AngleVectors`: looking down is a positive pitch), and **Copy ang**
+  copies its own the same way, `( pitch yaw roll )`, pitch and roll in -180..180 and yaw
+  in 0..360. The page's own roll turns the other way to the game's (`camAxes` tilts the
+  right axis up for a positive roll, `AngleVectors` down), so both swap its sign
+  (`camAngles`, `turnTo`).
 - `V` switches cameras, `R` returns to the player start, `B` toggles Full Brightness,
   `K` Simple Sky, `M` Simple models, `L` opens the legend, `` ` `` the game cvars list and
   `T` switches the theme. The
@@ -410,11 +518,14 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
   scripts open in the text editor. A map's `.pth` is read by its page (ai_showroutes),
   not opened from the tree on its own.
 - Triangle soups in a `.bsp` (rare in MOHAA maps) are counted but not decompiled.
-- `r_showtris` draws terrain at full detail (the game thins it out with distance,
-  `ter_error` / `ter_maxlod`) and models at full detail (no model LOD). Patches aren't
-  stitched where two meet (`R_StitchAllPatches`, `R_FixSharedVertexLodError`), so a seam
-  between patches of different detail can differ from the game's. The sky's cloud dome
-  isn't outlined. Doors are as the level starts unless opened with Open door (no scripts
+- `r_showtris` and `r_shownormals` draw terrain at full detail (the game thins it out with
+  distance, `ter_error` / `ter_maxlod`; it has no normals anyway) and models at full
+  detail (no model LOD), and every face and patch with its own normals (see above).
+  Patches aren't stitched where two meet (`R_StitchAllPatches`,
+  `R_FixSharedVertexLodError`; the stitching adds rows and columns and makes those grids'
+  normals again), so a seam between patches of different detail can differ from the
+  game's. The sky's cloud dome isn't outlined. Doors are as the level starts unless
+  opened with Open door (no scripts
   run), and other entities stand where the `.map` puts them. The overlay and its counts
   cover every direction around the camera.
 - Doors: a fully open door doesn't cut the AI paths it blocks. In game `Door::SetState`

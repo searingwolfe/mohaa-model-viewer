@@ -64,6 +64,45 @@ and line numbers next to the code that depends on them.
 - The full list of emitter commands the viewer understands is in
   [emitter-commands.md](emitter-commands.md).
 
+## Level of detail, bounds and hit locations
+
+- A skelmodel's level of detail is per part: `GetLODFile` (tiki_skel.cpp) gives an `.skd`
+  a control only if some surface's collapse index differs between its first and last
+  vertex, and reads it from the `.lod` beside the `.skd` (96 bytes, or 48 with no
+  constants; `TIKI_CalcLodConsts` recomputes them). An `.skb` never loses detail.
+- Without a `.lod`, the default curve's far end is `lodIndex[10]`, one past the array,
+  which in `skelHeaderGame_t` is `numBoxes`, usually 0: a model with no `.lod` is reduced
+  at mid range and whole again far away.
+- 88 of the retail `.lod` files (the `animate/bodies` corpses among them) have a curve that
+  starts above 0, so the game never draws those models whole, even with `r_uselod 0`.
+- `RB_SkelMesh` keeps a surface's vertices down to the first whose collapse index is under
+  the cutoff (a binary search from vertex 3), skips the surface when its third vertex is
+  already under it, folds the rest through the collapse map and stops at the first
+  triangle that folds flat. `TIKI_SortLOD` sorted the triangles at load so that this
+  equals dropping every flat triangle.
+- `R_CalcLod` measures a model by radius x 100 / fov_x over its distance. The radius is
+  92 for a `.tik` with `ischaracter` (players and humans get it through `$include`), else
+  the skeletor's frame radius (at least 2, the `.skc` frame's own) times `load_scale`.
+  OpenMoHAA widens fov_x on a wide screen; the original game's is `cg_fov`.
+- A model's bounds (`TIKI_CalculateBounds`, `sv_showbboxes 7`) are the union of the frame
+  bounds of the animation aliased `idle`, the last one loaded winning (`TIKI_InitTiki`),
+  times `load_scale` and the entity's scale: they don't follow the animation playing.
+  An entity whose `.tik` declares no `setsize` takes them as its size (`Entity::setModel`);
+  a player sizes itself in code (the pmove box), and so does an AI as it starts:
+  `Actor::EventStart` (`actor.cpp`) calls `setSize(MINS, MAXS)`, the standing player's
+  box ( -15 -15 0 ) ( 15 15 94 ) (`bg_pmove.cpp:52-53`, from `MINS_X`...`MAXS_Z` in
+  `bg_public.h`), whatever its `setsize` key or `.tik` setsize, since the start comes after
+  the spawn args (`SpawnArgs::Spawn` runs the pending events first; a map's args are posted
+  at -7, `EV_Entity_Start` at -1). The dog too. OpenMoHAA marks the call `//notsure`;
+  `bg_pmove.cpp` isn't among the uploaded files, only on OpenMoHAA's GitHub.
+- The hit spheres (`cm_trace_lbd.cpp`) sit on tag positions times `load_scale`, offset
+  along the tag's own axes; the secondary sphere uses the primary's tag frame. In
+  `Entity::DrawBoundingBox` a missing tag ends the loop, and 10 + i shows location i only
+  for i up to 17, so the left foot never shows alone.
+- A bone's animation channels are the names stored with the bone in the `.skd`
+  (`ofsChannelNames`, `LoadBoneFromBuffer2`), compared exactly: bone `m1garand ` (with a
+  space) is driven by `m1garand  rot`.
+
 ## Shaders and sprites
 
 - `model <name>.spr` in an emitter is a shader name, not a file: the shader named by the
@@ -80,6 +119,27 @@ and line numbers next to the code that depends on them.
 - `blendFunc GL_ONE GL_ONE` in a canvas needs premultiply compensation (alpha = max(R,G,B),
   RGB divided by it). Keeping the texture's own alpha under-lights it, and forcing alpha
   to 255 punches opaque black squares through the backdrop with canvas `'lighter'`.
+
+## Map entities
+
+- A spawn key that starts with `$` or `#` (`SpawnArgs::SpawnInternal`, fgame/g_spawn.cpp)
+  goes to the class's setter event of the same name (`Event::FindSetterEventNum`, an
+  `EV_SETTER` the class responds to), so `"$targetname" "x"` names an entity just as
+  `"targetname" "x"` does. `#` passes the value as a whole number (`atoi`; as a float only
+  when the key's own name has a `.` in it). Without such a setter the key only sets a
+  script variable of that name on the object: `"#set" "1"` is `self.set`, `"$type"` is
+  `self.type`. SimpleEntity's setters are `origin`, `targetname`, `target`, `angles` and
+  `angle`, so every map entity takes `$targetname`; `SETTER_KEYS` in mohaa_bsp.py lists
+  the setters of the classes a map spawns.
+- An entity's spawn keys are posted as events due at one moment (`EV_SPAWNARG`, -7 s;
+  `model` at `EV_PRIORITY_SPAWNARG`, -8), and `Listener::PostEventInternal`
+  (corepp/listener.cpp) links each new event in front of the first queued one due at the
+  same time or later (`LL_Add` inserts before its node, corepp/Linklist.h). So events due
+  together run last posted first, and of a key written twice, or of `targetname` and
+  `$targetname`, the first written stays. A plain `model` is due before the rest, so a
+  `$model` outlasts it wherever it is written. An actor's plain keys are due later
+  (`EV_SPAWNACTOR`, -2; its `model` at `EV_PRIORITY_SPAWNACTOR`, -3) than its `$` and `#`
+  ones, so on an actor the plain key wins.
 
 ## Browser, WebView2 and file URLs
 

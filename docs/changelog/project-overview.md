@@ -33,7 +33,9 @@ Model Viewer and what both share; the Map Viewer has its own notes in
    and `.tik` files in the background.
 2. **Open.** The model is extracted to a temp workspace (`%TEMP%/mohaaview_*`). A `.tik`
    has its `$include`s expanded and is written back so the builder sees the full text; a
-   matching `.map` is extracted for the `setsize` box. The launcher writes a texture
+   matching `.map` is extracted for the `setsize` box, each skelmodel's `.lod` (its level
+   of detail curve) beside it, and the animation the `.tik` names `idle` (the page sizes
+   the model by its bounds). The launcher writes a texture
    manifest (`--textures=`), the emitter sprite table (`--emittertex=`) and the animation
    catalogue (`--animcat=`).
 3. **Build.** `mohaa_view.py <model> --no-open [...]` runs as a subprocess and writes
@@ -83,6 +85,16 @@ Model Viewer and what both share; the Map Viewer has its own notes in
 - **Sprites.** Sprite types follow `tr_sprite.c` (parallel, parallel_oriented, oriented,
   upright); world-space quads are drawn with perspective-correct strips and near-plane
   clipping. See [sprite-roll-rules.md](sprite-roll-rules.md).
+- **Game cvars.** Display > game cvars (or `` ` ``) does some of the game's debugging cvars
+  to the model: `sv_showbboxes` (its boxes, and a person's 19 hit spheres on the Bip01
+  bones), `r_shownormals`, `r_uselod` (the game's level of detail by distance, per part,
+  with a LOD slider and triangle counts) and the particle counts of `cg_showemitters`,
+  `cg_showtempmodels` and `vss_showsources`. The build sends what they need: the vertex
+  normals, each surface's collapse data and each part's LOD control (`DATA.lods`), the
+  frames' radii, and what the game makes of the model as an entity (`DATA.game`: whether
+  it is a character or a Sentient, where its setsize came from, its idle bounds).
+  `CVAR_DEFAULTS` / `CVAR_ROWS` in the page hold the list. Everything stays inert at its
+  default, so a page draws exactly as before until a cvar is set.
 - **Shaders.** Resolved in Python into render hints (additive, alphaFunc, animMap,
   nextbundle + tcMod, deformVertexes autosprite/autosprite2/lightglow, distFade, spriteGen,
   spriteScale, rgbGen vertex) that the JS applies. A stage map missing from the paks is
@@ -90,8 +102,8 @@ Model Viewer and what both share; the Map Viewer has its own notes in
 
 ## Current state
 
-- Version 1.0.000 (pre-release), with both viewers. `VIEWER_REV` 70; the Map Viewer's
-  `MAP_VIEWER_REV` 21 and `INDEX_VERSION` 7.
+- Version 1.0.000 (pre-release), with both viewers. `VIEWER_REV` 76; the Map Viewer's
+  `MAP_VIEWER_REV` 29 and `INDEX_VERSION` 8.
 - Windows is the main platform (embedded pane); macOS and Linux run the launchers and open
   pages in the browser.
 
@@ -105,4 +117,14 @@ Model Viewer and what both share; the Map Viewer has its own notes in
 - **No map data.** Map-placed effects' placement rotation and light grid aren't available,
   so the corona orbit is synthetic (off by default) and volumetric smoke lighting is
   fixed at the engine-neutral 1.0.
+- **Bone names ending in a space.** Fifteen models have a bone whose name ends in a space
+  (the garands' `m1garand `, the Opel truck's and sdkfz's tags, the colt clip, the hidden
+  cabinets' doors, the German shepherd's weapon tags, one of the player's helpers). The
+  builder trims names, so the animation's channel (`m1garand  rot`, with both spaces)
+  never reaches the bone and it keeps no rotation: the garand stands upright instead of
+  lying along X as in game, so its `sv_showbboxes` boxes (which are right) cross it. The
+  engine takes a bone's channels from the names stored with the bone in the `.skd`
+  (`ofsChannelNames`, registered by `LoadBoneFromBuffer2`, tiki_skel.cpp); matching
+  through those, instead of trimming, would fix it. Trimming the channel names instead
+  would merge `opel_opening.skd`'s two bones `exhaust ` and `exhaust  `.
 - **Idea:** fold the Setsizes toggle and its edit pencil into one Display control.

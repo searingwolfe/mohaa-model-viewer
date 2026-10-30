@@ -156,7 +156,8 @@ what the game draws.
 * Show or hide individual surfaces, starting from what the `.tik` hides at spawn;
   an animation's own surface commands apply as it plays.
 * Hang other models off any bone or tag with **attach-to-bone**, each with its
-  own editable scale, offset (in `.tik` units) and angles.
+  own editable scale, offset (in `.tik` units) and angles. Its bone button moves
+  it to another bone or tag and keeps those settings.
 * WebGL rendering with a real depth buffer, or the 2D-canvas renderer (switch with
   View → Viewer renderer in the launcher, or Display → WebGL in the viewer; 2D is used
   automatically when WebGL isn't available).
@@ -175,7 +176,8 @@ opened in a plain browser shows everything already built into it.
   you can fill in the same way.
 * Copy the `setsize` line, or any attach-to-bone `scale / offset / angles` row,
   as one flat line in MOHAA `.tik` spacing, ready to paste straight into a
-  script.
+  script. Each attach-to-bone row's copy button gives the whole attachment as a
+  script `attachmodel` line (model, bone, scale and offset).
 * Free-look (WASD fly) and Tag-lock (orbit a clicked tag) cameras; tag/bone nodes
   and labels with a Tags-vs-Bones filter.
 * An entity placement-angle (pitch / yaw / roll) dial that snaps to quarter

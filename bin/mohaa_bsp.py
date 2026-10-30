@@ -286,8 +286,81 @@ def parse_entity_string(text):
     return ents
 
 
+# A spawn key that starts with "$" or "#" (SpawnArgs::SpawnInternal, g_spawn.cpp) goes to the
+# class's setter of the same name when it has one, "#" as a whole number (atoi): so
+# "$targetname" "x" names an entity just as "targetname" "x" does, and "#leash" "1792" sets its
+# leash. With no such setter it only sets a script variable of that name ("#set" "1" is
+# self.set, "$type" is self.type), which no key here stands for. These are the setter events
+# (EV_SETTER) of the classes a map spawns: SimpleEntity, Entity, Sentient, Actor, the path
+# nodes, turrets, vehicles, info_landmark and the world (not the HUD's, the level's or the
+# player's). The retail maps use "$targetname" some 3600 times, and "#leash", "#health",
+# "#turnspeed" and "#breathsteam" a few.
+# An entity's spawn keys are all posted for the same moment, and the event queue puts each in
+# front of the ones posted before it for that moment (Listener::PostEventInternal, LL_Add),
+# so they run last to first and the first one written wins: of a key written twice, and of
+# "targetname" against "$targetname". A plain "model" is due before the rest
+# (EV_PRIORITY_SPAWNARG), so a "$model" outlasts it. (An actor's plain keys are posted later
+# than its "$" and "#" ones, EV_SPAWNACTOR, so on an actor the plain key wins; the page knows
+# which entities are actors, and nothing the build reads depends on it.)
+SETTER_KEYS = frozenset("""
+origin targetname target angles angle
+model scale health max_health healthonly velocity radnum rotatedbbox
+threatbias forcedropweapon forcedrophealth
+enemyname gun blendtime position emotion animfinal turndoneerror turnspeed sight hearing fov
+type_idle type_attack type_disguise disguise_level type_grenade patrolpath waittrigger alarmnode
+prealarmthread alarmthread disguise_accept_thread accuracy mindist maxdist leash interval
+animname disguise_range disguise_period sound_awareness gren_awareness turret enableenemy
+enablepain painhandler deathhandler attackhandler ammo_grenade mood no_idle noticescale
+fixedleash fallheight enemysharerange weapon voicetype nolongpain favoriteenemy mumble
+breathsteam nosurprise silent avoidplayer movedoneradius lookaroundangle inreload balconyheight
+nonvislevel suppresschance ignorebadplaces runanimrate nationality
+priority max_dist stay_time respawn_time team
+collisionent targettype landmark_name
+farplane farplane_color farplane_bias skybox_farplane skybox_speed
+""".split())
+
+
+def atoi(s):
+    """C's atoi: the whole number at the start of s (after spaces), else 0."""
+    m = re.match(r"\s*([-+]?\d+)", s or "")
+    return int(m.group(1)) if m else 0
+
+
+def spawn_key(key, value):
+    """(key, value) as the game takes a spawn key: "$name" / "#name" with a setter become
+    ("name", value), "#" with the value as a whole number; any other key is only lower-cased."""
+    kl = key.lower()
+    if kl[:1] in ("$", "#") and kl[1:] in SETTER_KEYS:
+        return kl[1:], (str(atoi(value)) if kl[0] == "#" else value)
+    return kl, value
+
+
+def kv_dict(pairs):
+    """An entity's keys as a lower-cased dict, as the game takes them: each key's first value,
+    "$name" / "#name" counting as "name" for SETTER_KEYS (the first of them written wins).
+    A plain "model" is due before the other keys (EV_PRIORITY_SPAWNARG), so a "$model" or
+    "#model" wins over it wherever it is written (on an actor the plain one would; nothing
+    the build reads depends on that). A "$" or "#" key also keeps its own entry."""
+    d = {}
+    for k, v in pairs:                    # every key as written: its first value
+        d.setdefault(k.lower(), v)
+    first, pre_model = {}, None           # the first written of "name", "$name" and "#name"
+    for k, v in pairs:
+        name, val = spawn_key(k, v)
+        first.setdefault(name, val)
+        if name == "model" and k.lower() != "model" and pre_model is None:
+            pre_model = val
+    d.update(first)
+    if pre_model is not None:
+        d["model"] = pre_model
+    return d
+
+
 def ent_get(pairs, key, default=""):
-    """The first value of a key in an entity's (key, value) pairs, ignoring case."""
+    """The first value of a key in an entity's (key, value) pairs, ignoring case. The key as
+    written, as the map compiler reads it (the decompiler wants the classname, the brush
+    model's "model" "*N" and the "origin" its brushes are stored around); kv_dict is the
+    game's view."""
     kl = key.lower()
     for k, v in pairs:
         if k.lower() == kl:
@@ -1458,6 +1531,70 @@ def subdivide_patch(width, height, pts, subdivide):
         for row in ctrl:
             row[:width] = row[:width][::-1]
     return width, height, [p for row in ctrl for p in row[:width]], err[0][:width], err[1][:height]
+
+
+_GRID_NEIGHBOURS = ((0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1))
+
+
+def grid_normals(width, height, grid):
+    """MakeMeshNormals (tr_curve.c), which R_SubdividePatchToGrid runs on the finished grid:
+    the normal of each point of the grid subdivide_patch returns (row by row). Toward each
+    of its eight neighbours it takes the direction to the nearest of the next three points
+    that isn't the same point (stopping at the patch's edge; a grid whose first and last
+    columns, or rows, are within a unit of each other wraps round), and the normal is the
+    sum of the normals of each pair of neighbouring directions, made unit length: (0, 0, 0)
+    when there are none. These are what r_shownormals draws on a curve."""
+    sq = math.sqrt
+    wrap_w = all(sum((grid[j * width][k] - grid[j * width + width - 1][k]) ** 2 for k in range(3)) <= 1.0
+                 for j in range(height))
+    wrap_h = all(sum((grid[i][k] - grid[(height - 1) * width + i][k]) ** 2 for k in range(3)) <= 1.0
+                 for i in range(width))
+    out = []
+    for j in range(height):
+        for i in range(width):
+            bx, by, bz = grid[j * width + i]
+            around = [None] * 8
+            for k, (nx, ny) in enumerate(_GRID_NEIGHBOURS):
+                for dist in (1, 2, 3):
+                    x = i + nx * dist
+                    y = j + ny * dist
+                    if wrap_w:
+                        if x < 0:
+                            x = width - 1 + x
+                        elif x >= width:
+                            x = 1 + x - width
+                    if wrap_h:
+                        if y < 0:
+                            y = height - 1 + y
+                        elif y >= height:
+                            y = 1 + y - height
+                    if x < 0 or x >= width or y < 0 or y >= height:
+                        break                 # the edge of the patch
+                    q = grid[y * width + x]
+                    tx, ty, tz = q[0] - bx, q[1] - by, q[2] - bz
+                    ln = sq(tx * tx + ty * ty + tz * tz)
+                    if ln == 0:
+                        continue              # the same point: look one step further
+                    around[k] = (tx / ln, ty / ln, tz / ln)
+                    break
+            sx = sy = sz = 0.0
+            for k in range(8):
+                a, b = around[k], around[(k + 1) & 7]
+                if a is None or b is None:
+                    continue
+                # CrossProduct(around[(k+1)&7], around[k])
+                cx = b[1] * a[2] - b[2] * a[1]
+                cy = b[2] * a[0] - b[0] * a[2]
+                cz = b[0] * a[1] - b[1] * a[0]
+                ln = sq(cx * cx + cy * cy + cz * cz)
+                if ln == 0:
+                    continue
+                sx += cx / ln
+                sy += cy / ln
+                sz += cz / ln
+            ln = sq(sx * sx + sy * sy + sz * sz)
+            out.append((sx / ln, sy / ln, sz / ln) if ln else (0.0, 0.0, 0.0))
+    return out
 
 
 # ------------------------------------------------------------------------------

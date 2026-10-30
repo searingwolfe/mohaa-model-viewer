@@ -48,10 +48,10 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 21
+MAP_VIEWER_REV = 29
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
-INDEX_VERSION = 7
+INDEX_VERSION = 8
 
 # Default longest side of the textures embedded in the page. 256 keeps a large map's
 # page around 10-20 MB; the launcher can ask for 128 or 512.
@@ -233,6 +233,136 @@ def _picture_stage(stages, editor):
     return None
 
 
+# ---- r_lightmap: what a lit surface shows with it on ----------------------------------------
+# With r_lightmap set the game draws a surface's stages only as far as its first lightmap
+# stage (tr_shade.c RB_IterateStagesGeneric), and a stage that carries the lightmap as its
+# second picture replaces its colour with it (GL_REPLACE). So whether the texture still
+# shows depends on how FinishShader joined the stages (tr_shader.c CollapseMultitexture),
+# which these state bits and colour sources decide, as ParseStage sets them.
+_GLS_SRC = {"gl_one": 0x2, "gl_zero": 0x1, "gl_dst_color": 0x3, "gl_one_minus_dst_color": 0x4,
+            "gl_src_alpha": 0x5, "gl_one_minus_src_alpha": 0x6, "gl_dst_alpha": 0x7,
+            "gl_one_minus_dst_alpha": 0x8, "gl_src_alpha_saturate": 0x9}
+_GLS_DST = {"gl_one": 0x20, "gl_zero": 0x10, "gl_src_alpha": 0x50, "gl_one_minus_src_alpha": 0x60,
+            "gl_dst_alpha": 0x70, "gl_one_minus_dst_alpha": 0x80, "gl_src_color": 0x30,
+            "gl_one_minus_src_color": 0x40}
+_GLS_SIMPLE = {"add": (0x2, 0x20), "filter": (0x3, 0x10), "blend": (0x5, 0x60), "alphaadd": (0x5, 0x20)}
+_GLS_ATEST = {"gt0": 0x10000000, "lt128": 0x20000000, "ge128": 0x30000000, "lt_foliage1": 0x40000000,
+              "ge_foliage1": 0x50000000, "lt_foliage2": 0x60000000, "ge_foliage2": 0x70000000}
+_GLS_BLEND, _GLS_DEPTHMASK, _GLS_NODEPTH, _GLS_DEPTHEQUAL = 0xff, 0x100, 0x800, 0x1000
+# CollapseMultitexture's table: (the first stage's blend, the second's) -> (texture
+# environment, the blend of the joined stage)
+_COLLAPSE = {(0, 0x31): ("mod", 0), (0, 0x13): ("mod", 0), (0x13, 0x13): ("mod", 0x13),
+             (0x31, 0x13): ("mod", 0x13), (0x13, 0x31): ("mod", 0x13), (0x31, 0x31): ("mod", 0x13),
+             (0, 0x22): ("add", 0), (0x22, 0x22): ("add", 0x22)}
+_RGBGENS = {"identity": "identity", "identitylighting": "identitylighting", "global": "global",
+            "entity": "entity", "fromentity": "entity", "oneminusentity": "oneminusentity",
+            "vertex": "vertex", "fromclient": "vertex", "exactvertex": "exactvertex",
+            "lightinggrid": "lightinggrid", "lightingspherical": "lightingspherical",
+            "oneminusvertex": "oneminusvertex", "const": "const", "constant": "const",
+            "static": "static", "scoord": "scoord", "tcoord": "tcoord", "dot": "dot",
+            "oneminusdot": "oneminusdot", "wave": "wave", "colorwave": "colorwave"}
+
+
+def _stage_state(text):
+    """A stage's state bits, colour and alpha sources and which of its two pictures is the
+    lightmap, as tr_shader.c ParseStage leaves them."""
+    st = {"lm": [False, False], "mt": None, "rgb": None, "rgbw": None, "agen": "identity", "agenw": None}
+    src = dst = atest = 0
+    dmask, dmx, deq, nodepth, nocolor, nofog = True, False, False, False, False, False
+    bundle = 0
+    for line in text.splitlines():
+        tok = line.split()
+        if not tok:
+            continue
+        kw = tok[0].lower()
+        arg = tok[1].lower() if len(tok) > 1 else ""
+        if kw == "nextbundle":
+            st["mt"] = "add" if arg == "add" else "mod"
+            bundle = min(1, bundle + 1)
+        elif kw in ("map", "clampmap", "clampmapx", "clampmapy") and arg == "$lightmap":
+            st["lm"][bundle] = True
+        elif kw == "blendfunc" and arg:
+            if arg in _GLS_SIMPLE:
+                src, dst = _GLS_SIMPLE[arg]
+            else:
+                src = _GLS_SRC.get(arg, 0x2)
+                dst = _GLS_DST.get(tok[2].lower() if len(tok) > 2 else "", 0x20)
+            if not dmx:
+                dmask = False
+        elif kw in ("alphafunc", "alphatest") and arg:
+            atest = _GLS_ATEST.get(arg, 0)
+        elif kw == "depthfunc":
+            deq = arg == "equal"
+        elif kw in ("depthwrite", "depthmask"):
+            dmask, dmx = True, True
+        elif kw in ("nodepthwrite", "nodepthmask"):
+            dmask, dmx = False, True
+        elif kw in ("nocolorwrite", "nocolormask"):
+            nocolor = True
+        elif kw == "nodepthtest":
+            nodepth = True
+        elif kw == "nofog":
+            nofog = True
+        elif kw == "rgbgen" and arg in _RGBGENS:
+            st["rgb"] = _RGBGENS[arg]
+            st["rgbw"] = tuple(x.lower() for x in tok[2:]) if arg == "wave" else None
+            if arg in ("vertex", "fromclient", "static") and st["agen"] == "identity":
+                st["agen"] = "vertex"
+        elif kw == "alphagen" and arg:
+            st["agen"] = arg
+            st["agenw"] = tuple(x.lower() for x in tok[2:]) if arg == "wave" else None
+    if st["rgb"] is None:                      # CGEN_BAD: identity or identityLighting
+        st["rgb"] = "identity" if (st["mt"] or st["lm"][0]) else (
+            "identitylighting" if src in (0, 0x2, 0x5) else "identity")
+    if src == 0x2 and dst == 0x10:             # GL_ONE GL_ZERO: no blending
+        src = dst = 0
+        dmask = True
+    if nodepth:
+        dmask = False
+    if st["agen"] == "identity" and st["rgb"] in ("identity", "lightinggrid", "lightingspherical"):
+        st["agen"] = "skip"
+    st["bits"] = ((_GLS_DEPTHMASK if dmask else 0) | src | dst | atest | (_GLS_NODEPTH if nodepth else 0) |
+                  (_GLS_DEPTHEQUAL if deq else 0) | (0x100000 if nocolor else 0) | (0x10000 if nofog else 0))
+    if st["mt"] and st["lm"][0]:               # FinishShader: the lightmap goes second
+        st["lm"] = [st["lm"][1], True]
+    return st
+
+
+def _lightmap_replaces(stage_texts):
+    """True when r_lightmap shows this lit surface's lightmap in place of its texture: its
+    first lightmap stage gives the lightmap's colour (the texture's alpha still cuts or
+    blends it) and isn't a multiply or add over what was drawn before; False when it
+    multiplies the lightmap onto the texture drawn before it, as usual."""
+    sts = [_stage_state(t) for t in stage_texts]
+    if len(sts) > 1:                           # CollapseMultitexture
+        keep = ~(_GLS_BLEND | _GLS_DEPTHMASK) & 0xffffffff
+        i = 0
+        while i < len(sts) - 1:
+            a, b = sts[i], sts[i + 1]
+            i += 1
+            if a["mt"]:
+                continue
+            ar, br = a["bits"] & keep, b["bits"] & keep
+            if ar != br and ((ar & br & ~_GLS_DEPTHEQUAL) or not a["bits"] & _GLS_DEPTHMASK
+                             or not b["bits"] & _GLS_DEPTHEQUAL):
+                continue
+            env = _COLLAPSE.get((a["bits"] & _GLS_BLEND, b["bits"] & _GLS_BLEND))
+            if env is None or a["rgb"] != b["rgb"] or a["agen"] != b["agen"]:
+                continue
+            if env[0] == "add" and a["rgb"] != "identity":
+                continue
+            if (a["rgb"] == "wave" and a["rgbw"] != b["rgbw"]) or (a["agen"] == "wave" and a["agenw"] != b["agenw"]):
+                continue
+            a["lm"] = [b["lm"][0], True] if a["lm"][0] else [False, b["lm"][0]]
+            a["mt"] = env[0]
+            a["bits"] = (a["bits"] & ~_GLS_BLEND) | env[1]
+            del sts[i]
+    for st in sts:
+        if st["lm"][0] or st["lm"][1]:
+            return (st["bits"] & _GLS_BLEND) not in (0x13, 0x31, 0x22)
+    return False
+
+
 def _tcmod_scale(tcmods):
     """The texture scale a stage's tcMods give at time zero (scroll, rotate, turb and
     the other moving ones start at no change): RB_CalcScaleTexCoords multiplies."""
@@ -373,6 +503,7 @@ def parse_shaders(txt, out):
                 info["sprite"] = True
         info["nst"] = len(stages)
         sts = [_parse_stage(st) for st in stages]
+        info["lmr"] = _lightmap_replaces(stages)
         # A sky shader's stages are its cloud layers, drawn over the far box
         # (tr_sky.c R_BuildCloudData). Kept as written; sky_clouds() turns them into what
         # the page draws.
@@ -493,6 +624,10 @@ _LEG_CIRCLE = [[round(12 + 8 * math.sin(k * math.pi / 6), 2), round(12 + 8 * mat
                 [0, 0, 1]] for k in range(12)]
 _LEG_TRIS = [[3, 20, 12, 4, [1, 1, 1]], [12, 4, 21, 20, [1, 1, 1]], [21, 20, 3, 20, [1, 1, 1]], [12, 4, 12, 20, [1, 1, 1]]]
 _LEG_CROSS = [[12, 3, 12, 21, [1, 0, 0]], [3, 12, 21, 12, [0, 1, 0]], [6, 18, 18, 6, [0, 0, 1]]]
+# a curve (grey) with its normals (white)
+_LEG_NRM = [[3, 21, 8, 18.5, [0.45, 0.45, 0.45]], [8, 18.5, 16, 18.5, [0.45, 0.45, 0.45]],
+            [16, 18.5, 21, 21, [0.45, 0.45, 0.45]], [5.5, 19.7, 3, 13.5, [1, 1, 1]],
+            [12, 18.5, 12, 11.5, [1, 1, 1]], [18.5, 19.7, 21, 13.5, [1, 1, 1]]]
 
 LEGEND = [
     {"title": "AI path nodes (info_pathnode)",
@@ -568,13 +703,17 @@ LEGEND = [
                   "through walls."},
          {"sw": "hover", "name": "Under the mouse",
           "desc": "Outlined in the accent colour: a brush's edges, or a model's or marker's box."},
-         {"sub": "r_showtris (the game cvars list, `)"},
+         {"sub": "r_showtris, r_shownormals (the game cvars list, `)"},
          {"sw": "lines", "lines": _LEG_TRIS, "name": "Triangle outlines",
           "desc": "Every triangle the game draws from where the camera is: only what is in its PVS and "
                   "in an area joined to its own. 1 hides them behind walls, 2 shows them through walls."},
          {"sw": "lines", "lines": _LEG_CROSS, "name": "Axis cross",
           "desc": "r_showtris 2 or 3: the origin of the world and of each brush entity and model drawn. "
                   "Red up, green along y, blue a diagonal (the engine's own slip)."},
+         {"sw": "lines", "lines": _LEG_NRM, "name": "Vertex normals",
+          "desc": "r_shownormals 1: a white line 2 units long along the normal of each point the game "
+                  "draws from where the camera is, through walls (the curve itself isn't drawn). "
+                  "Terrain has none."},
      ]},
     {"title": "Brushes and editor surfaces",
      "note": "Editor-only textures are drawn see-through with their editor picture, as MOHRadiant shows "
@@ -707,7 +846,7 @@ MAP_VIEWER_KEYS = {
             _kx("V", "switch Free-look / Radiant-look", ("V", "camera")),
             _kx("R", "back to the player start", ("R", "start")),
             _kx("F|double-click", "fly to the selection", ("F", "fly to"), ("DblClick", "fly to")),
-            _kx("End", "level the view", ("End", "level")),
+            _kx("U", "level the view (no pitch, no tilt)", ("U", "level", "level the view")),
             _kx("PgUp|PgDn", "up / down one floor", ("PgUp", "floor up", "up one floor"),
                 ("PgDn", "floor dn", "down one floor")),
             _kx("[|]", "cubic clip nearer / further", ("[", "clip -", "cubic clip nearer"),
@@ -732,9 +871,9 @@ MAP_VIEWER_KEYS = {
                 ("Shift+4", "$name", "select every entity with the same targetname")),
             _kx("O", "open / close the selected door, as in game (Open door)",
                 ("O", "door", "open / close the selected door")),
-            _kx("Shift+click", "on a coloured square in the Find lists: hide / show that entity, or every entity "
-                "of that class",
-                ("Shift+Click", "hide", "on a Find list's coloured square: hide / show that entity or class")),
+            _kx("Shift+click", "on a coloured square in the Find lists: hide / show that entity, every entity "
+                "of that class, or every brush and entity using that texture",
+                ("Shift+Click", "hide", "on a Find list's square: hide / show that entity, class or texture")),
             _kx("Ctrl+Shift+click|middle-click", "the clicked face's texture",
                 ("Ctrl+Shift+Click", "texture"), ("MClick", "texture")),
             _kx("N", "more info on the selection", ("N", "info")),
@@ -1170,6 +1309,8 @@ class TextureTable:
                 ent["sky"] = info["sky"]
             if info.get("lmstage"):
                 ent["lm"] = 1
+                if info.get("lmr"):
+                    ent["lmr"] = 1             # r_lightmap shows its lightmap alone
             if info.get("rgb0"):
                 ent["rg"] = info["rgb0"]
             # how the game draws its picture: texture scale, alphaGen, depthWrite
@@ -1334,9 +1475,9 @@ def scan_map(text):
             if m:
                 use(m.group(1))
     for e in ents:
-        e["kvd"] = {}
-        for k, v in e["kv"]:
-            e["kvd"].setdefault(k.lower(), v)
+        # each key's first value, "$name" / "#name" counting as "name" where the game has a
+        # setter of that name (MB.kv_dict, SETTER_KEYS)
+        e["kvd"] = MB.kv_dict(e["kv"])
     return ents, textures
 
 
@@ -1415,6 +1556,11 @@ def _resolve_in_vfs(vfs, ref, base_dirs):
     return None
 
 
+def _q8(n):
+    """A normal as three signed bytes (x127), as the page takes normals."""
+    return [max(-127, min(127, int(round(c * 127)))) if c == c else 0 for c in n[:3]]
+
+
 class ModelBuilder:
     """Loads, poses and textures each model the map places, once per model."""
 
@@ -1460,40 +1606,49 @@ class ModelBuilder:
         return txt
 
     def _pose_channels(self, txt, tik_dir, setup_path):
-        """Frame 0 of the model's idle (or first) animation, the way static models
-        are drawn (renderergl1/tr_staticmodels.cpp poses them at frame 0)."""
+        """(frame 0 of the model's idle (or first) animation, the way static models are
+        drawn (renderergl1/tr_staticmodels.cpp poses them at frame 0), the model's own
+        bounds): the idle animation's bounds, the union of its frames' (TIKI_InitTiki
+        copies them into the .tik's mins / maxs, which TIKI_CalculateBounds and
+        r_showstaticbboxes use), or None with no "idle" animation (the game then uses
+        -4..4)."""
         try:
             anims = MV.parse_tik_animations(txt)
         except Exception:
             anims = []
         if not anims:
-            return {}
+            return {}, None
         pick = None
         for a in anims:
             if a["name"].lower() == "idle":
                 pick = a
                 break
+        idle = pick is not None
         if pick is None:
             pick = anims[0]
         ref = _resolve_in_vfs(self.vfs, pick["file"], [setup_path, tik_dir])
         if not ref or not ref.endswith(".skc"):
-            return {}
+            return {}, None
         data = self.vfs.read(ref)
         if not data:
-            return {}
+            return {}, None
         fd, tmp = tempfile.mkstemp(suffix=".skc")
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
             skc = MV.parse_skc(tmp)
         except Exception:
-            return {}
+            return {}, None
         finally:
             try:
                 os.remove(tmp)
             except OSError:
                 pass
-        return skc["frames"][0] if skc.get("frames") else {}
+        bounds = None
+        fb = skc.get("fbounds") or []
+        if idle and fb:
+            bounds = [[min(b[k] for b in fb) for k in range(3)], [max(b[3 + k] for b in fb) for k in range(3)]]
+        return (skc["frames"][0] if skc.get("frames") else {}), bounds
 
     def _build(self, path):
         """Load a .tik (or a bare .skd/.skb), pose it at frame 0 of its idle animation,
@@ -1505,6 +1660,8 @@ class ModelBuilder:
         shader_map = {}
         scale = 1.0
         setsize = None
+        tbounds = None
+        classname = None
         if low.endswith(".tik"):
             txt = self._tik_text(low)
             parts = MV.parse_tik_skelmodels(txt)
@@ -1512,6 +1669,10 @@ class ModelBuilder:
                 raise ValueError("the .tik names no skelmodel")
             scale = MV.parse_tik_scale(txt) or 1.0
             setsize = MV.parse_tik_setsize(txt)
+            try:
+                classname = MV.parse_tik_classname(txt)
+            except Exception:
+                classname = None
             try:
                 for skd, pairs in MTX.parse_tik_setup(txt).items():
                     for sname, sh in pairs:
@@ -1538,7 +1699,7 @@ class ModelBuilder:
             if not skds:
                 raise ValueError("its skelmodel isn't in the paks")
             skd = MV.merge_skds(skds) if len(skds) > 1 else skds[0]
-            channels = self._pose_channels(txt, tik_dir, setup_path)
+            channels, tbounds = self._pose_channels(txt, tik_dir, setup_path)
         else:
             data = self.vfs.read(low)
             if data is None:
@@ -1564,6 +1725,11 @@ class ModelBuilder:
         idx = []
         surfs = []
         nverts = 0
+        # r_shownormals: each vertex's normal turned by its first weight's bone, as the
+        # renderer turns it (SkelVertGetNormal for an entity, pStaticNormal for a static
+        # model, tr_staticmodels.cpp), unscaled
+        from array import array
+        nrm = array("b")
         # Where each surface starts in the engine's own vertex numbering (every surface of
         # every mesh in order, hidden ones included): a static model's baked vertex light
         # is stored in that order (tr_staticmodels.cpp R_AddStaticModelSurfaces).
@@ -1582,7 +1748,8 @@ class ModelBuilder:
                         break
             first = len(idx)
             base = nverts
-            for weights, (u, v) in zip(s["verts"], s["uvs"]):
+            ns = s.get("normals") or []
+            for vi, (weights, (u, v)) in enumerate(zip(s["verts"], s["uvs"])):
                 X = Y = Z = 0.0
                 for bi, wv, off in weights:
                     if not (0 <= bi < len(wR)):
@@ -1595,6 +1762,14 @@ class ModelBuilder:
                 pos += (X * scale, Y * scale, Z * scale)
                 uvs += (u, v)
                 nverts += 1
+                b0 = weights[0][0] if weights else -1
+                if vi < len(ns) and 0 <= b0 < len(wR):
+                    R, n = wR[b0], ns[vi]
+                    nrm.extend(_q8((R[0][0] * n[0] + R[0][1] * n[1] + R[0][2] * n[2],
+                                    R[1][0] * n[0] + R[1][1] * n[1] + R[1][2] * n[2],
+                                    R[2][0] * n[0] + R[2][1] * n[1] + R[2][2] * n[2])))
+                else:
+                    nrm.extend((0, 0, 0))
             for a, b, c in s["tris"]:
                 idx += (base + a, base + b, base + c)
             if nverts > MODEL_MAX_VERTS:
@@ -1612,11 +1787,20 @@ class ModelBuilder:
         mins = [min(pos[k::3]) for k in range(3)]
         maxs = [max(pos[k::3]) for k in range(3)]
         self.total_verts += nverts
-        return {"p": path,
-                "v": self.blobs.add(struct.pack("<%df" % len(pos), *pos)),
-                "t": self.blobs.add(struct.pack("<%df" % len(uvs), *uvs)),
-                "i": self.blobs.add(struct.pack("<%dI" % len(idx), *idx)),
-                "s": surfs, "b": [mins, maxs], "ss": setsize, "sc": scale, "nv": nverts, "env": eng}
+        # the .tik's own bounds as the game keeps them (the idle animation's, else -4..4;
+        # TIKI_LoadTIKIfile), times its scale: sv_showbboxes 7 and r_showstaticbboxes
+        if tbounds is None:
+            tbounds = [[-4.0, -4.0, -4.0], [4.0, 4.0, 4.0]]
+        tb = [[round(v * scale, 3) for v in tbounds[0]], [round(v * scale, 3) for v in tbounds[1]]]
+        out = {"p": path,
+               "v": self.blobs.add(struct.pack("<%df" % len(pos), *pos)),
+               "t": self.blobs.add(struct.pack("<%df" % len(uvs), *uvs)),
+               "i": self.blobs.add(struct.pack("<%dI" % len(idx), *idx)),
+               "s": surfs, "b": [mins, maxs], "ss": setsize, "sc": scale, "nv": nverts, "env": eng,
+               "tb": tb, "n": self.blobs.add(nrm.tobytes())}
+        if classname:
+            out["cn"] = classname          # the .tik's server "classname" (what it spawns as)
+        return out
 
 
 # ==============================================================================
@@ -1810,17 +1994,21 @@ def lit_payload(bsp, stats, texs, blobs, shaders, vfs, ents, model_of, models, s
         ti = texs.add(name)
         return ti, shaders.get(texs.entries[ti]["n"])
 
-    # ---- lightmaps: brightened like the game, packed 8 pages across in one PNG -------
-    shifted = MB.color_shift(bsp.lump(MB.LUMP_LIGHTMAPS)[:nlm * page], 3)
+    # ---- lightmaps: the .bsp's own bytes, packed 8 pages across in one PNG. The page
+    # brightens them the way the game does (R_ColorShiftLightingBytes, as MB.color_shift)
+    # and keeps them as they are for r_lightmap 2, which colours them by their raw
+    # intensity (R_LoadLightmaps) ------------------------------------------------------
+    raw = bsp.lump(MB.LUMP_LIGHTMAPS)[:nlm * page]
     cols = min(8, nlm)
     rows = (nlm + cols - 1) // cols
     atlas = Image.new("RGB", (cols * MB.LIGHTMAP_SIZE, rows * MB.LIGHTMAP_SIZE))
     for k in range(nlm):
-        pg = Image.frombytes("RGB", (MB.LIGHTMAP_SIZE, MB.LIGHTMAP_SIZE), shifted[k * page:(k + 1) * page])
+        pg = Image.frombytes("RGB", (MB.LIGHTMAP_SIZE, MB.LIGHTMAP_SIZE), raw[k * page:(k + 1) * page])
         atlas.paste(pg, ((k % cols) * MB.LIGHTMAP_SIZE, (k // cols) * MB.LIGHTMAP_SIZE))
     buf = io.BytesIO()
     atlas.save(buf, "PNG", compress_level=9)
-    out = {"lm": blobs.add(buf.getvalue()), "nlm": nlm, "cols": cols}
+    out = {"lm": blobs.add(buf.getvalue()), "nlm": nlm, "cols": cols, "raw": 1,
+           "shift": MB.OVERBRIGHT_SHIFT}
 
     # ---- the planar polygons of every brush model the map places ------------------------
     P, UV, LM = array("f"), array("f"), array("f")
@@ -1966,6 +2154,46 @@ def _surface_cull(info):
     return 0
 
 
+def lightgrid_payload(bsp, blobs):
+    """The light grid as the game keeps it, for r_light_showgrid (R_LoadLightGrid in
+    tr_bsp.c): its corner, cell size and size in cells, and its palette, column offsets and
+    run-length packed columns as they are in the .bsp. None when it can't be read."""
+    g = MB.LightGrid(bsp)
+    if not g.ok:
+        return None
+    return {"m": [float(v) for v in g.mins], "s": [float(v) for v in g.size], "b": list(g.bounds),
+            "o": blobs.add(struct.pack("<%dH" % len(g.offsets), *g.offsets)),
+            "p": blobs.add(bytes(g.pal)), "d": blobs.add(bytes(g.data))}
+
+
+def rain_payload(vfs, vpath):
+    """How far around the player a func_rain drops its rain (cg.rain.min_dist, 512 unless
+    the map's script sets it), for cg_rain_drawcoverage: {"min": units, "src": where it was
+    set} from the last uncommented "level.rain_min_dist = N" or "setcvar cg_rain_min_dist N"
+    in maps/<map>.scr. None when the script can't be read."""
+    if vfs is None:
+        return None
+    stem = os.path.splitext(vpath.replace("\\", "/"))[0]
+    if not stem.lower().startswith("maps/"):
+        stem = "maps/" + os.path.basename(stem)
+    k = (stem + ".scr").lower()
+    if k not in vfs.index:
+        return None
+    try:
+        txt = vfs.read(k).decode("latin-1", "replace")
+    except Exception:
+        return None
+    txt = re.sub(r"/\*.*?\*/", " ", txt, flags=re.S)
+    found = None
+    for line in txt.splitlines():
+        line = line.split("//", 1)[0]
+        m = re.search(r'(?i)\blevel\.rain_min_dist\s*=\s*"?\s*([-+]?\d*\.?\d+)', line) or \
+            re.search(r'(?i)\bsetcvar\s+"?cg_rain_min_dist"?\s+"?\s*([-+]?\d*\.?\d+)', line)
+        if m:
+            found = float(m.group(1))
+    return {"min": found if found is not None else 512.0, "src": k, "set": found is not None}
+
+
 def vis_payload(bsp, stats, texs, blobs, say=log):
     """The page's data for r_showtris, or None when the .bsp has no tree to walk."""
     from array import array
@@ -1991,8 +2219,15 @@ def vis_payload(bsp, stats, texs, blobs, say=log):
                 owner[si] = (ei, org)
     V, L, GE = array("f"), array("I"), array("f")
     SI, SF = array("i"), array("f")
+    SK = array("I")                   # the sky polygons' triangles (r_showsky), as vertices of V
+    # r_shownormals: the normal the renderer has for each vertex of V, as signed bytes x127.
+    # A face takes its plane's (ParseFace copies lightmapVecs[2] as it is, RB_SurfaceFace
+    # puts it on every point), a triangle soup its vertices' own (RB_SurfaceTriangles), a
+    # patch its grid's (MakeMeshNormals); the sky's are never drawn.
+    VN = array("b")
+    q8 = _q8
     verts = bsp._verts
-    counts = [0, 0, 0, 0]
+    counts = [0, 0, 0, 0, 0]
     kinds = {MB.MST_PLANAR: 1, MB.MST_TRIANGLE_SOUP: 2, MB.MST_PATCH: 3}
     for si, s in enumerate(bsp.surfaces):
         rec, flo = [0] * 8, [0.0] * 10
@@ -2000,9 +2235,13 @@ def vis_payload(bsp, stats, texs, blobs, say=log):
         sh = bsp.shaders[s["shader"]] if 0 <= s["shader"] < len(bsp.shaders) else None
         kind = kinds.get(s["type"], 0) if own and sh else 0
         info = texs.info(sh["name"]) if kind else None
-        if kind and (sh["surface"] & (MB.SURF_NODRAW | MB.SURF_SKY)
-                     or (info and shader_render_bits(info)[0] & (TF_NODRAW | TF_SKY))):
-            kind = 0                  # never drawn, or drawn as the sky box (no triangles of its own)
+        bits = shader_render_bits(info)[0] if info else 0
+        if kind and (sh["surface"] & MB.SURF_NODRAW or bits & TF_NODRAW):
+            kind = 0                  # never drawn
+        elif kind and (sh["surface"] & MB.SURF_SKY or bits & TF_SKY):
+            # drawn as the sky box, which r_showtris doesn't outline; kind 4 keeps the
+            # polygon's triangles for r_showsky (RB_ClipSkyPolygons)
+            kind = 4 if kind in (1, 2) else 0
         fv, nv = s["firstVert"], s["numVerts"]
         if kind and (fv < 0 or nv < 3 or (fv + nv) * 44 > len(verts)):
             kind = 0
@@ -2022,6 +2261,8 @@ def vis_payload(bsp, stats, texs, blobs, say=log):
                     rec[3:7] = [len(V) // 3, gw, gh, len(GE)]
                     for p in grid:
                         V.extend(p)
+                    for n in MB.grid_normals(gw, gh, grid):
+                        VN.extend(q8(n))
                     GE.extend(ew)
                     GE.extend(eh)
                     # the lod group's centre and radius (ParseMesh: lightmapVecs 0 and 1)
@@ -2031,10 +2272,40 @@ def vis_payload(bsp, stats, texs, blobs, say=log):
                                 math.sqrt(sum((a[k] - c[k]) ** 2 for k in range(3)))]
                     mn = [min(p[k] for p in grid) for k in range(3)]
                     mx = [max(p[k] for p in grid) for k in range(3)]
+            elif kind == 4:
+                base = len(V) // 3
+                for p in pts:
+                    V.extend(p)
+                VN.extend([0] * (3 * nv))
+                idx = bsp.indexes[s["firstIndex"]:s["firstIndex"] + s["numIndexes"]]
+                rec[3] = len(SK)
+                for t in range(0, len(idx) - 2, 3):
+                    a, b, c = idx[t], idx[t + 1], idx[t + 2]
+                    if 0 <= a < nv and 0 <= b < nv and 0 <= c < nv:
+                        SK.extend((base + a, base + b, base + c))
+                rec[4] = len(SK) - rec[3]
+                rec[5] = texs.add(sh["name"])     # its texture entry: which sky box and clouds
+                if s["type"] != MB.MST_PLANAR:
+                    rec[1] = 2                # a triangle soup isn't culled by its plane
+                else:
+                    n = s["vecs"][6:9]
+                    if abs(n[0]) + abs(n[1]) + abs(n[2]) < 0.5:
+                        n = MB._norm(MB._cross(MB._sub(pts[2], pts[0]), MB._sub(pts[1], pts[0]))) or (0.0, 0.0, 0.0)
+                        if n == (0.0, 0.0, 0.0):
+                            rec[1] = 2
+                    flo[0:4] = [n[0], n[1], n[2], pts[0][0] * n[0] + pts[0][1] * n[1] + pts[0][2] * n[2]]
+                if not rec[4]:
+                    kind = rec[0] = 0
             else:
                 base = len(V) // 3
                 for p in pts:
                     V.extend(p)
+                if kind == 1:
+                    VN.extend(q8(s["vecs"][6:9]) * nv)
+                else:
+                    for n in struct.iter_unpack("<12x8x8x3f4x", verts[fv * 44:(fv + nv) * 44]):
+                        VN.extend(q8(n))
+                rec[5], rec[6] = base, nv     # its points in V (r_shownormals)
                 edges = set()
                 idx = bsp.indexes[s["firstIndex"]:s["firstIndex"] + s["numIndexes"]]
                 for t in range(0, len(idx) - 2, 3):
@@ -2068,12 +2339,17 @@ def vis_payload(bsp, stats, texs, blobs, say=log):
            "pvs": blobs.add(vis[2]) if vis else None, "ncl": vis[0] if vis else 0, "cb": vis[1] if vis else 0,
            "si": blobs.add(SI.tobytes()), "sf": blobs.add(SF.tobytes()),
            "v": blobs.add(V.tobytes()), "l": blobs.add(L.tobytes()), "ge": blobs.add(GE.tobytes()),
-           "bm": bm, "to": list(stats["terrain_owner"]),
+           "sk": blobs.add(SK.tobytes()), "bm": bm, "to": list(stats["terrain_owner"]),
            "nn": len(tree["nodes"]), "nl": len(tree["leafs"]), "ns": len(bsp.surfaces)}
+    if len(VN) == len(V):
+        out["vn"] = blobs.add(VN.tobytes())
+    else:                             # can't happen; r_shownormals is then greyed out
+        say("! r_shownormals left out: %d normals for %d points" % (len(VN) // 3, len(V) // 3))
     areas = {t[1] for t in tree["leafs"] if t[1] >= 0}
     say("visibility: %d leafs in %d clusters%s, %d area%s; %d faces, %d triangle soups and %d patches drawn in game"
+        ", %d sky polygons"
         % (len(tree["leafs"]), vis[0] if vis else 0, "" if vis else " (no vis data: every leaf sees every other)",
-           len(areas), "" if len(areas) == 1 else "s", counts[1], counts[2], counts[3]))
+           len(areas), "" if len(areas) == 1 else "s", counts[1], counts[2], counts[3], counts[4]))
     return out
 
 
@@ -2117,7 +2393,9 @@ def paths_payload(vfs, vpath, src, blobs, say=log):
             C.extend(p1)
             C.extend(p2)
     say("AI paths: %d nodes, %d connections (%s)" % (len(pf["nodes"]), len(C) // 9, where))
-    return {"src": where, "n": len(pf["nodes"]), "time": pf["maptime"],
+    # "fail": the file's node check failed flag (PathSearch::m_NodeCheckFailed), which
+    # g_nodecheck 1 acts on when the map loads
+    return {"src": where, "n": len(pf["nodes"]), "time": pf["maptime"], "fail": int(bool(pf["failed"])),
             "o": blobs.add(O.tobytes()), "f": blobs.add(F.tobytes()), "c": blobs.add(C.tobytes())}
 
 
@@ -2364,6 +2642,17 @@ def build(src, args):
     except Exception as e:
         log("! AI paths left out: %s" % e)
         paths = None
+    # the light grid (r_light_showgrid) and the rain's reach (cg_rain_drawcoverage)
+    lgrid = None
+    if bsp is not None:
+        try:
+            lgrid = lightgrid_payload(bsp, blobs)
+        except Exception as e:
+            log("! light grid left out: %s" % e)
+    try:
+        rain = rain_payload(vfs, vpath)
+    except Exception:
+        rain = None
     world = ents[0]["kvd"] if ents else {}
     title = vpath
     header = {"v": 1, "name": stem, "path": vpath, "kind": kind, "built": time.strftime("%Y-%m-%d %H:%M"),
@@ -2371,8 +2660,10 @@ def build(src, args):
               "tex": texs.entries, "models": mb.models if mb else [], "modelOf": model_of,
               "defs": defs, "editorFlags": {str(k): v for k, v in ME.EDITOR_FLAGS.items()},
               "bsp": bspinfo, "lit": lit, "sky": skies, "clouds": clouds, "legend": legend,
-              "vis": vis, "paths": paths,
-              "ek": {"simple": sorted(ME.SIMPLE_CLASSES), "dropped": sorted(ME.DROPPED_CLASSES)}}
+              "vis": vis, "paths": paths, "lg": lgrid, "rain": rain,
+              "ek": {"simple": sorted(ME.SIMPLE_CLASSES), "dropped": sorted(ME.DROPPED_CLASSES)},
+              # the keys a "$" or "#" in front of a key can set (MB.SETTER_KEYS)
+              "sk": sorted(MB.SETTER_KEYS)}
     t0 = time.time()
     b64, raw_len, gz_len = pack_payload(header, blobs)
     info = {"name": stem, "path": vpath, "kind": kind, "entities": len(ents), "brushes": nbrush,

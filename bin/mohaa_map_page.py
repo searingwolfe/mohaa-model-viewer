@@ -198,6 +198,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  .amItem input{flex:none;width:70px;padding:1px 4px;background:var(--btn);color:var(--txt);border:1px solid var(--line);
    border-radius:4px;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
  .amItem input:focus{outline:1px solid var(--accent);outline-offset:0}
+ .amItem input.wide{width:92px}
+ .amGrp{padding:6px 8px 2px 8px;color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+   border-top:1px solid var(--line);margin-top:3px;cursor:default}
+ .amGrp:first-child{border-top:0;margin-top:0;padding-top:2px}
  .amNote{padding:4px 8px;color:var(--dim);font-size:11px;white-space:normal}
  #cvWhere{border-top:1px solid var(--line);margin-top:4px;padding-top:5px}
  #cvWhere div{margin:1px 0} #cvWhere .msg{color:var(--accent)} #cvWhere .warn{color:var(--warn)}
@@ -277,8 +281,8 @@ __KEYS_CSS__
        <div class="row co"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</div>
        <div class="row co"><kbd>Q</kbd>/<kbd>E</kbd> tilt</div>
        <div class="row co"><kbd>Space</kbd>/<kbd>C</kbd> up/down</div>
-       <div class="row co"><kbd>End</kbd> level camera</div>
        <div class="row co"><kbd>Shift</kbd> fast camera</div>
+       <div class="row co"><kbd>U</kbd> level camera</div>
        <div class="row co"><kbd>X</kbd> stop camera</div>
      </div>
      <div id="camHelpRad" style="display:none">
@@ -288,7 +292,7 @@ __KEYS_CSS__
        <div class="row co"><kbd>,</kbd><kbd>.</kbd> strafe</div>
        <div class="row co"><kbd>D</kbd>/<kbd>C</kbd> up/down</div>
        <div class="row co"><kbd>A</kbd>/<kbd>Z</kbd> look</div>
-       <div class="row co"><kbd>End</kbd> level camera</div>
+       <div class="row co"><kbd>U</kbd> level camera</div>
        <div class="row co"><kbd>Shift</kbd> fast camera</div>
        <div class="row co"><kbd>Ctrl</kbd> grid step</div>
        <div class="row co"><kbd>X</kbd> stop camera</div>
@@ -300,6 +304,10 @@ __KEYS_CSS__
        <input type="text" id="gotoIn" placeholder="go to: x y z" style="flex:1;min-width:0" title="Type or paste a position, e.g. ( 512 -128 64 ), and press Enter">
        <button class="sm" id="bCopyCam" title="Copy the camera position as ( x y z ) for a script">Copy pos</button>
      </div>
+     <div class="row co" style="gap:5px">
+       <input type="text" id="angIn" placeholder="angles: pitch yaw roll" style="flex:1;min-width:0" title="Type or paste angles, e.g. ( 15 90 0 ), and press Enter to turn the camera to them, as the game takes angles: pitch (looking down is positive), yaw, roll">
+       <button class="sm" id="bCopyAng" title="Copy the camera's angles as ( pitch yaw roll ) for a script, as the game takes them (looking down is a positive pitch)">Copy ang</button>
+     </div>
    </div>
    <div class="sect">
      <h2>Display</h2>
@@ -308,7 +316,7 @@ __KEYS_CSS__
        <input type="color" id="bgcol" value="#0e1116" style="width:44px;height:22px;padding:1px;border:1px solid var(--line);border-radius:6px;background:var(--btn);cursor:pointer" title="Backdrop colour behind the map. Overrides the theme's default; remembered.">
        <button class="sm" id="bgReset" title="Return the backdrop to the theme's default colour">Default</button>
      </div>
-     <div class="row co" id="cvarRow"><button id="cvarBtn" title="Some of the game's debugging cvars, doing here what they do in game: r_showtris (what the game draws from where the camera is), ai_showroutes (the AI's path connections) and their settings. Type a cvar and a value in its box as in the game's console. (` like the game's console key)"><span class="albl">&mdash; game cvars &mdash;</span><span class="acar">&#9668;</span></button><span id="cvarCount">none set</span></div>
+     <div class="row co" id="cvarRow"><button id="cvarBtn" title="The game's debugging cvars, doing here what they do in game: what the renderer draws from where the camera is (r_showtris, r_shownormals, r_lockpvs, r_showsky, r_farplane...), its lightmaps and light grid (r_lightmap, r_light_showgrid), entity numbers, boxes and info (sv_showentnums, sv_showbboxes, g_entinfo), cameras, rain and the AI's path nodes. Type a cvar and a value in its box as in the game's console. (` like the game's console key)"><span class="albl">&mdash; game cvars &mdash;</span><span class="acar">&#9668;</span></button><span id="cvarCount">none set</span></div>
    </div>
    <div class="sect">
      <h2>Show</h2>
@@ -316,8 +324,13 @@ __KEYS_CSS__
      <div class="tg" id="filtBtns"></div>
      <div class="row" style="margin-top:7px">
        <button class="sm" id="bShowAll" title="Show every group (Ctrl+A)">All<span class="k">Ctrl+A</span></button>
-       <button class="sm" id="bGameView" title="Hide what the game never draws (caulk, clips, triggers, hints, origin brushes, areaportals) and the entity markers, with the game's lighting and sky: Full Brightness and Simple Sky off (G)">In-game look<span class="k">G</span></button>
-       <button class="sm" id="bEditView" title="MOHRadiant's view: everything except hints, areaportals and rain, at full brightness with Simple Sky on (Shift+G)">Editor look<span class="k">Shift+G</span></button>
+     </div>
+     <!-- the two looks, as wide as the panel like the cameras' buttons; each is on while the
+          Show buttons, the light and the sky are as it sets them. A name never breaks: in a
+          panel too narrow for it, the key goes under the name, both buttons as tall -->
+     <div class="row" style="align-items:stretch">
+       <button id="bGameView" style="flex:1" title="Hide what the game never draws (caulk, clips, triggers, hints, origin brushes, areaportals) and the entity markers, with the game's lighting and sky: Full Brightness and Simple Sky off (G)">In-game&nbsp;look<wbr><span class="k">G</span></button>
+       <button id="bEditView" style="flex:1" title="MOHRadiant's view: everything except hints, areaportals and rain, at full brightness with Simple Sky on (Shift+G)">Editor&nbsp;look<wbr><span class="k">Shift+G</span></button>
      </div>
    </div>
    <div class="sect">
@@ -327,6 +340,7 @@ __KEYS_CSS__
        <button id="tabFind" class="on" title="Search results">Results</button>
        <button id="tabCls" title="Every entity class in the map, like MOHRadiant's Map Info and Entities windows">Classes</button>
        <button id="tabTex" title="Every texture the map uses">Textures</button>
+       <button id="tabEnt" title="Every entity the game gives an entity number to (what sv_showentnums shows), in that order, for the game the cvars set (g_gametype, skill, developer, sv_maxclients)">Entities</button>
      </div>
      <div id="listHead"></div>
    </div>
@@ -525,6 +539,38 @@ function readMap(text){
     ents.push(e);
   }
   return {ents:ents,errors:errors};
+}
+// "$" and "#" in front of a key (SpawnArgs::SpawnInternal, g_spawn.cpp): when the entity's
+// class has a setter of that name the value goes to it, so "$targetname" "x" names the
+// entity just as "targetname" "x" does, and "#leash" "1792" sets its leash ("#" as a whole
+// number, atoi). With no such setter it only sets a script variable of that name ("#set" is
+// self.set), which no key stands for. The setters' names come with the page (D.sk:
+// SETTER_KEYS in mohaa_bsp.py). Every key the page reads (kvl) goes by this, as in game:
+// names, links and paths, labels, the lists; the info card shows the keys as written.
+// An entity's keys are all posted for one moment and the event queue runs them last to first
+// (Listener::PostEventInternal), so the first written of "name", "$name" and "#name" wins, as
+// readMap keeps a key's first value. Plain "model" is due earlier (EV_PRIORITY_SPAWNARG), so
+// "$model" wins over it; an actor's plain keys are due after its "$" and "#" ones
+// (EV_SPAWNACTOR), so on an actor the plain key wins.
+function spawnKeys(){
+  const SK=new Set(D.sk||[]);if(!SK.size)return;
+  const atoi=v=>{const n=parseInt(v,10);return String(isNaN(n)?0:n);};
+  MAP.ents.forEach((e,ei)=>{
+    const pre=new Map(),plain=new Map();   // name -> [where, value] of its first "$"/"#" form; -> where its first plain one
+    e.kv.forEach(([k,v],i)=>{const kl=k.toLowerCase(),c=kl[0];
+      if((c==='$'||c==='#')&&SK.has(kl.slice(1))){const n=kl.slice(1);if(!pre.has(n))pre.set(n,[i,c==='#'?atoi(v):v]);}
+      else if(!plain.has(kl))plain.set(kl,i);});
+    if(!pre.size)return;
+    // an actor: by its class, else by the class its .tik spawns it as (as gameEnts)
+    let actor=null;
+    const isActor=()=>{if(actor===null){const g=GAME_CLASS[e.cls];
+        if(g)actor=g==='actor';
+        else{const mi=(D.modelOf||{})[ei],M=mi!=null?(D.models||[])[mi]:null;
+          actor=!!(M&&M.cn&&GAME_CLASS[String(M.cn).toLowerCase()]==='actor');}}
+      return actor;};
+    // (a plain "model" is due before the rest, EV_PRIORITY_SPAWNARG, so "$model" outlasts it)
+    for(const[n,[i,v]]of pre){const p=plain.get(n);if(p==null||(!isActor()&&(i<p||n==='model')))e.kvl[n]=v;}
+  });
 }
 
 // ---- vector helpers ---------------------------------------------------------------
@@ -979,6 +1025,9 @@ async function loadData(){
   hdr.f32=i=>{const b=hdr.blobs[i];return new Float32Array(buf,base+b[0],b[1]>>2);};
   hdr.u32=i=>{const b=hdr.blobs[i];return new Uint32Array(buf,base+b[0],b[1]>>2);};
   hdr.i32=i=>{const b=hdr.blobs[i];return new Int32Array(buf,base+b[0],b[1]>>2);};
+  hdr.i8=i=>{const b=hdr.blobs[i];return new Int8Array(buf,base+b[0],b[1]);};
+  // normals sent as signed bytes x127
+  hdr.nrm=i=>{const s=hdr.i8(i),out=new Float32Array(s.length);for(let k=0;k<s.length;k++)out[k]=s[k]/127;return out;};
   return hdr;
 }
 
@@ -1113,12 +1162,15 @@ function buildEntities(){
 // that there, so here too; classes defined in a .tik keep their definition.
 const RAD_STANDIN_COL=[0,0.5,0];
 function radiantKnows(def){return !!(def&&def.s&&/\.tik$/i.test(def.s));}
+// A key's first value as written in the .map, as the editor reads it (no "$" or "#" forms).
+function edKey(e,name){for(const[k,v]of e.kv)if(k.toLowerCase()===name)return v;return '';}
 function radiantLook(X,e){
   X.standin=!radiantKnows(X.def);
   if(X.standin)X.col=RAD_STANDIN_COL.slice();
   X.ccol=X.col;X.mcol=X.col;X.mk=1;
   const lc=parseVec(e.kvl._color,3);
-  if(e.cls.startsWith('info_path')&&e.kvl.targetname){X.mk=2;X.col=X.ccol.map(v=>1-v);X.why='it has a "targetname"';}
+  // the key as written: to MOHRadiant "$targetname" is any other key (kvl takes it as the game does)
+  if(e.cls.startsWith('info_path')&&edKey(e,'targetname')){X.mk=2;X.col=X.ccol.map(v=>1-v);X.why='it has a "targetname"';}
   else if(lc){X.mk=0;X.col=X.mcol=lc.map(v=>Math.min(1,Math.max(0,v)));X.why='its "_color" key';}
   X.ol=e.cls==='info_pathnode'?nodeOutline(parseInt(e.kvl.spawnflags||'0',10)|0):null;
 }
@@ -1209,7 +1261,8 @@ void main(){vec4 p=vec4(aPos,1.0);vec3 w=vec3(dot(aR0,p),dot(aR1,p),dot(aR2,p));
   else if(uLit>0)c=vec4(aILight.rgb,1.0);
   vUV=aUV;vPos=w;vCol=c;vPick=aIPick;gl_Position=uVP*vec4(w,1.0);}`;
 // The game's own polygons: texture x lightmap page (aLM.z >= 0), x vertex light
-// (aLM.z = -1) or as it is (aLM.z = -2). uTm is the picture stage's tcMod scale
+// (aLM.z = -1) or as it is (aLM.z = -2); with uLMOnly (r_lightmap) a lightmapped one shows
+// its lightmap alone, the texture's alpha still cutting it. uTm is the picture stage's tcMod scale
 // (RB_CalcScaleTexCoords); uAg its alphaGen (tr_shade.c ComputeColors): 1 constant,
 // 2 / 3 from the base s / t coordinate (RB_CalcAlphaFromTexCoords: min, max, low cap,
 // high cap in uAgP), 4 vertex alpha, 5 one minus vertex alpha.
@@ -1229,13 +1282,14 @@ precision highp float;
 in vec2 vUV; in vec3 vPos; in vec4 vCol; in vec3 vLM; in float vA;
 uniform sampler2D uTex; uniform highp sampler2DArray uLM; uniform int uAF; uniform vec4 uTint;
 uniform int uUseTex; uniform vec3 uFlat; uniform vec3 uFogCol; uniform vec3 uFog; uniform vec3 uEye; uniform float uClip;
+uniform int uLMOnly;
 out vec4 o;
 void main(){
   if(uClip>0.0){vec3 d=abs(vPos-uEye);if(max(d.x,max(d.y,d.z))>uClip)discard;}
   vec4 t=(uUseTex==1)?texture(uTex,vUV):vec4(uFlat,1.0);
   if(uAF==1&&t.a<=0.0)discard; if(uAF==2&&t.a<0.5)discard; if(uAF==3&&t.a>=0.5)discard;
   vec3 l=vLM.z>-0.5?texture(uLM,vec3(vLM.xy,floor(vLM.z+0.5))).rgb:(vLM.z>-1.5?vCol.rgb:vec3(1.0));
-  vec3 c=t.rgb*l*uTint.rgb;
+  vec3 c=(uLMOnly==1&&vLM.z>-0.5)?l*uTint.rgb:t.rgb*l*uTint.rgb;
   if(uFog.z>0.5){float f=clamp((distance(vPos,uEye)-uFog.x)/max(1.0,uFog.y-uFog.x),0.0,1.0);c=mix(c,uFogCol,f);}
   o=vec4(c,t.a*vA*uTint.a);
 }`;
@@ -1782,7 +1836,8 @@ function initLitGL(){
   gl.bindBuffer(gl.ARRAY_BUFFER,B.lCol);gl.enableVertexAttribArray(7);gl.vertexAttribPointer(7,4,gl.UNSIGNED_BYTE,true,0,0);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,B.lTri);gl.bindVertexArray(null);
   const L=D.lit;
-  // lightmap pages: white until the picture is decoded
+  // lightmap pages: white until the picture is decoded. The page holds the .bsp's own
+  // bytes (raw); they are brightened here as the game does it, and kept for r_lightmap 2.
   B.lmTex=arrayTex(1,1,1,new Uint8Array([255,255,255,255]));
   if(L.lm!=null){const url=URL.createObjectURL(new Blob([D.bytes(L.lm)],{type:'image/png'})),im=new Image();
     im.onload=()=>{try{
@@ -1790,7 +1845,10 @@ function initLitGL(){
       const px=c2.getImageData(0,0,im.width,im.height).data, S=128, n=L.nlm, cols=L.cols, out=new Uint8Array(S*S*4*n);
       for(let k=0;k<n;k++){const ox=(k%cols)*S, oy=Math.floor(k/cols)*S;
         for(let y=0;y<S;y++)out.set(px.subarray(((oy+y)*im.width+ox)*4,((oy+y)*im.width+ox+S)*4),(k*S*S+y*S)*4);}
-      const t=arrayTex(S,S,n,out);gl.deleteTexture(B.lmTex);B.lmTex=t;requestDraw();
+      B.lmRaw=L.raw?out:null;B.lmN=n;
+      const t=arrayTex(S,S,n,L.raw?lmShift(out,L.shift|0):out);gl.deleteTexture(B.lmTex);B.lmTex=t;
+      if(B.lmHeat){gl.deleteTexture(B.lmHeat);B.lmHeat=null;}
+      requestDraw();
     }catch(e){console.warn('lightmaps',e);}URL.revokeObjectURL(url);};
     im.src=url;}
   // baked light of the static props, one texel per vertex, 4096 across
@@ -1800,6 +1858,31 @@ function initLitGL(){
     for(const p of [gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER])gl.texParameteri(gl.TEXTURE_2D,p,gl.NEAREST);}
   else B.smTex=colourTex([1,1,1]);
 }
+// R_ColorShiftLightingBytes: each channel shifted up (the overbright bits), and a texel
+// that goes past 255 scaled back by its brightest channel, so it keeps its colour
+function lmShift(raw,sh){const out=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i+=4){let r=raw[i]<<sh,g=raw[i+1]<<sh,b=raw[i+2]<<sh;
+    if((r|g|b)>255){const m=Math.max(r,g,b);r=Math.floor(r*255/m);g=Math.floor(g*255/m);b=Math.floor(b*255/m);}
+    out[i]=r;out[i+1]=g;out[i+2]=b;out[i+3]=255;}
+  return out;}
+// r_lightmap 2 (R_LoadLightmaps): each texel coloured by the intensity of its raw bytes,
+// 0.33 red + 0.685 green + 0.063 blue out of 255, through HSVtoRGB (hue times 5, full
+// saturation, value 0.5), in the game's float arithmetic; the brightest is reported
+function lmHeat(){
+  if(B.lmHeat||!B.lmRaw)return B.lmHeat||null;
+  const raw=B.lmRaw,out=new Uint8Array(raw.length),f=Math.fround;let mx=0;
+  for(let i=0;i<raw.length;i+=4){
+    let I=f(f(f(f(0.33)*raw[i])+f(f(0.685)*raw[i+1]))+f(f(0.063)*raw[i+2]));
+    I=I>255?1:f(I/255);if(I>mx)mx=I;
+    const h=f(I*5),k=Math.floor(h),fr=f(h-k),q=f(0.5*f(1-fr)),t=f(0.5*fr);
+    const c=k===0?[0.5,t,0]:k===1?[q,0.5,0]:k===2?[0,0.5,t]:k===3?[0,q,0.5]:k===4?[t,0,0.5]:[0.5,0,q];
+    out[i]=Math.trunc(f(c[0]*255));out[i+1]=Math.trunc(f(c[1]*255));out[i+2]=Math.trunc(f(c[2]*255));out[i+3]=255;}
+  B.lmBright=Math.trunc(f(mx*255));
+  B.lmHeat=arrayTex(128,128,B.lmN,out);
+  return B.lmHeat;}
+// r_lightmap: does this texture's shader show the lightmap alone (the builder works it out
+// from its stages; a texture with no shader gets the game's own two-stage one, which does)
+function lmOnly(ti){const te=TEX[ti];return !!(te&&(te.lmr||te.noshader));}
 // The sky boxes (a .bsp's and a .map's): six pictures each, one array texture per box.
 function initSkyGL(){
   const S0=D.sky||[];
@@ -1906,7 +1989,7 @@ function skyQueryPoll(){
   try{if(gl.getQueryParameter(SKYQ.q,gl.QUERY_RESULT_AVAILABLE)){SKYQ.seen=!!gl.getQueryParameter(SKYQ.q,gl.QUERY_RESULT);SKYQ.wait=false;}}
   catch(_e){SKYQ.wait=false;SKYQ.seen=true;}
 }
-function cloudsMoving(){return CLOUDS_MOVE&&!simpleSky&&!(hiddenMask&C_SKY)&&!(view.fog&&FOG.far>0);}
+function cloudsMoving(){return CLOUDS_MOVE&&!simpleSky&&!(hiddenMask&C_SKY)&&!fogOn();}
 function cloudTick(){if(!cloudTimer&&cloudsMoving())cloudTimer=setTimeout(cloudStep,33);}
 function cloudStep(){
   cloudTimer=0;
@@ -1966,7 +2049,7 @@ function camAxes(){
 let VP=null, NEAR=4, FAR=131072;
 function farPlane(){
   let far=FAR;
-  if(view.fog&&FOG.far>0)far=FOG.far*1.02;
+  if(fogOn())far=fogFar()*1.02;
   if(clipOn)far=Math.min(far,clipDist*1.8);
   return far;
 }
@@ -1999,6 +2082,13 @@ function screenRay(x,y){
 //  Drawing
 // ============================================================================
 const FOG={far:0,col:[0.5,0.5,0.5]};
+// The fog the game draws: the map's farplane, or r_farplane's in its place with its own
+// colour (R_SetupFrustum); none with r_farplane_nofog (RB_SetupFog). The game always draws
+// a farplane's fog, so r_farplane turns it on here whatever the Fog switch says.
+function farOverride(){return !!Math.trunc(CVARS.r_farplane);}
+function fogFar(){return farOverride()?CVARS.r_farplane:FOG.far;}
+function fogCol(){return farOverride()?(parseVec(CVARS.r_farplane_color,3)||[0.5,0.5,0.5]):FOG.col;}
+function fogOn(){return (view.fog||farOverride())&&fogFar()>0&&!CVARS.r_farplane_nofog;}
 let _drawReq=false;
 function requestDraw(){if(_drawReq||!gl)return;_drawReq=true;requestAnimationFrame(()=>{_drawReq=false;draw();});}
 function resize(){const r=glcv.getBoundingClientRect();W=Math.max(1,r.width);H=Math.max(1,r.height);DPR=Math.min(2,window.devicePixelRatio||1);
@@ -2009,7 +2099,7 @@ window.addEventListener('resize',resize);
 function setCommon(p,vp,mode){
   gl.useProgram(p);gl.uniformMatrix4fv(p.u.uVP,false,vp);gl.uniform1i(p.u.uMode,mode);
   gl.uniform1f(p.u.uShade,view.shade?1:0);gl.uniform3fv(p.u.uEye,cam.pos);gl.uniform1f(p.u.uClip,clipOn?clipDist:0);
-  gl.uniform3fv(p.u.uFogCol,FOG.col);gl.uniform3f(p.u.uFog,FOG.far*0.25,FOG.far,(view.fog&&FOG.far>0&&mode===0)?1:0);
+  const ff=fogFar();gl.uniform3fv(p.u.uFogCol,fogCol());gl.uniform3f(p.u.uFog,ff*0.25,ff,(fogOn()&&mode===0)?1:0);
   gl.uniform4f(p.u.uTint,1,1,1,1);gl.uniform1i(p.u.uAF,0);gl.uniform1i(p.u.uUseTex,1);gl.uniform1i(p.u.uTex,0);
   if(p.u.uPush)gl.uniform1f(p.u.uPush,0);
   if(p.u.uTm){gl.uniform2f(p.u.uTm,1,1);gl.uniform1i(p.u.uAg,0);}
@@ -2026,6 +2116,7 @@ function bindMat(p,ti,mode,game){
   if(m.two||mode===1)gl.disable(gl.CULL_FACE);else gl.enable(gl.CULL_FACE);
   if(game&&p.u.uTm){const tm=m.tm||[1,1],q=m.agp||[1,0,0,1];
     gl.uniform2f(p.u.uTm,tm[0],tm[1]);gl.uniform1i(p.u.uAg,m.agk|0);gl.uniform4f(p.u.uAgP,q[0],q[1],q[2],q[3]);}
+  if(game&&p.u.uLMOnly)gl.uniform1i(p.u.uLMOnly,CVARS.r_lightmap&&lmOnly(ti)?1:0);
 }
 function blendFor(kind){
   if(kind===3){gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);}
@@ -2037,7 +2128,8 @@ function blendFor(kind){
 // faces' ids, see pickAt). Picking always uses the .map's faces; with the game's
 // lighting on, the picture uses the game's polygons for every face it draws itself (op.rep).
 function bindLit(p){
-  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D_ARRAY,B.lmTex);gl.activeTexture(gl.TEXTURE0);
+  const t=CVARS.r_lightmap===2?(lmHeat()||B.lmTex):B.lmTex;
+  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D_ARRAY,t);gl.activeTexture(gl.TEXTURE0);
   gl.uniform1i(p.u.uLM,1);
 }
 function setModelCommon(vp,mode,lit){
@@ -2128,7 +2220,7 @@ function drawScene(vp,mode){
 // fog covers the whole sky.
 function drawGameSky(vp){
   const ops=LIT?LIT.sky:drawOps.filter(op=>op.sky);
-  const fogged=view.fog&&FOG.far>0, flat=fogged?FOG.col:skyColour(), T=(performance.now()-T0)/1000;
+  const fogged=fogOn(), flat=fogged?fogCol():skyColour(), T=(performance.now()-T0)/1000;
   const cloudsOf=op=>{const te=TEX[op.ti]||{};return(!fogged&&te.cl!=null)?CLOUDS[te.cl]:null;};
   // the skies with moving clouds go last, inside an occlusion query: is any of them seen?
   // (see cloudStep). A sky with still clouds, or none, doesn't keep the view redrawing.
@@ -2182,15 +2274,19 @@ function draw(){
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
   gl.viewport(0,0,glcv.width,glcv.height);
   // with the map's fog on, everything past the fog's far end is fog colour, as in game
-  const bg=(view.fog&&FOG.far>0)?FOG.col:TH.bg;
+  const bg=fogOn()?fogCol():TH.bg;
   gl.clearColor(bg[0],bg[1],bg[2],1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   VP=viewProj(null);
   updateInside(false);
   drawScene(VP,0);
+  drawShowSky(VP);
   drawSelection(VP);
   drawLines(VP);
   drawShowTris(VP);
+  drawShowNormals(VP);
   drawRoutes(VP);
+  if(CVARS.r_light_showgrid)drawLightGrid(VP);
+  drawCvarLines(VP);
   draw2D();
   if(cvEl)cvarWhereRender();
   updateHint();
@@ -2414,13 +2510,11 @@ function gvInit(){
   const V=D.vis;if(!V||!V.nl)return;
   const G={np:D.f32(V.np),nc:D.i32(V.nc),nb:D.i32(V.nb),lf:D.i32(V.lf),ls:D.i32(V.ls),lt:D.i32(V.lt),lm:D.i32(V.lm),
     pvs:V.pvs!=null?D.bytes(V.pvs):null,ncl:V.ncl|0,cb:V.cb|0,si:D.i32(V.si),sf:D.f32(V.sf),v:D.f32(V.v),l:D.u32(V.l),
-    ge:D.f32(V.ge),nn:V.nn|0,nl:V.nl|0,ns:V.ns|0};
+    ge:D.f32(V.ge),nn:V.nn|0,nl:V.nl|0,ns:V.ns|0,sk:V.sk!=null?D.u32(V.sk):new Uint32Array(0),
+    vn:V.vn!=null?D.nrm(V.vn):null};             // r_shownormals: each point's normal
   let na=0;for(let l=0;l<G.nl;l++){const a=G.lf[l*14+1];if(a+1>na)na=a+1;}
   G.na=na;
-  // the farplane: nodes are dropped past it with farplane_cull 1 (the default), boxes and
-  // spheres with any farplane_cull but 0; terrain patches 768 units past it
-  const wk=MAP.ents[0]?MAP.ents[0].kvl:{}, fc=wk.farplane_cull!=null?parseInt(wk.farplane_cull,10)||0:1;
-  G.far=parseFloat(wk.farplane)||0;G.farNodes=G.far>0&&fc===1;G.farBoxes=G.far>0&&fc!==0;
+  gvFar(G);
   // The lines are kept as their two ends (each vertex knows the other end, so a line that
   // runs behind the camera can be cut at the near plane: see VS_GVL). The surfaces' lines
   // come first, in the .bsp's order (vertex m of the list is the m-th line end of G.l),
@@ -2435,6 +2529,8 @@ function gvInit(){
     return [start,G.l.length+TL.length-start];});
   G.terLines=new Uint32Array(TL);
   G.idx=new Uint32Array(Math.max(2,G.l.length+TL.length));
+  // r_shownormals: the ends of the normal lines to draw, two per point of G.v
+  G.nidx=G.vn?new Uint32Array(Math.max(2,G.v.length/3*2)):null;G.nNIdx=0;G.nstats='';
   // a patch's lines are made each time, as many as its finest level can have
   let gm=0;for(let s=0;s<G.ns;s++)if(G.si[s*8]===3){const w=G.si[s*8+4],h=G.si[s*8+5];gm+=(w-1)*h+w*(h-1)+(w-1)*(h-1);}
   G.grid=new Float32Array(Math.max(12,gm*12));
@@ -2455,9 +2551,19 @@ function gvInit(){
     const E=gvLink(G,X.ei,[o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]]);
     if(door)G.doorArea.set(X.ei,[E.a1,E.a2]);
   }
-  G.key='';G.leafVis=new Uint8Array(G.nl);G.nodeVis=new Uint8Array(Math.max(1,G.nn));G.conn=null;G.camArea=-1;G.camCluster=-1;
+  G.key='';G.skey='';G.marked=false;G.leafVis=new Uint8Array(G.nl);G.nodeVis=new Uint8Array(Math.max(1,G.nn));G.conn=null;G.camArea=-1;G.camCluster=-1;
   G.sig='';G.nIdx=0;G.nGrid=0;G.nX=0;G.stats='';
   GV=G;
+}
+// The farplane the game culls with: the map's (worldspawn "farplane" and "farplane_cull":
+// nodes are dropped past it with farplane_cull 1, the default, boxes and spheres with any
+// but 0; terrain patches 768 units past it), or r_farplane's in its place with
+// r_farplane_nocull (1 none, 0 standard, -1 as for a portal sky: R_SetupFrustum).
+function gvFar(G){
+  const wk=MAP.ents[0]?MAP.ents[0].kvl:{};
+  let far=parseFloat(wk.farplane)||0,fc=wk.farplane_cull!=null?parseInt(wk.farplane_cull,10)||0:1;
+  if(farOverride()){far=CVARS.r_farplane;const n=CVARS.r_farplane_nocull;fc=n>0?0:n===0?1:2;}
+  G.far=far;G.farNodes=far>0&&fc===1;G.farBoxes=far>0&&fc!==0;
 }
 // The leafs a box touches (CM_BoxLeafnums), with BoxOnPlaneSide's quick test for the
 // axial planes.
@@ -2506,15 +2612,20 @@ function gvAreas(G,area){
   while(grew){grew=false;for(const[a,b]of G.portals){if(conn[a]&&!conn[b]){conn[b]=1;grew=true;}else if(conn[b]&&!conn[a]){conn[a]=1;grew=true;}}}
   return conn;
 }
-// R_MarkLeaves: the leafs kept for the camera's cluster and area, and every node above one.
+// The server's view of the camera (which entities it sends: gvSent) is always where the
+// camera is. R_MarkLeaves: the leafs the renderer keeps for the camera's cluster and area,
+// and every node above one; r_lockpvs keeps the last ones marked (it returns at once),
+// r_novis marks every leaf.
 function gvMark(G,leaf){
   const cl=G.lf[leaf*14],area=G.lf[leaf*14+1];
-  const key=cl+':'+area+':'+(CVARS.cm_noAreas?1:0);
+  const skey=cl+':'+area+':'+(CVARS.cm_noAreas?1:0);
+  if(skey!==G.skey){G.skey=skey;G.camArea=area;G.camCluster=cl;G.conn=cl<0?null:gvAreas(G,area);}
+  if(CVARS.r_lockpvs&&G.marked)return;
+  const key=CVARS.r_novis?'novis':skey;
   if(key===G.key)return;
-  G.key=key;G.camArea=area;G.camCluster=cl;
+  G.key=key;G.marked=true;G.markCl=cl;G.markArea=area;
   const lv=G.leafVis;lv.fill(0);
-  G.conn=gvAreas(G,area);
-  if(cl<0){lv.fill(1);G.conn=null;}       // no PVS for a leaf outside the map: everything
+  if(cl<0||CVARS.r_novis)lv.fill(1);       // no PVS for a leaf outside the map (or r_novis): everything
   else{
     const row=(G.pvs&&cl<G.ncl)?cl*G.cb:-1;
     for(let l=0;l<G.nl;l++){
@@ -2559,7 +2670,10 @@ function gvBeyond(f,fe,far,x0,y0,z0,x1,y1,z1){
 // (G.idx), the patches' lines as they are now (G.grid), each model's visible instances and
 // the axis crosses. Sent to the graphics card only when something changed.
 function gvUpdate(){
-  const G=GV,e=cam.pos,f=camAxes().f,fe=f[0]*e[0]+f[1]*e[1]+f[2]*e[2],far=G.far;
+  const G=GV;
+  if(G.upd===FRAMES&&!G.dirty)return;            // once a frame
+  G.upd=FRAMES;gvFar(G);
+  const e=cam.pos,f=camAxes().f,fe=f[0]*e[0]+f[1]*e[1]+f[2]*e[2],far=G.far;
   const nodeFar=G.farNodes,boxFar=G.farBoxes;
   gvMark(G,gvPointLeaf(G,e));
   const fr=++G.frame,surfs=[],ters=[],stats=[];
@@ -2590,9 +2704,17 @@ function gvUpdate(){
   // the surfaces: faces facing away dropped (R_CullSurface), soups and patches past the farplane
   let n=0,ng=0,sig=0;const out=G.idx,gr=G.grid,si=G.si,sf=G.sf,P=G.v;
   const cnt=[0,0,0,0];
+  // r_shownormals: the same points' normal lines (DrawNormals runs on every batch drawn)
+  const nout=G.nidx;let nn=0,nnF=0,nnP=0,nnM=0;
   const gline=(i,j)=>{gr.set([P[i*3],P[i*3+1],P[i*3+2],P[j*3],P[j*3+1],P[j*3+2],P[j*3],P[j*3+1],P[j*3+2],P[i*3],P[i*3+1],P[i*3+2]],ng);ng+=12;};
+  const sky=[];
   const add=s=>{
     const o=s*8,k=si[o],q=s*10;
+    // a sky polygon isn't outlined (the sky box is drawn there), but r_showsky needs those
+    // drawn, turned away ones dropped as for a face
+    if(k===4){const c=si[o+1];
+      if(c!==2){const d=e[0]*sf[q]+e[1]*sf[q+1]+e[2]*sf[q+2];if(c===0?d<sf[q+3]-8:d>sf[q+3]+8)return false;}
+      sky.push(s);return false;}
     if(k===1){
       const c=si[o+1];
       if(c!==2){const d=e[0]*sf[q]+e[1]*sf[q+1]+e[2]*sf[q+2];if(c===0?d<sf[q+3]-8:d>sf[q+3]+8)return false;}
@@ -2613,12 +2735,17 @@ function gvUpdate(){
         if(c+1<wt.length)gline(p,v0+ht[r]*w+wt[c+1]);
         if(r+1<ht.length){gline(p,v0+ht[r+1]*w+wt[c]);if(c+1<wt.length)gline(v0+ht[r+1]*w+wt[c],v0+ht[r]*w+wt[c+1]);}}
       sig=(Math.imul(sig,31)+s*7+wt.length*131+ht.length)|0;
-    }else{const a=si[o+3],c=si[o+4];for(let m=a;m<a+c;m++)out[n++]=m;sig=(Math.imul(sig,31)+s)|0;}
+      // the grid points RB_SurfaceGrid emits: those of the rows and columns kept
+      if(nout){for(const r of ht)for(const c of wt){const v=v0+r*w+c;nout[nn++]=2*v;nout[nn++]=2*v+1;}nnP+=ht.length*wt.length;}
+    }else{const a=si[o+3],c=si[o+4];for(let m=a;m<a+c;m++)out[n++]=m;sig=(Math.imul(sig,31)+s)|0;
+      // every point of the face or soup (RB_SurfaceFace, RB_SurfaceTriangles)
+      if(nout){const vb=si[o+5],vc=si[o+6];for(let v=vb;v<vb+vc;v++){nout[nn++]=2*v;nout[nn++]=2*v+1;}nnF+=vc;}}
     cnt[k]++;
     return true;
   };
   let world=false;
   for(const s of surfs)if(add(s))world=true;
+  G.skyNow=sky;
   // terrain patches from the kept leafs, but not 768 units past the farplane (R_MarkTerrainPatch)
   let nter=0;
   for(const t of ters){const R=G.terRange[t];if(!R)continue;const p=SC.prims[G.terPrim[t]];
@@ -2649,25 +2776,36 @@ function gvUpdate(){
   for(const m of stats){const ei=fs+m;if(ei<ENTS.length&&ENTS[ei].model>=0)vis.add(ei);}
   for(const ei of G.ent.keys())if(ENTS[ei].model>=0&&gvSent(G,ei))vis.add(ei);
   for(const R of MODELS){
-    const a=[];
+    const a=[],an=[];
     for(const ei of R.inst){if(!vis.has(ei))continue;
       const E=ENTS[ei],b=E.box,o=E.origin;
       if(boxFar&&b&&gvBeyond(f,fe,far,o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2],o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]))continue;
       const rows=instRows(E);for(const v of rows)a.push(v);nmod++;sig=(Math.imul(sig,31)+ei*11+3)|0;
       // a static prop's cross takes its .tik scale and its own (R_RotateForStaticModel);
       // an entity's axes are unit length
-      const kv=MAP.ents[ei].kvl,ax=anglesAxis(entAngles(kv));
-      cross(o,ax,ei>=fs?(parseFloat(kv.scale)||1)*(R.M.sc||1):1);
+      const kv=MAP.ents[ei].kvl,ax=anglesAxis(entAngles(kv)),ks=parseFloat(kv.scale)||1;
+      cross(o,ax,ei>=fs?ks*(R.M.sc||1):1);
+      // r_shownormals: a static prop's lines are 2 of its own units (its scale is in the
+      // matrix), an entity's 2 world units (RB_SkelMesh scales the points, not the normals)
+      if(R.nVao){for(const v of rows)an.push(v);an.push(ei>=fs?2*(R.M.sc||1):2/ks);nnM+=R.nVerts/2;}
     }
-    R.gvRows=a;
+    R.gvRows=a;R.gvNRows=an;
   }
   const pl=(v,w,ws)=>v+' '+(v===1?w:(ws||w+'s'));
   G.stats=[pl(cnt[1],'face'),cnt[2]?pl(cnt[2],'triangle soup'):'',cnt[3]?pl(cnt[3],'patch','patches'):'',
     nter?pl(nter,'terrain block'):'',nbm?pl(nbm,'brush entity','brush entities'):'',pl(nmod,'model')].filter(Boolean).join(' · ');
+  if(nout)G.nstats=pl(nnF+nnP+nnM,'line')+': '+[pl(nnF,'face point'),nnP?pl(nnP,'curve point'):'',nnM?pl(nnM,'model vertex','model vertices'):'']
+    .filter(Boolean).join(' · ')+(nter?'; none on the terrain (the renderer makes it no normals)':'');
   const key=sig+':'+n+':'+ng+':'+X.length;
   G.nX=X.length/10;
   if(key===G.sig&&!G.dirty)return;
   G.sig=key;G.dirty=false;G.nIdx=n;G.nGrid=ng/6;
+  gl.bindVertexArray(null);                      // the element buffers below are bound loose
+  if(B.gvNIdx){G.nNIdx=nn;
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,B.gvNIdx);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,nout.subarray(0,Math.max(2,nn)),gl.DYNAMIC_DRAW);
+    for(const R of MODELS){if(!R.nVao)continue;
+      gl.bindBuffer(gl.ARRAY_BUFFER,R.nInst);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(R.gvNRows.length?R.gvNRows:new Array(13).fill(0)),gl.DYNAMIC_DRAW);
+      R.nN=R.gvNRows.length/13;}}
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,B.gvIdx);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,out.subarray(0,Math.max(2,n)),gl.DYNAMIC_DRAW);
   gl.bindBuffer(gl.ARRAY_BUFFER,B.gvGrid);gl.bufferData(gl.ARRAY_BUFFER,gr.subarray(0,Math.max(12,ng)),gl.DYNAMIC_DRAW);
   gl.bindBuffer(gl.ARRAY_BUFFER,B.gvX);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(X.length?X:new Array(10).fill(0)),gl.DYNAMIC_DRAW);
@@ -2758,6 +2896,80 @@ function drawShowTris(vp){
       gl.drawArraysInstanced(gl.LINES,0,R.gvVerts,R.gvN);}
   }
   if(m>1&&GV.nX){gvUniforms(PGVL,vp,0);gl.bindVertexArray(B.vGvX);gl.drawArrays(gl.LINES,0,GV.nX);}
+  gl.bindVertexArray(null);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);
+}
+
+// ============================================================================
+//  r_shownormals: a line along the normal of each point drawn (tr_shade.c DrawNormals)
+// ============================================================================
+// RB_EndSurface runs DrawNormals on every batch it draws, as DrawTris, so the points are
+// r_showtris's: the faces, triangle soups and patch rows and columns gvUpdate keeps, and
+// the models it lists (at their full detail). Each gets a white line 2 units long from the
+// point along the normal the tessellator holds for it, over everything (the depth range
+// squeezed to the near end): a face's plane, a soup's own vertex normals, a patch's grid
+// normals (MakeMeshNormals), a model's vertex normal turned by its first weight's bone.
+// An entity's lines are 2 world units (RB_SkelMesh scales its points, not the normals); a
+// static prop's are 2 of its own units, so its scale stretches them (R_RotateForStaticModel
+// puts the scale in the matrix). Terrain has none: tr_terrain.c never fills them in. In
+// game a face or patch fills its normals in only when its shader uses them or a dynamic
+// light is in the scene (RB_SurfaceFace, RB_SurfaceGrid); here each always shows its own.
+const VS_GVN=`#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNrm; layout(location=2) in float aEnd; layout(location=7) in vec4 aCol;
+layout(location=3) in vec4 aR0; layout(location=4) in vec4 aR1; layout(location=5) in vec4 aR2; layout(location=6) in float aK;
+uniform mat4 uVP; uniform vec3 uEye; uniform float uPull;
+out vec4 vC;`+GV_CLIP+`
+void main(){vC=aCol;vec4 h=vec4(aPos,1.0);
+  vec3 p=vec3(dot(aR0,h),dot(aR1,h),dot(aR2,h)),q=p+vec3(dot(aR0.xyz,aNrm),dot(aR1.xyz,aNrm),dot(aR2.xyz,aNrm))*aK;
+  gl_Position=aEnd<0.5?clipEnd(p,q):clipEnd(q,p);}`;
+let PGVN=null;
+// point v of G.v's line, both ends (each with the other end), 12 floats from out[k]
+function gvNrmLine(G,out,v,k){const P=G.v,N=G.vn,i=v*3;
+  const x=P[i],y=P[i+1],z=P[i+2],qx=x+2*N[i],qy=y+2*N[i+1],qz=z+2*N[i+2];
+  out[k]=x;out[k+1]=y;out[k+2]=z;out[k+3]=qx;out[k+4]=qy;out[k+5]=qz;
+  out[k+6]=qx;out[k+7]=qy;out[k+8]=qz;out[k+9]=x;out[k+10]=y;out[k+11]=z;}
+// Made the first time the cvar is on, from where the points are then (a door may be open):
+// a line for every point of G.v, and for each model one per vertex of the surfaces
+// r_showtris outlines, placed by its instances with the line's length (aK) beside them.
+function gvNrmGL(){
+  const G=GV;if(B.gvN||!G||!G.vn)return;
+  const nv=G.v.length/3,out=new Float32Array(Math.max(12,nv*12));
+  for(let v=0;v<nv;v++)gvNrmLine(G,out,v,v*12);
+  B.gvN=makeBuf(gl.ARRAY_BUFFER,out,gl.DYNAMIC_DRAW);
+  gl.bindVertexArray(null);
+  B.gvNIdx=makeBuf(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(2),gl.DYNAMIC_DRAW);
+  B.vGvN=gvLineVAO(B.gvN,false);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,B.gvNIdx);gl.bindVertexArray(null);
+  PGVN=compile(VS_GVN,FS_LINE);
+  for(const R of MODELS){
+    if(!R.inst.length||R.M.n==null)continue;
+    const N=D.nrm(R.M.n),Q=R.pos,ss=R.surfs.filter(s=>!s.sprite&&!s.lod);
+    let cnt=0;for(const s of ss)cnt+=s.vn;
+    if(!cnt)continue;
+    const L=new Float32Array(cnt*14);let k=0;
+    for(const s of ss)for(let v=s.v0;v<s.v0+s.vn;v++){const i=v*3;
+      for(let e=0;e<2;e++){L[k]=Q[i];L[k+1]=Q[i+1];L[k+2]=Q[i+2];L[k+3]=N[i];L[k+4]=N[i+1];L[k+5]=N[i+2];L[k+6]=e;k+=7;}}
+    R.nLine=makeBuf(gl.ARRAY_BUFFER,L);R.nVerts=cnt*2;R.nInst=gl.createBuffer();R.nN=0;R.gvNRows=[];
+    const v=gl.createVertexArray();gl.bindVertexArray(v);
+    attr(0,R.nLine,3,28,0);attr(1,R.nLine,3,28,12);attr(2,R.nLine,1,28,24);gl.disableVertexAttribArray(7);
+    gl.bindBuffer(gl.ARRAY_BUFFER,R.nInst);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(13),gl.DYNAMIC_DRAW);
+    for(let k=0;k<3;k++){gl.enableVertexAttribArray(3+k);gl.vertexAttribPointer(3+k,4,gl.FLOAT,false,52,k*16);gl.vertexAttribDivisor(3+k,1);}
+    gl.enableVertexAttribArray(6);gl.vertexAttribPointer(6,1,gl.FLOAT,false,52,48);gl.vertexAttribDivisor(6,1);
+    gl.bindVertexArray(null);R.nVao=v;
+  }
+  G.dirty=true;                                  // the next update sends their lists
+}
+// points a..b-1 moved (a door): their lines again
+function gvNrmSpan(G,a,b){
+  if(!B.gvN||!G.vn||b<=a)return;
+  const out=new Float32Array((b-a)*12);for(let v=a;v<b;v++)gvNrmLine(G,out,v,(v-a)*12);
+  gl.bindBuffer(gl.ARRAY_BUFFER,B.gvN);gl.bufferSubData(gl.ARRAY_BUFFER,a*48,out);}
+function drawShowNormals(vp){
+  if(!CVARS.r_shownormals||!GV||!GV.vn||!gl)return;
+  gl.bindVertexArray(null);gvGL();gvNrmGL();gvUpdate();
+  gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);gl.depthMask(false);gl.disable(gl.DEPTH_TEST);
+  gl.vertexAttrib4f(7,1,1,1,1);                 // white, as DrawNormals
+  if(GV.nNIdx){gvUniforms(PGVL,vp,0);gl.bindVertexArray(B.vGvN);gl.drawElements(gl.LINES,GV.nNIdx,gl.UNSIGNED_INT,0);}
+  gvUniforms(PGVN,vp,0);
+  for(const R of MODELS){if(!R.nVao||!R.nN)continue;gl.bindVertexArray(R.nVao);gl.drawArraysInstanced(gl.LINES,0,R.nVerts,R.nN);}
   gl.bindVertexArray(null);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);
 }
 
@@ -2939,7 +3151,7 @@ function doorPortal(d,open){
   const k=Math.min(a[0],a[1])+','+Math.max(a[0],a[1]);
   PORTAL_REF.set(k,(PORTAL_REF.get(k)||0)+(open?1:-1));
   GV.portals=[];for(const[key,n]of PORTAL_REF)if(n>0)GV.portals.push(key.split(',').map(Number));
-  GV.key='';GV.dirty=true;
+  GV.key='';GV.skey='';GV.dirty=true;
 }
 // ---- the game's door events -------------------------------------------------------------
 function doorShut(d){return d.state==='closed'||d.state==='closing';}
@@ -3054,10 +3266,11 @@ function doorGeom(d){
       if(k===3){a=G.si[o+3];b=a+G.si[o+4]*G.si[o+5];}
       else{const m0=G.si[o+3],mc=G.si[o+4];
         for(let m=m0;m<m0+mc;m++){const v=G.l[m];if(v<a)a=v;if(v+1>b)b=v+1;}
+        if(G.si[o+6]>0){a=Math.min(a,G.si[o+5]);b=Math.max(b,G.si[o+5]+G.si[o+6]);}   // all its points (r_shownormals)
         if(mc){l0=Math.min(l0,m0);l1=Math.max(l1,m0+mc);}}
       if(!(a<b))continue;
       S.push({s:s,k:k,a:a,b:b,f:G.sf.slice(s*10,s*10+10)});p0=Math.min(p0,a);p1=Math.max(p1,b);}
-    if(S.length)g.gv={S:S,p0:p0,p1:p1,P:G.v.slice(p0*3,p1*3),l0:l0,l1:l1};}
+    if(S.length)g.gv={S:S,p0:p0,p1:p1,P:G.v.slice(p0*3,p1*3),N:G.vn?G.vn.slice(p0*3,p1*3):null,l0:l0,l1:l1};}
   return d.gm=g;
 }
 // Put a door where it is now (d.a): its faces, with the planes and boxes that picking and
@@ -3087,6 +3300,10 @@ function doorPose(d){
 function doorGv(d,gg,X){
   const G=GV;
   xfSpan(X,gg.P,G.v,gg.p0*3);
+  // r_shownormals: its normals turned with it, and their lines when already uploaded
+  if(gg.N&&G.vn){const N=gg.N,k0=gg.p0*3;
+    for(let i=0;i<N.length;i+=3){const r=X?xfN(X,[N[i],N[i+1],N[i+2]]):[N[i],N[i+1],N[i+2]];G.vn[k0+i]=r[0];G.vn[k0+i+1]=r[1];G.vn[k0+i+2]=r[2];}
+    gvNrmSpan(G,gg.p0,gg.p1);}
   for(const S of gg.S){const q=S.s*10,f=S.f;
     if(!X){G.sf.set(f,q);continue;}
     if(S.k===1){const n=xfN(X,f),p=xfP(X,[f[0]*f[3],f[1]*f[3],f[2]*f[3]]);G.sf[q]=n[0];G.sf[q+1]=n[1];G.sf[q+2]=n[2];G.sf[q+3]=vdot(n,p);}
@@ -3172,57 +3389,833 @@ function doorInfo(ei){
 }
 
 // ============================================================================
+//  Game cvars: what the game draws for them
+// ============================================================================
+// Each frame the cvars that are set put their lines in DL, drawn the way the game draws
+// its debug lines (R_DrawDebugLines: one pixel wide, not blended, hidden behind walls).
+// The game measures most of them from the player: here the camera is a standing
+// player's eye and the player's feet are 82 units under it (DEFAULT_VIEWHEIGHT).
+const VIEWHEIGHT=82;
+function feetPos(){return[cam.pos[0],cam.pos[1],cam.pos[2]-VIEWHEIGHT];}
+function dist2(a,b){const x=a[0]-b[0],y=a[1]-b[1],z=a[2]-b[2];return x*x+y*y+z*z;}
+let DL=[];                                     // this frame's lines: end, other end, colour (as B.gvX)
+function dl(p,q,c){DL.push(p[0],p[1],p[2],q[0],q[1],q[2],c[0],c[1],c[2],1,q[0],q[1],q[2],p[0],p[1],p[2],c[0],c[1],c[2],1);}
+const DC={blue:[0,0,1],yellow:[1,1,0],cyan:[0,1,1],magenta:[1,0,1],red:[1,0,0],green:[0,1,0],white:[1,1,1]};
+// G_DebugBBox / G_DebugRotatedBBox: corner i takes x from mins with bit 1 set, y with bit
+// 2, z with bit 4 (else maxs); the top and bottom loops in the colour, the uprights blue
+function dlBox8(P,c){
+  for(const[a,b]of[[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4]])dl(P[a],P[b],c);
+  for(let i=0;i<4;i++)dl(P[i],P[i+4],DC.blue);}
+function boxPts(o,mn,mx,ax){const P=[];
+  for(let i=0;i<8;i++){const t=[(i&1)?mn[0]:mx[0],(i&2)?mn[1]:mx[1],(i&4)?mn[2]:mx[2]];
+    P.push(ax?[o[0]+t[0]*ax[0][0]+t[1]*ax[1][0]+t[2]*ax[2][0],o[1]+t[0]*ax[0][1]+t[1]*ax[1][1]+t[2]*ax[2][1],
+               o[2]+t[0]*ax[0][2]+t[1]*ax[1][2]+t[2]*ax[2][2]]:[o[0]+t[0],o[1]+t[1],o[2]+t[2]]);}
+  return P;}
+// G_DebugCircle: 24 segments in the plane of the view's up and right, or flat; only
+// within 1000 units of the player, plus the radius
+function dlCircle(org,r,c,horiz,feet){
+  if(dist2(feet,org)>(1000+r)*(1000+r))return;
+  let F,L;
+  if(horiz){F=[1,0,0];L=[0,-1,0];}
+  else{const a=camAxes();F=a.u;L=a.r;}         // AngleVectors(NULL, &left, &forward): right and up
+  let prev=null;
+  for(let i=0;i<=24;i++){const t=i*15*Math.PI/180,s=Math.sin(t)*r,k=Math.cos(t)*r;
+    const p=[org[0]+s*F[0]-k*L[0],org[1]+s*F[1]-k*L[1],org[2]+s*F[2]-k*L[2]];
+    if(prev)dl(prev,p,c);prev=p;}}
+// G_DrawDebugNumber: digits of up to 8 strokes, 8 x 8 units times scale and 10 apart,
+// facing the view and centred on org; only within 1000 units of the player
+const LED_NUM=[[1,3,4,5,6,7],[4,5],[1,4,2,7,3],[1,4,2,5,3],[6,4,2,5],[1,6,2,5,3],[1,6,2,5,7,3],[1,8],[1,2,3,4,5,6,7],[1,6,4,2,5,3],[9,10,11,12],[2]];
+const LED_SEG=[null,[-4,8,4,8],[-4,4,4,4],[-4,0,4,0],[4,8,4,4],[4,4,4,0],[-4,8,-4,4],[-4,4,-4,0],[4,8,-4,0],[-1,2,1,2],[1,2,1,0],[-1,0,1,0],[-1,0,-1,2]];
+function dlNumber(org,num,scale,c,feet){
+  if(dist2(feet,org)>1000*1000)return;
+  const a=camAxes(),up=[a.u[0]*scale,a.u[1]*scale,a.u[2]*scale],lf=[-a.r[0]*scale,-a.r[1]*scale,-a.r[2]*scale];
+  const txt=String(Math.trunc(num));
+  let s=[org[0]+(txt.length-1)*5*lf[0],org[1]+(txt.length-1)*5*lf[1],org[2]+(txt.length-1)*5*lf[2]];
+  for(const ch of txt){const n=ch==='.'?10:ch==='-'?11:ch.charCodeAt(0)-48;
+    if(n>=0&&n<12)for(const l of LED_NUM[n]){const L=LED_SEG[l];
+      dl([s[0]-L[0]*lf[0]+L[1]*up[0],s[1]-L[0]*lf[1]+L[1]*up[1],s[2]-L[0]*lf[2]+L[1]*up[2]],
+         [s[0]-L[2]*lf[0]+L[3]*up[0],s[1]-L[2]*lf[1]+L[3]*up[1],s[2]-L[2]*lf[2]+L[3]*up[2]],c);}
+    s=[s[0]-10*lf[0],s[1]-10*lf[1],s[2]-10*lf[2]];}}
+
+// ---- what each map entity is in game -------------------------------------------------------
+// The class a map entity spawns as (SpawnArgs::getClassDef): the game's class of that
+// classname (OpenMoHAA's CLASS_DECLARATIONs in code/fgame, by id and by C++ name), else the
+// class the "classname" line of its .tik's init block names, else Object (an Animate).
+// Grouped by what the cvars need of them: their ShowInfo (g_entinfo), whether they take an
+// entity number (simple entities and listeners don't), whether they are solid.
+const GAME_CLASS={};
+for(const[g,names]of Object.entries({
+  door:'door func_door func_rotatingdoor normaldoor rotatingdoor script_door scriptdoor slidingdoor',
+  actor:'actor',
+  turret:'portableturret turretgun vehicleturretgun vehicleturretguntandem',
+  weapon:'carryableturret inventoryitem weapon',
+  item:'ammoentity armor dynitem health health_020 item',
+  vehicle:'drivablevehicle drivablevehicletandem fixedturret script_drivablevehicle script_vehicle vehicle vehiclehalftrack vehicletank vehicletanktandem vehiclewheelsx2 vehiclewheelsx4',
+  slave:'fulcrum func_beam func_fulcrum func_randomspawn func_respawn func_sinkobject func_spawn func_spawnchain func_spawnoutofsight funcbeam randomspawn respawn script_aimedstrafinggunfire script_model script_model_realdamage script_object script_origin script_simplestrafinggunfire script_skyorigin scriptaimedstrafinggunfire scriptmodel scriptmodelrealdamage scriptorigin scriptsimplestrafinggunfire scriptskyorigin scriptslave sinkobject spawn spawnchain spawnoutofsight',
+  trigger:'explodeobject exploder explodingwall func_explodeobject func_exploder func_explodingwall func_multi_exploder func_viewjitter gib mover multiexploder play_sound_triggered randomspeaker sound_randomspeaker sound_speaker teleporter touchfield trigger trigger_box trigger_camerause trigger_changelevel trigger_clickitem trigger_damagetargets trigger_entity trigger_exit trigger_givepowerup trigger_hurt trigger_landmine trigger_multiple trigger_multipleall trigger_music trigger_nodamage trigger_once trigger_push trigger_pushany trigger_pushobject trigger_relay trigger_save trigger_secret trigger_sideduse trigger_teleport trigger_use trigger_useonce trigger_vehicle triggerall triggerbox triggerbypushobject triggercamerause triggerchangelevel triggerclickitem triggerdamagetargets triggerentity triggerexit triggergivepowerup triggerhurt triggerlandmine triggermusic triggernodamage triggeronce triggerplaysound triggerpush triggerpushany triggerrelay triggerreverb triggersave triggersecret triggersideduse triggerspeaker triggeruse triggeruseonce triggervehicle viewjitter',
+  camera:'camera func_camera info_player_intermission playerintermission',
+  spline:'info_splinepath splinepath',
+  animate:'animate body damagemodel effectentity explosion func_throwobject func_useobject interactobject lodslave object plant_puffdaddy player projectile projectilegenerator projectilegenerator_gun projectilegenerator_heavy projectilegenerator_projectile puffdaddy sentient simpleactor smokegrenade throbbingbox_explodeflak88 throbbingbox_explodenebelwerfer throbbingbox_explodeplayerflak88 throbbingbox_explodeplayernebelwerfer throbbingbox_explosive throbbingbox_stickybomb throwobject tossobject useobject vehiclebase viewmaster viewthing',
+  entity:'barrelobject crateobject decal emitter entity fallingrock fencepost func_barrel func_crate func_emitter func_fallingrock func_fencepost func_horizontalpipe func_ladder func_monkeybars func_objective func_pushobject func_rain func_remove func_runthrough func_teleportdest func_touchanim func_towobjective func_useanim func_useanimdest func_window funcladder funcremove gravpathnode helmetobject horizontalpipe info_grav_pathnode info_notnull infonotnull light misc_model miscmodel monkeybars objective portal_camera portal_surface portalcamera portalsurface projectilegenerator_target projectiletarget pushobject rain runthrough teleporterdestination touchanim towobjective useanim useanimdestination vehiclecollisionentity vehiclesoundentity windowobject world worldspawn',
+  simple:'aispawnpoint attractivenode grenadehint info_aispawnpoint info_grenadehint info_pathnode info_player_allied info_player_axis info_player_deathmatch info_player_start info_vehiclepoint info_waypoint pathnode playerallieddeathmatchstart playeraxisdeathmatchstart playerdeathmatchstart playerstart simplearchivedentity simpleentity tempwaypoint testplayerstart vehiclepoint waypoint',
+  listener:'ammo animationevent botcontroller cameramanager clientgamecommandmanager clientspecialeffectsmanager consoleevent consolehider consoleview dm_manager dm_team dmconsolehider emitterloader event fsfile game gravpath gravpathmanager hud info_landmark info_null infolandmark infonull level lightstyleclass listener lodmaster navmaster osfile parm pathsearch scriptevent scriptmaster scriptthread scripttimer soundmanager spawnargs statsupdater targetlist uifakklabel view3d voteupload'}))
+  for(const n of names.split(' '))GAME_CLASS[n]=g;
+// solid as they set themselves up (a script can change it): brush entities but the ones
+// that only trigger, the AI, vehicles, script objects with a model, and these
+const SOLID_CLASSES=new Set(['interactobject','damagemodel','useobject','func_useobject','throbbingbox_stickybomb']);
+const NONSOLID_BRUSH=new Set(['func_rain','func_runthrough','func_touchanim','func_useanim','func_emitter','func_remove','func_teleportdest','func_useanimdest']);
+// Level::inhibitEntity: what the spawnflags keep out of this game (8 SPAWNFLAG_DETAIL only
+// with detail 0, which isn't the default)
+function inhibitEntity(sf,map){
+  if(CVARS.g_gametype!==0)return !!(sf&0x800);                 // NOT_DEATHMATCH
+  if(!CVARS.developer&&(sf&0x2000))return true;                 // DEVELOPMENT
+  if(map==='t3l2')return !!(sf&0x100);
+  switch(CVARS.skill){case 0:return !!(sf&0x100);case 1:return !!(sf&0x200);case 2:case 3:return !!(sf&0x400);}
+  return false;
+}
+// Level::SpawnEntities: the world is 1022 (ENTITYNUM_WORLD), the players come first, then
+// each map entity in turn takes the next number from sv_maxclients up; radnum counts every
+// object spawned, from 1. What the cvars that set this are now is part of the key.
+let GAMEENTS=null;
+function gameEnts(){
+  const key=[CVARS.g_gametype,CVARS.skill,CVARS.developer,CVARS.sv_maxclients].join(':');
+  if(GAMEENTS&&GAMEENTS.key===key)return GAMEENTS.e;
+  const map=String(D.path||'').replace(/^.*[\\/]/,'').replace(/\.(bsp|map)$/i,'').toLowerCase();
+  const out=[];let num=CVARS.sv_maxclients,rad=0,n=0;
+  for(let ei=0;ei<MAP.ents.length;ei++){
+    const e=MAP.ents[ei],k=e.kvl,c=e.cls,R={g:'',num:-1,rad:0,gone:false,cn:'',why:''};out.push(R);
+    if(ei===0){R.g='entity';R.num=1022;continue;}
+    if(isStaticProp(ei)){R.g='static';R.why='a static model: scenery the map compiler made, not an entity';continue;}
+    if(WORLDLIKE[c]){R.g='none';R.why='its brushes become part of the world when the map is compiled';continue;}
+    if(k.spawnflags!=null&&c!=='info_pathnode'&&c!=='info_patharea'&&inhibitEntity(parseInt(k.spawnflags,10)|0,map)){
+      R.g='inhibited';R.why='its spawnflags keep it out of this game (g_gametype, skill, developer)';continue;}
+    if(c==='light'){R.g='none';R.why='lights are only for the map compiler: the game never spawns them';continue;}
+    let g=GAME_CLASS[c];
+    if(!g){
+      const mi=ENTS[ei].model,M=mi>=0?D.models[mi]:null,cn=M&&M.cn?String(M.cn).toLowerCase():'';
+      if(M&&parseInt(k.make_static||'0',10)){R.g='none';R.why='"make_static": it is drawn as scenery, not spawned';continue;}
+      R.cn=cn;
+      if(cn){g=GAME_CLASS[cn];if(!g){R.g='none';R.why='its .tik names class '+M.cn+', which the game doesn\'t have';continue;}}
+      else g='animate';                          // Object
+    }
+    rad++;R.g=g;R.rad=rad;
+    if(g==='simple'){R.why='a simple entity (no entity number)';continue;}
+    if(g==='listener'){R.why='not an entity in game';continue;}
+    R.num=num++;n++;
+    if(c==='misc_model'||c==='func_remove'){R.gone=true;R.why='it removes itself once it has spawned';}
+  }
+  GAMEENTS={key:key,e:out,count:n};
+  return out;
+}
+// The entity's box and angles at the level's start: a brush model's bounds (a door where
+// it is now); for a model the "setsize" key, else its .tik's setsize, else its .tik's
+// bounds times "scale" (Entity::setModel); a point entity has no size. An AI (class
+// Actor) replaces all that with a standing player's box as it starts (Actor::EventStart:
+// setSize(MINS, MAXS), its start coming after its spawn args).
+function gameBox(ei){
+  const e=MAP.ents[ei],X=ENTS[ei],b=X.box,k=e.kvl;
+  if(X.hasGeo&&b){const d=DOORS&&DOORS.get(ei)||null;return{o:b.origin,mins:b.mins,maxs:b.maxs,ang:[0,0,0],door:d,dx:d?doorXf(ei):null};}
+  const o=X.origin;if(!o)return null;
+  const ang=entAngles(k),ss=parseVec(k.setsize,6);
+  if(gameEnts()[ei].g==='actor')return{o:o,mins:[-15,-15,0],maxs:[15,15,94],ang:ang};
+  if(ss)return{o:o,mins:ss.slice(0,3),maxs:ss.slice(3),ang:ang};
+  if(X.model>=0){const M=D.models[X.model],sc=parseFloat(k.scale)||1;
+    if(M.ss)return{o:o,mins:M.ss[0],maxs:M.ss[1],ang:ang};
+    const tb=M.tb||[[-4,-4,-4],[4,4,4]];
+    return{o:o,mins:tb[0].map(v=>v*sc),maxs:tb[1].map(v=>v*sc),ang:ang};}
+  return{o:o,mins:[0,0,0],maxs:[0,0,0],ang:ang};
+}
+// A key as the game reads it ("$name" and "#name" included: spawnKeys).
+function gameKey(ei,name){return MAP.ents[ei].kvl[name]||'';}
+let GAME_TN=null;
+// the entities of a targetname, in spawn order (G_FindTarget takes the first)
+function gameTn(name){
+  if(!GAME_TN){GAME_TN=new Map();MAP.ents.forEach((e,ei)=>{const t=gameKey(ei,'targetname');
+    if(t){let l=GAME_TN.get(t);if(!l){l=[];GAME_TN.set(t,l);}l.push(ei);}});}
+  return GAME_TN.get(name)||[];}
+// its corners in G_DebugRotatedBBox's order (doorCorners numbers them the other way round)
+function gameBoxPts(B){
+  if(B.door){const C=doorCorners(B.door,B.dx);return C.map((_,i)=>C[i^7]);}
+  return boxPts(B.o,B.mins,B.maxs,anglesAxis(B.ang));}
+function gameOrigin(B){return B.dx?xfP(B.dx,B.o):B.o;}
+function entSolid(ei){
+  const R=gameEnts()[ei],e=MAP.ents[ei],X=ENTS[ei];
+  if(R.num<0||R.gone||ei===0)return false;
+  switch(R.g){
+    case 'door':case 'actor':case 'vehicle':return true;
+    case 'slave':                                // SetModelEvent: a brush model BSP, a .tik a box; NOT_SOLID (1)
+      return (X.hasGeo||X.model>=0)&&!((parseInt(e.kvl.spawnflags||'0',10)|0)&1);
+    case 'entity':return X.hasGeo&&!NONSOLID_BRUSH.has(e.cls);
+    case 'animate':return SOLID_CLASSES.has(e.cls)||SOLID_CLASSES.has(R.cn);
+  }
+  return false;
+}
+// sent to the client (g_entinfo shows only those): it has something to draw, isn't of a
+// class kept from clients (triggers, func_ladder), and the server sends it from here
+function entSent(ei){
+  const R=gameEnts()[ei],X=ENTS[ei],c=MAP.ents[ei].cls;
+  if(R.num<0||R.gone||ei===0)return false;
+  if(!X.hasGeo&&X.model<0)return false;
+  if(R.g==='trigger'||c==='func_ladder')return false;
+  return GV?gvSent(GV,ei):true;
+}
+
+// ---- sv_showentnums, sv_showbboxes, g_entinfo --------------------------------------------
+// The numbers: yellow, twice the size, at the origin raised by the box's top (the world's
+// 1022 sits at the map's origin: it has no size)
+function dlEntNums(feet){
+  const G=gameEnts();
+  dlNumber([0,0,0],1022,2,DC.yellow,feet);
+  for(let ei=1;ei<MAP.ents.length;ei++){const R=G[ei];if(R.num<0||R.gone)continue;
+    const B=gameBox(ei);if(!B)continue;
+    const o=gameOrigin(B);dlNumber([o[0],o[1],o[2]+B.maxs[2]],R.num,2,DC.yellow,feet);}}
+// Entity::DrawBoundingBox for every entity whose centre is within 1000 of the player
+function dlBoxes(m,feet){
+  const G=gameEnts();
+  if(m>=100||m<0)return;                         // 100+: g_monitor's entity; negative: the player's
+  for(let ei=1;ei<MAP.ents.length;ei++){const R=G[ei];if(R.num<0||R.gone)continue;
+    const B=gameBox(ei);if(!B)continue;
+    const P=gameBoxPts(B),bb=ptsBounds(P),cen=[(bb.mins[0]+bb.maxs[0])/2,(bb.mins[1]+bb.maxs[1])/2,(bb.mins[2]+bb.maxs[2])/2];
+    if(dist2(cen,feet)>1000*1000)continue;
+    const tik=ENTS[ei].model>=0,solid=entSolid(ei);
+    if(m===1){if(solid)dlBox8(P,DC.yellow);}
+    else if(m===2){if(solid)dlBox8(boxPts([0,0,0],[bb.mins[0]-1,bb.mins[1]-1,bb.mins[2]-1],[bb.maxs[0]+1,bb.maxs[1]+1,bb.maxs[2]+1],null),DC.magenta);}
+    else if(m===3){if(tik)dlBox8(P,DC.yellow);}
+    else if(m===4)dlBox8(P,DC.yellow);
+    else if(m===7){if(tik){const M=D.models[ENTS[ei].model],sc=parseFloat(MAP.ents[ei].kvl.scale)||1,tb=M.tb||[[-4,-4,-4],[4,4,4]];
+      dlBox8(boxPts(B.o,tb[0].map(v=>v*sc),tb[1].map(v=>v*sc),anglesAxis(B.ang)),DC.cyan);}}
+    else if(m===8){if(tik){dlBox8(P,DC.yellow);dlBox8(boxPts(B.o,[-4,-4,-4],[4,4,4],null),DC.cyan);}}
+    // 9 to 28: a sentient's hit spheres (the Model Viewer draws them), anything else solid
+    // its plain box
+    if(m>=9&&m<=28&&solid&&R.g!=='actor')dlBox8(boxPts(gameOrigin(B),B.mins,B.maxs,null),DC.yellow);
+  }}
+// Actor::ShowInfo's numbers: the map's keys, the game's defaults, then FixAIParameters
+// (every think): mindist down to the leash, maxdist at least mindist + 128, and with a
+// farplane no further than 82.8% of it
+function actorRadii(ei){
+  const k=MAP.ents[ei].kvl,wk=MAP.ents[0]?MAP.ents[0].kvl:{},num=(v,d)=>{const f=parseFloat(v);return isFinite(f)?f:d;};
+  const r={leash:num(k.leash,512),mind:num(k.mindist,128),maxd:num(k.maxdist,1024),hear:num(k.hearing,2048),
+           sight:num(k.sight,num(wk.ai_visiondistance,2048)),health:num(k.health,100)};
+  if(r.mind<0)r.mind=0;if(r.maxd<256)r.maxd=256;
+  if(r.leash<r.mind)r.mind=r.leash;
+  if(r.maxd<r.mind+127)r.maxd=r.mind+128;
+  const far=parseFloat(wk.farplane)||0;
+  if(far>0&&r.maxd>far*0.828){r.maxd=far*0.828;if(r.maxd<r.mind+127)r.mind=Math.max(0,r.maxd-128);}
+  return r;
+}
+let ENTTEXT=[];                                  // g_entinfo's strings: {p: bottom left, s: text}
+// ShowInfo of everything sent: what each class shows when the player looks at it
+function dlEntInfo(v,feet){
+  const G=gameEnts(),eye=cam.pos,f=camAxes().f,maxd=CVARS.g_entinfo_max;
+  for(let ei=1;ei<MAP.ents.length;ei++){
+    const R=G[ei];if(R.num<0||R.gone||!entSent(ei))continue;
+    const B=gameBox(ei);if(!B)continue;
+    const k=MAP.ents[ei].kvl,o=gameOrigin(B);
+    const cen=[o[0]+(B.mins[0]+B.maxs[0])/2,o[1]+(B.mins[1]+B.maxs[1])/2,o[2]+(B.mins[2]+B.maxs[2])/2];
+    const d=[cen[0]-eye[0],cen[1]-eye[1],cen[2]-eye[2]],dist=Math.hypot(d[0],d[1],d[2]);if(!dist)continue;
+    const dot=vdot(f,d)/dist,tn=gameKey(ei,'targetname'),hp=parseFloat(k.health);
+    const head=R.num+':'+R.rad+(tn?':'+tn:'')+(isFinite(hp)&&hp?':'+hp.toFixed(1):'');
+    const T=(z,s)=>ENTTEXT.push({p:[o[0],o[1],o[2]+z],s:s});
+    if(R.g==='actor'){
+      if(v!==4&&(!(dot>0.9||(dot>0&&dist<256))||dist>=maxd||dist<=64))continue;
+      const r=actorRadii(ei);
+      T(B.maxs[2]+56,R.num+':'+R.rad+':'+tn+':'+r.health.toFixed(1));
+      T(B.maxs[2]+20,'idle');                    // every AI starts in its idle think state
+      if(v===1){const home=[o[0],o[1],o[2]+B.maxs[2]+18];
+        dl(cen,home,DC.green);dlCircle(home,r.leash,DC.green,true,feet);
+        dlCircle(cen,r.mind,DC.red,true,feet);dlCircle(cen,r.maxd,DC.blue,true,feet);}
+      else if(v===2){dlCircle(cen,r.hear,DC.red,true,feet);dlCircle(cen,r.sight,DC.blue,true,feet);}
+    }else if(R.g==='door'){
+      if(!(dot>0.95&&dist<1024&&dist>64))continue;
+      const z=(B.mins[2]+B.maxs[2])*0.5;T(z,head);T(z+18,B.door?B.door.state:'closed');
+    }else if(R.g==='turret'){
+      if(!(dot>0.9||(dot>0&&dist<256))||dist>=2048||dist<=64)continue;
+      T(B.maxs[2]+56,R.num+':'+R.rad+':'+tn);T(B.maxs[2]+38,'aim_target: -1');T(B.maxs[2]+20,'owner: -1');
+    }else if(R.g!=='weapon'){                    // Weapon::ShowInfo shows nothing
+      if(!(dot>0.95&&dist<1024&&dist>64))continue;
+      T(B.maxs[2]+65,head);
+    }
+  }}
+
+// ---- AI path nodes: ai_shownodenums, ai_shownode, ai_showallnode -------------------------
+// The node numbers (DrawAllConnections): yellow, 14 units over each node within
+// ai_showroutes_distance of the eye.
+function dlNodeNums(feet){
+  const P=D.paths,O=D.f32(P.o),eye=cam.pos,lim=CVARS.ai_showroutes_distance;
+  for(let i=0;i<P.n;i++){const o=[O[i*3],O[i*3+1],O[i*3+2]];
+    if(Math.sqrt(dist2(o,eye))>lim)continue;
+    dlNumber([o[0],o[1],o[2]+14],i,1.5,DC.yellow,feet);}}
+// PathSearch's map cells (256 units, from -8192): every node not marked DONT_LINK is filed
+// in the four cells round it, in node order
+let PATHCELLS=null;
+function pathCells(){
+  if(PATHCELLS)return PATHCELLS;
+  const P=D.paths,O=D.f32(P.o),F=D.i32(P.f),cells=new Map();
+  const NC=c=>{let v=c+8192-128;if(v<0)v=c+8192+128-1;return Math.trunc(v)>>8;};   // NodeCoordinate
+  const add=(x,y,i)=>{if(x<0||x>=64||y<0||y>=64)return;const k=x*64+y;let l=cells.get(k);if(!l){l=[];cells.set(k,l);}l.push(i);};
+  for(let i=0;i<P.n;i++){if(F[i]&1)continue;const x=NC(O[i*3]),y=NC(O[i*3+1]);add(x,y,i);add(x+1,y,i);add(x,y+1,i);add(x+1,y+1,i);}
+  return PATHCELLS=cells;
+}
+function gridCoord(c){let v=c+8192;if(v<0)v=c+8192+256-1;return Math.trunc(v)>>8;}   // GridCoordinate
+function pnEnts(){if(!PN_ENTS){PN_ENTS=[];MAP.ents.forEach((e,j)=>{if(e.cls==='info_pathnode')PN_ENTS.push(j);});}return PN_ENTS;}
+// a node's yaw: its info_pathnode's (the .pth keeps nodes in the map's order)
+function nodeYaw(i){const pn=pnEnts(),ei=pn.length===D.paths.n?pn[i]:-1;return ei>=0?entAngles(MAP.ents[ei].kvl)[1]:0;}
+// GetPathnodeColor, by spawnflags: black for flags the AI can't combine (IsValidPathnode)
+function nodeColour(sf){
+  if(nodeFlagsBad(sf))return[0,0,0];
+  if(sf&16)return[1,1,0];if(sf&32)return[0.7,1,0];if(sf&2)return[0,1,1];if(sf&64)return[1,0,0];
+  if(sf&8)return[0,0,1];if(sf&4)return[0,1,0];if(sf&128)return[1,0,0];       // CRATE: (3, 0, 0)
+  return[1,0,1];}
+// Where the player stands for these: its feet 82 units under the camera, lifted out of a
+// brush they would be inside (the game's player never is), at most to the camera
+function standFeet(feet){
+  const p=feet.slice();
+  for(let dz=0;dz<=VIEWHEIGHT;dz++){p[2]=feet[2]+dz;if(sightTrace(p,p))return p;}
+  return feet;
+}
+let NODELIST=null;
+// DrawNode's list: DebugNearestNodeList (the nodes of the player's cell within 94 units
+// of its height, nearest first, those a 30 x 30 x 62 box can reach, at most N; none
+// reachable: the nearest) or with ai_showallnode DebugNearestNodeList2 (every node at
+// that height, nearest first; N doesn't limit it)
+function nodeList(feet0,N){
+  const key=feet0.map(v=>Math.round(v)).join(',')+':'+N+':'+CVARS.ai_showallnode;
+  if(NODELIST&&NODELIST.key===key)return NODELIST;
+  const feet=standFeet(feet0),P=D.paths,O=D.f32(P.o),list=[];
+  if(CVARS.ai_showallnode){
+    const d=[];for(let i=0;i<P.n;i++){const z=O[i*3+2];if(feet[2]>z+94||z>feet[2]+94)continue;
+      d.push([dist2([O[i*3],O[i*3+1],z],feet),i]);}
+    d.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);for(const x of d)list.push(x[1]);
+  }else{
+    const gx=gridCoord(feet[0]),gy=gridCoord(feet[1]);
+    const cell=(gx>=0&&gx<64&&gy>=0&&gy<64)?pathCells().get(gx*64+gy):null;
+    if(cell){
+      const order=[],deltas=[];                  // NearestNodeSetup: deltas in the cell's order, the order by distance
+      for(let i=0;i<cell.length;i++){const j=cell[i],z=O[j*3+2];
+        if(feet[2]>z+94||feet[2]+94<z)continue;
+        deltas[i]=[O[j*3]-feet[0],O[j*3+1]-feet[1],z-feet[2]];
+        const dd=vdot(deltas[i],deltas[i]);let k=order.length;while(k>0&&dd<order[k-1][0])k--;order.splice(k,0,[dd,i]);}
+      for(let r=0;r<order.length&&list.length<N;r++){
+        // the game traces to the delta of the cell's r-th node (it indexes them by rank),
+        // which is this node's own only when nothing nearer was left out
+        const dv=deltas[r]||deltas[order[r][1]];
+        if(sightTrace(feet,[feet[0]+dv[0],feet[1]+dv[1],feet[2]+dv[2]]))list.push(cell[order[r][1]]);}
+      if(!list.length&&order.length)list.push(cell[order[0][1]]);
+    }
+  }
+  return NODELIST={key:key,list:list,feet:feet,lift:feet[2]-feet0[2]};
+}
+// DrawNode: a 31 x 31 x 36 box in the node's colour and a white line 16 units along its yaw,
+// 18 up; no node at all: a red circle round the player
+function dlNodes(feet){
+  const N=Math.min(CVARS.ai_shownode,4096),L=nodeList(feet,N),list=L.list,O=D.f32(D.paths.o),F=D.i32(D.paths.f);
+  if(!list.length){const f=L.feet;dlCircle([f[0],f[1],f[2]+48],128,DC.red,true,feet);return;}
+  const q=[[15.5,15.5],[15.5,-15.5],[-15.5,-15.5],[-15.5,15.5]];
+  for(const i of list){const o=[O[i*3],O[i*3+1],O[i*3+2]],c=nodeColour(F[i]),y=nodeYaw(i)*Math.PI/180;
+    dl([o[0],o[1],o[2]+18],[o[0]+Math.cos(y)*16,o[1]+Math.sin(y)*16,o[2]+18],DC.white);
+    for(let a=0;a<4;a++){const p=q[a],r=q[(a+1)%4];
+      dl([o[0]+p[0],o[1]+p[1],o[2]+36],[o[0]+r[0],o[1]+r[1],o[2]+36],c);
+      dl([o[0]+p[0],o[1]+p[1],o[2]],[o[0]+r[0],o[1]+r[1],o[2]],c);
+      dl([o[0]+p[0],o[1]+p[1],o[2]+36],[o[0]+p[0],o[1]+p[1],o[2]],c);}}}
+// G_SightTrace with the 30 x 30 x 62 box as the game's capsule (a sphere of radius 15
+// swept along 32 units upright, CM_TraceThroughBrush), against the world's brushes whose
+// contents MASK_PATHSOLID stops; patches, terrain and entities (doors, the AI) don't stop
+// it here. Each brush gets its six axial planes, as the compiler adds them (bevels).
+const MASK_PATHSOLID=0x1|0x40000000|0x2000000|0x2000|0x800|0x100|0x20000;
+const CLEARS_SOLID=new Set(['water','slime','lava','playerclip','monsterclip','fence','weaponclip','vehicleclip','nodrop','nonsolid','origin','areaportal','fog','alphashadow']);
+let TRACEBR=null;
+function traceBrushes(){
+  if(TRACEBR)return TRACEBR;
+  const L=[];
+  for(const p of SC.prims){if(p.kind!==0||!WORLDLIKE[MAP.ents[p.ent].cls]||!isFinite(p.mins[0]))continue;
+    const pr=MAP.ents[p.ent].prims[p.bn];if(!pr||!pr.d||!pr.d.faces.length)continue;
+    // the brush's contents: its first side's, as the compiled .bsp has them on the face,
+    // else its shader's (solid unless a surfaceparm clears it)
+    const faces=pr.d.faces,f0=faces[0],te=texFor(f0.tex);
+    let c=(f0.cont|0)&~0x8000000;
+    if(!c){c=(te.cf|0)|((te.p||[]).some(x=>CLEARS_SOLID.has(x))?0:1);}
+    if(!(c&MASK_PATHSOLID))continue;
+    const pl=[];for(const f of faces){const q=planeOf(f);if(q)pl.push(q);}
+    const mn=p.mins,mx=p.maxs;
+    pl.push([1,0,0,mx[0]],[-1,0,0,-mn[0]],[0,1,0,mx[1]],[0,-1,0,-mn[1]],[0,0,1,mx[2]],[0,0,-1,-mn[2]]);
+    L.push({mn:mn,mx:mx,pl:pl});}
+  return TRACEBR=L;
+}
+function sightTrace(a,b){
+  const s=[a[0],a[1],a[2]+31],e=[b[0],b[1],b[2]+31],R=15,EPS=0.125;
+  const lo=[Math.min(a[0],b[0])-16,Math.min(a[1],b[1])-16,Math.min(a[2],b[2])-1],hi=[Math.max(a[0],b[0])+16,Math.max(a[1],b[1])+16,Math.max(a[2],b[2])+63];
+  for(const B of traceBrushes()){
+    if(B.mn[0]>hi[0]||B.mx[0]<lo[0]||B.mn[1]>hi[1]||B.mx[1]<lo[1]||B.mn[2]>hi[2]||B.mx[2]<lo[2])continue;
+    let enter=-1,leave=1,out=false,miss=false;
+    for(const q of B.pl){
+      const dist=Math.abs(q[2]*16)+q[3]+R, d1=s[0]*q[0]+s[1]*q[1]+s[2]*q[2]-dist, d2=e[0]*q[0]+e[1]*q[1]+e[2]*q[2]-dist;
+      if(d1<=0&&d2<=0)continue;
+      if(d1>0)out=true;
+      if(d1>0&&(d2>=EPS||d2>=d1)){miss=true;break;}
+      if(d1>d2){const f=Math.max(0,(d1-EPS)/(d1-d2));if(f>enter)enter=f;}
+      else{const f=Math.min(1,(d1+EPS)/(d1-d2));if(f<leave)leave=f;}
+    }
+    if(miss)continue;
+    if(!out)return false;                        // starts inside the brush
+    if(enter<leave&&enter>-1)return false;
+  }
+  return true;
+}
+
+// ---- splines: sv_showcameras and g_showflypath -------------------------------------------
+// The info_splinepath chains as SplinePath::CreatePath links them, a frame after the level
+// starts, in spawn order: a node's "target" is its next (the first entity of that
+// targetname), taken from any node that named the same one before.
+let SPLINES=null;
+function splineGraph(){
+  if(SPLINES)return SPLINES;
+  const node=new Map();
+  MAP.ents.forEach((e,ei)=>{if(e.cls==='info_splinepath'&&ENTS[ei].origin)node.set(ei,{ei:ei,next:-1,owner:-1});});
+  for(const n of node.values()){const tg=gameKey(n.ei,'target');if(!tg)continue;
+    const t=gameTn(tg)[0];if(t==null||!node.has(t))continue;
+    const m=node.get(t);
+    if(m.owner>=0&&m.owner!==n.ei)node.get(m.owner).next=-1;
+    n.next=t;m.owner=n.ei;}
+  return SPLINES={node:node};
+}
+// one path as Camera::CreatePath builds it from a node: its points to the end of the
+// chain (or round to the start), and with SPLINE_LOOP the point a "loop" key goes back to
+function splinePath(start,loop){
+  const S=splineGraph(),pts=[],seen=new Set();let lcp=0,n=start;
+  while(n>=0&&S.node.has(n)&&!seen.has(n)){seen.add(n);const o=ENTS[n].origin;pts.push(o);
+    const lk=gameKey(n,'loop'),lt=lk?gameTn(lk)[0]:null;
+    if(loop&&lt!=null&&ENTS[lt]&&ENTS[lt].origin){const lo=ENTS[lt].origin,i=pts.findIndex(p=>p[0]===lo[0]&&p[1]===lo[1]&&p[2]===lo[2]);if(i>=0)lcp=i;}
+    n=S.node.get(n).next;}
+  return{pts:pts,loop:!!loop,lcp:lcp,ring:n===start};
+}
+// The paths drawn: each func_camera's from its target (SPLINE_LOOP with ORBIT, 1), then
+// every chain no camera starts, from its first node (a ring of nodes as a loop)
+function splinePaths(){
+  const S=splineGraph(),out=[],from=new Set();
+  for(let ei=1;ei<MAP.ents.length;ei++){const e=MAP.ents[ei];if(e.cls!=='func_camera')continue;
+    const tg=gameKey(ei,'target'),t=tg?gameTn(tg)[0]:null;
+    if(t==null||!S.node.has(t))continue;
+    out.push(splinePath(t,(parseInt(e.kvl.spawnflags||'0',10)|0)&1));from.add(t);}
+  for(const n of S.node.values())if(n.owner<0&&!from.has(n.ei))out.push(splinePath(n.ei,false));
+  // rings: nodes no walk reached
+  const seen=new Set();for(const P of out)P.pts.forEach(p=>seen.add(p));
+  for(const n of S.node.values())if(!seen.has(ENTS[n.ei].origin)){const P=splinePath(n.ei,true);P.pts.forEach(p=>seen.add(p));out.push(P);}
+  return out.filter(P=>P.pts.length);
+}
+// BSpline::Eval: a uniform cubic B-spline; SPLINE_CLAMP holds the ends, SPLINE_LOOP wraps
+// back to its loop point (and is clamped before 0)
+function bsplineAt(P,u,loop,lcp){
+  const n=P.length,seg=Math.floor(u),t=u-seg,t2=t*t,t3=t2*t,m=1-t;
+  const B=[m*m*m/6,(3*t3-6*t2+4)/6,(-3*t3+3*t2+3*t+1)/6,t3/6],r=[0,0,0];
+  let j=loop&&u>=0?((seg%n)+n)%n:seg;
+  for(let i=0;i<4;i++,j++){
+    let k=j;
+    if(loop&&u>=0){if(j>=n){j-=n-lcp;k=j;}}
+    else k=Math.max(0,Math.min(n-1,j));
+    for(let a=0;a<3;a++)r[a]+=P[k][a]*B[i];}
+  return r;}
+function dlSplines(cams,fly){
+  const paths=splinePaths();
+  // DrawCurve(10): from u = -2 to the number of points, a tenth at a time, in yellow
+  if(cams)for(const P of paths){let prev=null;
+    for(let u=Math.fround(-2);u<=P.pts.length;u=Math.fround(u+Math.fround(0.1))){const p=bsplineAt(P.pts,u,P.loop,P.lcp);if(prev)dl(prev,p,DC.yellow);prev=p;}}
+  // a fly path: a 64-unit box on each node and the way between them
+  if(fly)for(const P of paths)P.pts.forEach((p,i)=>{dlBox8(boxPts(p,[-32,-32,-32],[32,32,32],null),DC.cyan);
+    if(i+1<P.pts.length)dl(p,P.pts[i+1],DC.green);});
+  // a small wire camera where the game puts func_camera.tik (not in the game's paks)
+  if(cams)for(let ei=1;ei<MAP.ents.length;ei++){const e=MAP.ents[ei];if(e.cls!=='func_camera'||!ENTS[ei].origin)continue;
+    const ax=anglesAxis(entAngles(e.kvl)),o=ENTS[ei].origin;dlBox8(boxPts(o,[-12,-6,-8],[6,6,8],ax),DC.yellow);
+    const at=(x,y,z)=>[o[0]+ax[0][0]*x+ax[1][0]*y+ax[2][0]*z,o[1]+ax[0][1]*x+ax[1][1]*y+ax[2][1]*z,o[2]+ax[0][2]*x+ax[1][2]*y+ax[2][2]*z];
+    const l=at(6,0,0),C=[[16,8,6],[16,-8,6],[16,-8,-6],[16,8,-6]];
+    C.forEach((c,i)=>{dl(l,at(...c),DC.yellow);dl(at(...c),at(...C[(i+1)%4]),DC.yellow);});}
+}
+
+// ---- cg_rain_drawcoverage ------------------------------------------------------------------
+// CG_Rain: a func_rain's box, cut to rain_min_dist round the player across; the red
+// rectangle at its bottom is where its drops land
+function dlRain(feet){
+  const md=(D.rain&&D.rain.min)||512;
+  for(let ei=1;ei<MAP.ents.length;ei++){if(MAP.ents[ei].cls!=='func_rain')continue;
+    const B=gameBox(ei);if(!B||(GV&&!gvSent(GV,ei)))continue;
+    const lo=[Math.max(B.o[0]+B.mins[0],feet[0]-md),Math.max(B.o[1]+B.mins[1],feet[1]-md)];
+    const hi=[Math.min(B.o[0]+B.maxs[0],feet[0]+md),Math.min(B.o[1]+B.maxs[1],feet[1]+md)];
+    if(lo[0]>hi[0]||lo[1]>hi[1])continue;
+    const z=B.o[2]+B.mins[2],C=[[lo[0],lo[1],z],[hi[0],lo[1],z],[hi[0],hi[1],z],[lo[0],hi[1],z]];
+    for(let i=0;i<4;i++)dl(C[i],C[(i+1)%4],DC.red);}}
+
+// ---- r_showstaticbboxes ----------------------------------------------------------------------
+// R_AddStaticModelSurfaces: each static model the game draws gets its .tik's bounds times
+// its scale, turned with it, every edge magenta (R_DebugRotatedBBox)
+function dlStaticBoxes(){
+  const G=GV,fs=D.bsp&&D.bsp.firstStatic!=null?D.bsp.firstStatic:MAP.ents.length,f=camAxes().f,fe=vdot(f,cam.pos);
+  for(let ei=fs;ei<ENTS.length;ei++){const X=ENTS[ei];if(X.model<0||!X.origin)continue;
+    if(G.stM[ei-fs]!==G.frame)continue;          // not in a leaf the game draws
+    const M=D.models[X.model],k=MAP.ents[ei].kvl,sc=parseFloat(k.scale)||1,tb=M.tb||[[-4,-4,-4],[4,4,4]];
+    const P=boxPts(X.origin,tb[0].map(v=>v*sc),tb[1].map(v=>v*sc),anglesAxis(entAngles(k)));
+    if(G.farBoxes){const b=ptsBounds(P);if(gvBeyond(f,fe,G.far,b.mins[0],b.mins[1],b.mins[2],b.maxs[0],b.maxs[1],b.maxs[2]))continue;}
+    for(const[a,b]of[[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7]])dl(P[a],P[b],DC.magenta);}}
+
+// ---- the lines, drawn -------------------------------------------------------------------------
+let PDL=null;
+function cvarLinesWanted(){
+  return !!(CVARS.sv_showentnums||CVARS.sv_showbboxes||CVARS.g_entinfo||(pathsOk()&&(CVARS.ai_shownodenums||CVARS.ai_shownode))||
+    CVARS.sv_showcameras||CVARS.g_showflypath||CVARS.cg_rain_drawcoverage||(CVARS.r_showstaticbboxes&&GV));}
+// the server's view of the camera (which entities it sends), kept up to date for these
+function gvCamera(){if(GV)gvMark(GV,gvPointLeaf(GV,cam.pos));}
+function drawCvarLines(vp){
+  DL=[];ENTTEXT=[];
+  if(!cvarLinesWanted()||!gl)return;
+  const feet=feetPos();
+  gvCamera();
+  if(CVARS.sv_showentnums)dlEntNums(feet);
+  if(CVARS.sv_showbboxes)dlBoxes(CVARS.sv_showbboxes,feet);
+  if(CVARS.g_entinfo)dlEntInfo(CVARS.g_entinfo,feet);
+  if(pathsOk()){if(CVARS.ai_shownode>0)dlNodes(feet);if(CVARS.ai_shownodenums)dlNodeNums(feet);}
+  if(CVARS.sv_showcameras||CVARS.g_showflypath)dlSplines(CVARS.sv_showcameras,CVARS.g_showflypath);
+  if(CVARS.cg_rain_drawcoverage)dlRain(feet);
+  if(CVARS.r_showstaticbboxes&&GV){gvGL();gvUpdate();dlStaticBoxes();}
+  if(DL.length){
+    if(!PDL)PDL=compile(VS_GVL,FS_LINE);
+    if(!B.dlBuf){B.dlBuf=gl.createBuffer();B.vDl=gvLineVAO(B.dlBuf,true);gl.bindVertexArray(null);}
+    gl.bindBuffer(gl.ARRAY_BUFFER,B.dlBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(DL),gl.STREAM_DRAW);
+    gvUniforms(PDL,vp,0.0015);
+    gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(false);
+    gl.bindVertexArray(B.vDl);gl.drawArrays(gl.LINES,0,DL.length/10);
+    gl.bindVertexArray(null);gl.depthMask(true);
+  }
+  if(ENTTEXT.length)drawWorldText(vp,ENTTEXT);
+}
+
+// ---- floating text (G_DebugString, R_DrawFloatingString) --------------------------------------
+// The game writes these in the world in verdana-14, 14 units tall, from their spot to the
+// right along the view, hidden behind walls like the rest of the scene.
+let PTXT=null;
+const TXT_PX=28;                                 // canvas pixels per 14 units
+function drawWorldText(vp,list){
+  if(!PTXT)PTXT=compile(`#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec2 aUV; uniform mat4 uVP; out vec2 vUV;
+void main(){vUV=aUV;gl_Position=uVP*vec4(aPos,1.0);}`,`#version 300 es
+precision mediump float; in vec2 vUV; uniform sampler2D uTex; out vec4 o;
+void main(){vec4 t=texture(uTex,vUV);if(t.a<0.02)discard;o=vec4(1.0,1.0,1.0,t.a);}`);
+  // every string on one canvas, a row each, redrawn when the strings change
+  const key=list.map(t=>t.s).join('\n'),RH=TXT_PX+6;
+  if(!B.txt||B.txt.key!==key){
+    const cv=document.createElement('canvas'),c2=cv.getContext('2d'),font=TXT_PX+'px Verdana,Tahoma,sans-serif';
+    c2.font=font;const ws=list.map(t=>Math.ceil(c2.measureText(t.s).width)+4);
+    cv.width=Math.min(4096,Math.max(4,...ws));cv.height=Math.min(4096,Math.max(4,list.length*RH));
+    c2.font=font;c2.textBaseline='bottom';c2.fillStyle='#fff';
+    list.forEach((t,i)=>c2.fillText(t.s,2,(i+1)*RH-3));
+    if(!B.txt)B.txt={tex:gl.createTexture()};
+    gl.bindTexture(gl.TEXTURE_2D,B.txt.tex);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,cv);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    B.txt.key=key;B.txt.w=cv.width;B.txt.h=cv.height;B.txt.ws=ws;}
+  const a=camAxes(),u=TXT_PX/14,V=[];
+  list.forEach((t,i)=>{if((i+1)*RH>B.txt.h)return;
+    const w=Math.min(B.txt.ws[i],B.txt.w)/u,h=RH/u,p=t.p,r=a.r,q=a.u;
+    const v0=(i*RH)/B.txt.h,v1=((i+1)*RH)/B.txt.h,u1=Math.min(B.txt.ws[i],B.txt.w)/B.txt.w;
+    const P=(x,y)=>[p[0]+r[0]*x+q[0]*y,p[1]+r[1]*x+q[1]*y,p[2]+r[2]*x+q[2]*y];
+    const c=[[P(0,0),0,v1],[P(w,0),u1,v1],[P(w,h),u1,v0],[P(0,h),0,v0]];
+    for(const k of[0,1,2,0,2,3])V.push(c[k][0][0],c[k][0][1],c[k][0][2],c[k][1],c[k][2]);});
+  if(!V.length)return;
+  if(!B.txtBuf){B.txtBuf=gl.createBuffer();B.vTxt=gl.createVertexArray();gl.bindVertexArray(B.vTxt);
+    gl.bindBuffer(gl.ARRAY_BUFFER,B.txtBuf);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,20,0);
+    gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,2,gl.FLOAT,false,20,12);gl.bindVertexArray(null);}
+  gl.bindBuffer(gl.ARRAY_BUFFER,B.txtBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(V),gl.STREAM_DRAW);
+  gl.useProgram(PTXT);gl.uniformMatrix4fv(PTXT.u.uVP,false,vp);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,B.txt.tex);gl.uniform1i(PTXT.u.uTex,0);
+  gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(false);gl.disable(gl.CULL_FACE);
+  gl.bindVertexArray(B.vTxt);gl.drawArrays(gl.TRIANGLES,0,V.length/5);
+  gl.bindVertexArray(null);gl.depthMask(true);gl.disable(gl.BLEND);
+}
+
+// ---- r_light_showgrid ---------------------------------------------------------------------------
+// R_AddLightGridSurfacesToScene: a 4 x 4 square (the "showgrid" shader turns it to face the
+// view: autosprite) on every light grid point within 256 units of the eye, in the colour
+// R_GetLightingGridValueFast finds there (the nearest lit sample, its palette colour).
+let LGRID=null;
+function lightGrid(){
+  if(LGRID!==null)return LGRID;
+  const g=D.lg;if(!g){LGRID=false;return false;}
+  return LGRID={m:g.m,s:g.s,b:g.b,o:D.bytes(g.o),p:D.bytes(g.p),d:D.bytes(g.d)};
+}
+const LG_SEARCH=[[0,4,2,6,1,5,3,7],[0,2,4,6,1,3,5,7],[0,0,0,0,0,0,0,0],[0,2,1,3,4,6,5,7],[0,4,1,5,2,6,3,7],[0,0,0,0,0,0,0,0],[0,1,4,5,2,3,6,7],[0,1,2,3,4,5,6,7]];
+function lgOff(G,i){return G.o[i*2]|(G.o[i*2+1]<<8);}
+function lgFast(G,pos){
+  const gp=[0,0,0],fd=[0,0,0];let tog=0,ord=0;
+  for(let i=0;i<3;i++){let v=(G.s[i]*0.5+pos[i]-G.m[i])/G.s[i];gp[i]=Math.floor(v);v-=gp[i];
+    if(gp[i]<0){gp[i]=0;v=0;}else if(gp[i]>G.b[i]-2){gp[i]=G.b[i]-2;v=1;}
+    fd[i]=0.5-v;if(fd[i]<0){fd[i]=-fd[i];tog|=1<<i;}}
+  if(fd[1]>=fd[0])ord=1;if(fd[2]>=fd[0])ord|=2;if(fd[2]>=fd[1])ord|=4;
+  const smp=[-1,-1,-1,-1,-1,-1,-1,-1],step=G.b[1],base=gp[1]+G.b[0]+gp[0]*G.b[1],D8=G.d,sb=v=>v>127?v-256:v;
+  for(let i=0;i<8;i++){
+    const j=LG_SEARCH[ord][i]^tog;
+    if(smp[j]<0){
+      let at;
+      switch(j&3){case 0:at=lgOff(G,gp[0])*256+lgOff(G,base);break;case 1:at=lgOff(G,gp[0])*256+lgOff(G,base+1);break;
+        case 2:at=lgOff(G,gp[0]+1)*256+lgOff(G,base+step);break;default:at=lgOff(G,gp[0]+1)*256+lgOff(G,base+step+1);}
+      const k=j&~1;let row=gp[2],d=0,len=0;
+      for(let guard=0;guard<4096;guard++){
+        let done=false;
+        for(;sb(D8[at+d])>=0;d+=2,row-=len){len=sb(D8[at+d])+2;
+          if(len-1<row)continue;
+          if(len-1>row){smp[k+1]=smp[k]=D8[at+d+1];}else{smp[k]=D8[at+d+1];smp[k+1]=D8[at+d+3];}
+          done=true;break;}
+        if(done)break;
+        const n=-sb(D8[at+d]);
+        if(n>row){smp[k]=D8[at+row+d+1];smp[k+1]=(n-1===row)?D8[at+row+d+3]:D8[at+row+d+2];break;}
+        row-=n;d+=n+1;
+      }
+    }
+    if(smp[j]>0){const c=smp[j]*3;return[G.p[c],G.p[c+1],G.p[c+2]];}
+  }
+  return[255,255,255];                         // tr.identityLightByte
+}
+function drawLightGrid(vp){
+  const G=lightGrid();if(!G||!gl)return;
+  const e=cam.pos,mn=[0,0,0],mx=[0,0,0];
+  for(let i=0;i<3;i++){mn[i]=G.m[i]+Math.floor((e[i]-256-G.m[i])/G.s[i])*G.s[i];mx[i]=G.m[i]+Math.floor((e[i]+256-G.m[i])/G.s[i])*G.s[i];}
+  const a=camAxes(),r=[a.r[0]*2,a.r[1]*2,a.r[2]*2],u=[a.u[0]*2,a.u[1]*2,a.u[2]*2],V=[];
+  for(let z=mn[2];z<mx[2];z+=G.s[2])for(let y=mn[1];y<mx[1];y+=G.s[1])for(let x=mn[0];x<mx[0];x+=G.s[0]){
+    const c=lgFast(G,[x,y,z]),q=k=>[x+r[0]*k[0]+u[0]*k[1],y+r[1]*k[0]+u[1]*k[1],z+r[2]*k[0]+u[2]*k[1]];
+    const P=[q([-1,-1]),q([1,-1]),q([1,1]),q([-1,1])];
+    for(const k of[0,1,2,0,2,3])V.push(P[k][0],P[k][1],P[k][2],c[0]/255,c[1]/255,c[2]/255,1);}
+  LGRID.n=V.length/42;
+  if(!V.length)return;
+  if(!B.lgBuf){B.lgBuf=gl.createBuffer();B.vLg=gl.createVertexArray();gl.bindVertexArray(B.vLg);
+    gl.bindBuffer(gl.ARRAY_BUFFER,B.lgBuf);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,28,0);
+    gl.enableVertexAttribArray(7);gl.vertexAttribPointer(7,4,gl.FLOAT,false,28,12);gl.bindVertexArray(null);}
+  gl.bindBuffer(gl.ARRAY_BUFFER,B.lgBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(V),gl.STREAM_DRAW);
+  setCommon(PC,vp,0);gl.uniform1f(PC.u.uShade,0);gl.uniform1i(PC.u.uUseTex,0);gl.uniform3f(PC.u.uFlat,1,1,1);gl.uniform3f(PC.u.uFog,0,1,0);
+  gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);
+  gl.bindVertexArray(B.vLg);gl.vertexAttrib1f(2,0);gl.drawArrays(gl.TRIANGLES,0,V.length/7);gl.bindVertexArray(null);
+}
+
+// ---- r_showsky ------------------------------------------------------------------------------------
+// RB_StageIteratorSky: the sky polygons the game draws from here are clipped to the six sides
+// of a box round the eye (ClipSkyPolygon), each side's covered part is rounded out to
+// quarters (DrawSkyBox) and those blocks of the sky box are what it draws; r_showsky draws
+// them with the depth range squeezed to the near end, in front of everything.
+const SKY_CLIP=[[1,1,0],[1,-1,0],[0,-1,1],[0,1,1],[1,0,1],[-1,0,1]];
+const SKY_VTS=[[-2,3,1],[2,3,-1],[1,3,2],[-1,3,-2],[-2,-1,3],[-2,1,-3]];
+const SKY_STV=[[3,-1,2],[-3,1,2],[1,3,2],[-1,-3,2],[-2,-1,3],[2,-1,-3]];
+function skyAddPoly(S,vs){
+  const v=[0,0,0];for(const p of vs){v[0]+=p[0];v[1]+=p[1];v[2]+=p[2];}
+  const av=v.map(Math.abs);let axis;
+  if(av[0]>av[1]&&av[0]>av[2])axis=v[0]<0?1:0;else if(av[1]>av[2]&&av[1]>av[0])axis=v[1]<0?3:2;else axis=v[2]<0?5:4;
+  const g=(p,j)=>j<0?-p[-j-1]:p[j-1];
+  for(const p of vs){const dv=g(p,SKY_VTS[axis][2]);if(dv<0.001)continue;
+    const s=g(p,SKY_VTS[axis][0])/dv,t=g(p,SKY_VTS[axis][1])/dv;
+    if(s<S.mn[0][axis])S.mn[0][axis]=s;if(t<S.mn[1][axis])S.mn[1][axis]=t;
+    if(s>S.mx[0][axis])S.mx[0][axis]=s;if(t>S.mx[1][axis])S.mx[1][axis]=t;}}
+function skyClip(S,vs,stage){
+  if(stage===6){skyAddPoly(S,vs);return;}
+  const n=SKY_CLIP[stage],d=vs.map(p=>p[0]*n[0]+p[1]*n[1]+p[2]*n[2]),sd=d.map(x=>x>0.1?1:x<-0.1?2:0);
+  if(!sd.includes(1)||!sd.includes(2)){skyClip(S,vs,stage+1);return;}
+  const f=[],b=[];
+  for(let i=0;i<vs.length;i++){const p=vs[i],j=(i+1)%vs.length;
+    if(sd[i]!==2)f.push(p);if(sd[i]!==1)b.push(p);
+    if(sd[i]===0||sd[j]===0||sd[j]===sd[i])continue;
+    const t=d[i]/(d[i]-d[j]),q=vs[j],c=[p[0]+t*(q[0]-p[0]),p[1]+t*(q[1]-p[1]),p[2]+t*(q[2]-p[2])];
+    f.push(c);b.push(c);}
+  skyClip(S,f,stage+1);skyClip(S,b,stage+1);}
+function skyVec(s,t,axis,size){const b=[s*size,t*size,size],o=[0,0,0];
+  for(let j=0;j<3;j++){const k=SKY_STV[axis][j];o[j]=k<0?-b[-k-1]:b[k-1];}return o;}
+function drawShowSky(vp){
+  if(!CVARS.r_showsky||!GV||!gl||!GV.sk||!GV.sk.length)return;
+  gvGL();gvUpdate();
+  const G=GV,e=cam.pos,byTex=new Map(),a=camAxes(),tx=Math.tan(fovX*Math.PI/360),ty=tx*H/W;
+  // the view's four side planes (the game adds only what is in the view)
+  const fr=[[tx*a.f[0]-a.r[0],tx*a.f[1]-a.r[1],tx*a.f[2]-a.r[2]],[tx*a.f[0]+a.r[0],tx*a.f[1]+a.r[1],tx*a.f[2]+a.r[2]],
+            [ty*a.f[0]-a.u[0],ty*a.f[1]-a.u[1],ty*a.f[2]-a.u[2]],[ty*a.f[0]+a.u[0],ty*a.f[1]+a.u[1],ty*a.f[2]+a.u[2]]];
+  let nTri=0;
+  for(const s of G.skyNow||[]){const o=s*8,ti=G.si[o+5];let S=byTex.get(ti);
+    if(!S){S={mn:[[9999,9999,9999,9999,9999,9999],[9999,9999,9999,9999,9999,9999]],mx:[[-9999,-9999,-9999,-9999,-9999,-9999],[-9999,-9999,-9999,-9999,-9999,-9999]]};byTex.set(ti,S);}
+    const K=G.sk,P=G.v;
+    for(let k=G.si[o+3];k+2<G.si[o+3]+G.si[o+4];k+=3){
+      const tri=[0,1,2].map(m=>{const v=K[k+m]*3;return[P[v]-e[0],P[v+1]-e[1],P[v+2]-e[2]];});
+      if(fr.some(n=>tri.every(p=>p[0]*n[0]+p[1]*n[1]+p[2]*n[2]<0)))continue;
+      skyClip(S,tri,0);nTri++;}}
+  G.skyTris=nTri;G.skyBlocks=0;
+  if(!nTri)return;
+  const fogged=fogOn(),flat=fogged?fogCol():skyColour(),T=(performance.now()-T0)/1000,size=farPlane()/1.75;
+  if(!B.skBuf){B.skBuf=gl.createBuffer();B.vSk=gl.createVertexArray();gl.bindVertexArray(B.vSk);
+    gl.bindBuffer(gl.ARRAY_BUFFER,B.skBuf);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,12,0);gl.bindVertexArray(null);}
+  gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);gl.disable(gl.DEPTH_TEST);gl.depthMask(false);
+  let blocks=0;
+  for(const[ti,S]of byTex){
+    const V=[];
+    for(let i=0;i<6;i++){
+      const lo=[Math.floor(S.mn[0][i]*4)/4,Math.floor(S.mn[1][i]*4)/4],hi=[Math.ceil(S.mx[0][i]*4)/4,Math.ceil(S.mx[1][i]*4)/4];
+      if(lo[0]>=hi[0]||lo[1]>=hi[1])continue;
+      const c=x=>Math.max(-1,Math.min(1,x)),s0=c(lo[0]),t0=c(lo[1]),s1=c(hi[0]),t1=c(hi[1]);
+      blocks+=Math.round((s1-s0)*4)*Math.round((t1-t0)*4);
+      const q=[skyVec(s0,t0,i,size),skyVec(s1,t0,i,size),skyVec(s1,t1,i,size),skyVec(s0,t1,i,size)];
+      for(const k of[0,1,2,0,2,3])V.push(q[k][0]+e[0],q[k][1]+e[1],q[k][2]+e[2]);}
+    if(!V.length)continue;
+    gl.bindBuffer(gl.ARRAY_BUFFER,B.skBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(V),gl.STREAM_DRAW);
+    const te=TEX[ti]||{},sb=te.sb,t=(!fogged&&sb!=null)?B.skyTex[sb]:null,C=(!fogged&&te.cl!=null)?CLOUDS[te.cl]:null,list=cloudLayers(C),Q=skyProgram(list.length);
+    gl.useProgram(Q);gl.uniformMatrix4fv(Q.u.uVP,false,vp);gl.uniform3fv(Q.u.uEye,cam.pos);gl.uniform1f(Q.u.uClip,0);
+    gl.uniform1i(Q.u.uSky,2);gl.uniform3fv(Q.u.uSkyCol,flat);for(let k=0;k<4;k++)if(Q.u['uC'+k])gl.uniform1i(Q.u['uC'+k],4+k);
+    if(Q.u.uPush)gl.uniform1f(Q.u.uPush,0);
+    if(Q.u.uTm){gl.uniform2f(Q.u.uTm,1,1);gl.uniform1i(Q.u.uAg,0);}
+    gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D_ARRAY,t||B.skyNone);gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(Q.u.uHasBox,t?1:0);if(list.length)setClouds(Q,C,list,T);
+    gl.bindVertexArray(B.vSk);gl.drawArrays(gl.TRIANGLES,0,V.length/3);}
+  G.skyBlocks=blocks;
+  gl.bindVertexArray(null);gl.enable(gl.DEPTH_TEST);gl.depthMask(true);
+}
+
+// ============================================================================
 //  Game cvars: the list under Display (or `, as the game's console key)
 // ============================================================================
-// A few of the game's debugging cvars, doing in the page what they do in game. CVARS
-// holds their values; a click on a row sets it (or back to its default), and the filter
-// box takes a cvar and a value the way the game's console does: "r_showtris 2", Enter.
-const CVAR_DEFAULTS={r_showtris:0,cm_noAreas:0,ai_showroutes:0,ai_showroutes_distance:1000,ai_fallheight:96};
+// Some of the game's debugging cvars, doing in the page what they do in game, and the
+// game settings some of them depend on. CVARS holds their values; a click on a row sets
+// it (or back to its default), and the filter box takes a cvar and a value the way the
+// game's console does: "r_showtris 2", Enter.
+const CVAR_DEFAULTS={r_showtris:0,r_shownormals:0,r_lockpvs:0,r_novis:0,cm_noAreas:0,r_showsky:0,r_showstaticbboxes:0,
+  r_farplane:0,r_farplane_color:'.5 .5 .5',r_farplane_nocull:0,r_farplane_nofog:0,r_lightmap:0,r_light_showgrid:0,
+  sv_showentnums:0,sv_showbboxes:0,g_entinfo:0,g_entinfo_max:2048,sv_showcameras:0,g_showflypath:0,cg_rain_drawcoverage:0,
+  ai_showroutes:0,ai_showroutes_distance:8200,ai_fallheight:96,ai_shownodenums:0,ai_shownode:0,ai_showallnode:0,g_nodecheck:0,
+  g_gametype:0,skill:1,developer:0,sv_maxclients:1};
 const CVARS=Object.assign({},CVAR_DEFAULTS);
+const CVAR_NOSAVE=new Set(['r_lockpvs']);      // a lock is of where the camera was: not kept for next time
+// the values a cvar without a number box takes (the rest are switches, 0 or 1)
+const CVAR_RANGE={r_showtris:[0,3],r_lightmap:[0,2],sv_showbboxes:[-28,128],g_entinfo:[0,4]};
+// the cvars the viewer starts at another value than the game does: the game's (the console says so)
+const CVAR_GAMEDEF={ai_showroutes_distance:1000};
 const CVAR_ROWS=[
+ {h:'What the renderer draws'},
  {n:'r_showtris',v:1,need:'vis',d:'outline what the game draws',
   t:'Outline every triangle the game draws from where the camera is, hidden behind walls: what is in the camera\'s PVS and in an area joined to its own, without the faces turned away from it'},
  {n:'r_showtris',v:2,need:'vis',d:'through walls: the culling',
   t:'The same outlines drawn through walls, with an axis cross at each model the game draws: shows what it culls from here. Step out of a room and the rest of the map comes in as soon as the camera reaches a cluster that can see it'},
  {n:'r_showtris',v:3,need:'vis',d:'axis crosses only',
   t:'Only the axis crosses: at the world origin, and at the origin of each brush entity and model the game draws from here (red up, green along y, blue a diagonal, as the engine draws it)'},
+ {n:'r_shownormals',v:1,need:'nrm',d:'vertex normals',
+  t:'A white line 2 units long along the normal at each vertex the game draws from here, over everything (DrawNormals, tr_shade.c): a face\'s plane, a curve\'s grid (MakeMeshNormals), a model\'s vertices turned by their bones; a static prop\'s lines grow with its scale. Terrain has none: the renderer never makes normals for it. In game a face or curve only fills its normals in when its shader uses them (an environment map, deformVertexes, a dot alphaGen or rgbGen...) or a dynamic light is in the scene; otherwise its lines show whatever the surface before it left, pointing anywhere. Here every face and curve shows its own. In game it also takes developer 1'},
+ {n:'r_lockpvs',v:1,need:'vis',d:'freeze what is drawn',
+  t:'Keep the leafs the renderer marked from where the camera is now (R_MarkLeaves stops): fly out with r_showtris 2 to see the whole of what the game draws from that spot. The entities still follow the camera, as the server sends them from where the player is'},
+ {n:'r_novis',v:1,need:'vis',d:'ignore the PVS',
+  t:'Ignore the visibility data and the doors: the renderer keeps every leaf (R_MarkLeaves marks them all). Compare with r_showtris 2: only the farplane and the faces turned away are left out'},
  {n:'cm_noAreas',v:1,need:'vis',d:'every door open',
   t:'Count every area portal as open, as if every door were open, for r_showtris. Off: the game\'s start, with every door shut but those that start open, so the areas behind a shut door aren\'t drawn even when they are in the PVS'},
+ {n:'r_showsky',v:1,need:'sky',d:'the sky drawn from here',
+  t:'Draw the parts of the sky box the game draws from here in front of everything: the sky polygons in view are projected onto the six sides of a box round the eye and rounded out to quarters of a side (tr_sky.c). In game the walls are drawn after the sky and still cover it, unless the sky has a solid cloud layer'},
+ {n:'r_showstaticbboxes',v:1,need:'vis',d:'static models\' boxes',
+  t:'A magenta box round each static model the game draws from here (the leafs it keeps and the farplane decide): its .tik\'s bounds times its scale, turned with it'},
+ {n:'r_farplane',num:[0,65536],step:64,f:1,d:'units, for the map\'s',
+  t:'Fog and cull at this distance in place of the map\'s farplane (0: the map\'s own), in the colour r_farplane_color, culling what r_farplane_nocull says. The game always draws a farplane\'s fog, so this turns the fog on here'},
+ {n:'r_farplane_color',str:1,need:'farset',d:'r g b, 0 to 1',
+  t:'The fog colour of r_farplane, red green blue from 0 to 1 (the game\'s default .5 .5 .5)'},
+ {n:'r_farplane_nocull',num:[-1,1],need:'farset',d:'1 none, -1 sky',
+  t:'What r_farplane culls: 0 (the default) the BSP nodes and the models past it, 1 nothing, -1 the models only (as for a portal sky). r_showtris shows it'},
+ {n:'r_farplane_nofog',v:1,need:'fog',d:'no fog',
+  t:'Don\'t draw the farplane\'s fog, the map\'s or r_farplane\'s (what is past the farplane is still culled: r_showtris shows it)'},
+ {h:'Lighting'},
+ {n:'r_lightmap',v:1,need:'lit',d:'lightmaps only',
+  t:'Lightmapped surfaces show their lightmap in place of their texture (the texture\'s alpha still cuts or blends it): the game draws a surface\'s stages only as far as its lightmap stage, and a stage joined with the texture replaces the colour. A shader that multiplies the lightmap over its texture in a pass of its own keeps the texture, as in game'},
+ {n:'r_lightmap',v:2,need:'lit',d:'lightmap brightness',
+  t:'The lightmaps coloured by how bright their raw bytes are, as the game makes them when the map loads (tr_bsp.c): red for dark, then yellow, green, cyan and blue to magenta for the brightest; the brightest value it prints is under the list. In game it takes a vid_restart'},
+ {n:'r_light_showgrid',v:1,need:'lgrid',d:'light grid points',
+  t:'A small square on each point of the light grid within 256 units of the camera, in the colour the grid gives there (R_GetLightingGridValueFast): the light the game\'s models take'},
+ {h:'Entities'},
+ {n:'sv_showentnums',v:1,d:'entity numbers',
+  t:'Each entity\'s number (the one script errors give) in yellow over it, within 1000 units of the player: the world 1022, then every map entity from sv_maxclients up, in the order the game spawns them. Path nodes, player starts and other simple entities have none; g_gametype, skill and developer below decide which entities spawn'},
+ {n:'sv_showbboxes',v:1,d:'solid entities',
+  t:'Within 1000 units of the player, a yellow box round each solid entity, turned with it (its uprights blue). Solid as each class sets itself up when the level starts; a script can change it. The box is its "setsize" key, else its .tik\'s setsize, else its .tik\'s bounds times its scale; an AI gives itself a standing player\'s box as it starts, ( -15 -15 0 ) ( 15 15 94 ) (Actor::EventStart)'},
+ {n:'sv_showbboxes',v:2,d:'solid ones, world-aligned',
+  t:'The magenta box the server links each solid entity with: the bounds of its turned box, a unit bigger all round'},
+ {n:'sv_showbboxes',v:3,d:'entities with a model',
+  t:'A yellow box round each entity that has a .tik model'},
+ {n:'sv_showbboxes',v:4,d:'every entity',
+  t:'A yellow box round every entity: a point entity without a model has no size, so its box is a point'},
+ {n:'sv_showbboxes',v:7,d:'models\' .tik bounds',
+  t:'A cyan box round each model: the bounds of its .tik\'s idle animation times its scale (TIKI_CalculateBounds), whatever its setsize'},
+ {n:'sv_showbboxes',v:8,d:'models and origins',
+  t:'A yellow box round each entity with a model and a small cyan box on its origin. (9 to 27 show the AI\'s hit spheres: see the Model Viewer)'},
+ {n:'g_entinfo',v:1,d:'AI leash and distances',
+  t:'What the game tells about the entity you look at (within 1024 units and 18° of the view; the AI within g_entinfo_max and 25°): its entity number, radnum, targetname and health over it, a door\'s state, an AI\'s think state. 1 adds an AI\'s green leash circle round its home and its mindist (red) and maxdist (blue) circles, from its keys or the game\'s defaults (512, 128, 1024)'},
+ {n:'g_entinfo',v:2,d:'AI hearing and sight',
+  t:'The same, with an AI\'s hearing (red) and sight (blue) circles in place of the others (2048 each unless its keys say)'},
+ {n:'g_entinfo',v:3,d:'the text only',t:'The text alone, no circles'},
+ {n:'g_entinfo',v:4,d:'AI text from anywhere',t:'The text alone, and an AI\'s whatever the direction and distance'},
+ {n:'g_entinfo_max',num:[0,65536],step:64,d:'units',t:'How far away g_entinfo tells about an AI (the game\'s default is 2048)'},
+ {n:'sv_showcameras',v:1,need:'spline',d:'cameras and their paths',
+  t:'The cameras (a wire stand-in: func_camera.tik isn\'t in the game\'s files) and their spline paths in yellow: each func_camera\'s from its target (a loop with ORBIT), and every other info_splinepath chain. In game a path shows while a camera follows it'},
+ {n:'g_showflypath',v:1,need:'spline',d:'fly paths',
+  t:'The paths a script_object can fly along (flypath): a cyan box on each info_splinepath node and a green line to the next. In game they show while something flies them'},
+ {n:'cg_rain_drawcoverage',v:1,need:'rain',d:'where the rain lands',
+  t:'A red rectangle at the bottom of each func_rain the client gets, cut to rain_min_dist round the player (the map script\'s, else 512): where its drops land'},
+ {h:'AI paths'},
  {n:'ai_showroutes',v:1,need:'paths',d:'AI path connections',
   t:'The connections the AI can walk between path nodes, from the map\'s .pth file: green both ways, a red arrowhead one way (pointing where it goes), a red X on a node with no connections, a blue circle on a node marked not to link. Only the nodes within ai_showroutes_distance of the camera'},
  {n:'ai_showroutes_distance',num:[0,65536],need:'paths',d:'units',
-  t:'ai_showroutes draws the nodes within this many units of the camera (the game\'s default is 1000)'},
+  t:'ai_showroutes and ai_shownodenums draw the nodes within this many units of the camera. The game\'s default is 1000; the viewer starts at 8200, so they show from far away: the page draws that many without slowing down'},
  {n:'ai_fallheight',num:[0,1024],need:'paths',d:'units',
-  t:'ai_showroutes leaves out the connections with a drop higher than this, and a connection counts as both ways only when the way back drops less (the game\'s default is 96)'}];
+  t:'ai_showroutes leaves out the connections with a drop higher than this, and a connection counts as both ways only when the way back drops less (the game\'s default is 96)'},
+ {n:'ai_shownodenums',v:1,need:'paths',d:'node numbers',
+  t:'Each path node\'s number in yellow over it, within ai_showroutes_distance of the camera'},
+ {n:'ai_shownode',num:[0,4096],need:'paths',d:'nodes the AI finds here',
+  t:'Up to this many path nodes the game finds for where you stand: the nodes of your 256-unit cell within 94 units of your height that a player-sized box can reach (traced here against the world\'s brushes), nearest first; if none can be reached, the nearest. Each is a 31 x 31 x 36 box in its type\'s colour (yellow corner left, lime corner right, cyan duck, red sniper, blue concealment, green cover, magenta plain, black flags that can\'t go together) with a white line toward its yaw. No node at all: a red circle round you'},
+ {n:'ai_showallnode',v:1,need:'paths',d:'every node at your height',
+  t:'ai_shownode shows every node within 94 units of your height, nearest first, however many it is set to'},
+ {n:'g_nodecheck',v:1,need:'paths',d:'path node errors',
+  t:'In game the path nodes are built again to show their errors, and the level stops with "Node check failed" when a node has 48 paths to check. Here: whether the build the map\'s .pth was saved from failed, and the nodes with 48 connections or more'},
+ {h:'The game the entities spawn for'},
+ {n:'g_gametype',num:[0,6],d:'0 single player',
+  t:'Anything but 0 leaves out the entities flagged not for deathmatch (spawnflags 2048), which renumbers the rest (sv_showentnums, g_entinfo)'},
+ {n:'skill',num:[0,3],d:'0 easy … 3 hard',
+  t:'The difficulty: the entities flagged not for it (spawnflags 256 easy, 512 medium, 1024 hard) don\'t spawn (the game\'s default is 1)'},
+ {n:'developer',v:1,d:'development entities',t:'Spawn the entities flagged for development (spawnflags 8192) too'},
+ {n:'sv_maxclients',num:[1,64],d:'players',t:'The first entity numbers are the players\': the map\'s entities are numbered from this up (1 in single player)'}];
 const CVAR_NAMES={};for(const k in CVAR_DEFAULTS)CVAR_NAMES[k.toLowerCase()]=k;
+// each row's group header, for the filter
+{let g=null;for(const r of CVAR_ROWS){if(r.h)g=r;else r.grp=g;}}
+function cvarValRow(n){return CVAR_ROWS.find(r=>r.n===n&&(r.num||r.str));}
 // what a row needs from the page, and why it can't be used without it
 function cvarWhyNot(need){
-  if(need==='vis'){if(GV)return '';
-    return D.kind==='map'?'r_showtris needs the compiled .bsp: a .map has no PVS yet (open the .bsp)':'this .bsp has no BSP tree to walk';}
+  if(need==='vis'||need==='sky'||need==='nrm'){if(GV){if(need==='sky'&&!(GV.sk&&GV.sk.length))return 'this map has no sky polygons';
+      if(need==='nrm'&&!GV.vn)return 'the build couldn\'t give this map its normals (see the Output pane)';return '';}
+    return D.kind==='map'?'a .map has no PVS yet: open the compiled .bsp':'this .bsp has no BSP tree to walk';}
   if(need==='paths'){if(pathsOk())return '';
     if(D.paths&&D.paths.err)return 'the path file '+(D.paths.src||'')+' can\'t be read: '+D.paths.err;
     if(!MAP.ents.some(e=>e.cls==='info_pathnode'))return 'this map has no AI path nodes (info_pathnode), so the game makes no path file for it';
     return 'no path file for this map ('+String(D.path||'maps/?.bsp').replace(/\.(bsp|map)$/i,'.pth')+'): the game writes one when it first loads a map that has path nodes';}
+  if(need==='lit'){if(!LIT)return D.kind==='map'?'a .map has no lightmaps: open the compiled .bsp':'this .bsp has no lightmaps (the game draws it at full brightness)';
+    if(fullBright)return 'Full Brightness is on: turn it off (B) to see the game\'s lighting';return '';}
+  if(need==='lgrid'){if(D.lg)return '';return D.kind==='map'?'a .map has no light grid: open the compiled .bsp':'this .bsp has no light grid';}
+  if(need==='spline'){if(MAP.ents.some(e=>e.cls==='info_splinepath'||e.cls==='func_camera'))return '';return 'this map has no info_splinepath or func_camera';}
+  if(need==='rain'){if(MAP.ents.some(e=>e.cls==='func_rain'))return '';return 'this map has no func_rain';}
+  if(need==='farset'){if(Math.trunc(CVARS.r_farplane))return '';return 'only with r_farplane set';}
+  if(need==='fog'){if(fogFar()>0)return '';return 'the map has no farplane (worldspawn "farplane") and r_farplane isn\'t set';}
   return '';
 }
-// a value as the cvar takes it: a whole number, r_showtris 0 to 3, the switches 0 or 1
+// a value as the cvar takes it: in its range, a whole number unless it takes fractions,
+// the switches 0 or 1, a colour as text
 function cvarClamp(n,v){
+  const row=cvarValRow(n);
+  if(row&&row.str){const s=String(v==null?'':v).trim();return s||null;}
   v=Number(v);if(!isFinite(v))return null;
-  const row=CVAR_ROWS.find(r=>r.n===n&&r.num);
-  if(row)return Math.max(row.num[0],Math.min(row.num[1],Math.round(v)));
-  if(n==='r_showtris')return Math.max(0,Math.min(3,Math.round(v)));
+  if(row)return Math.max(row.num[0],Math.min(row.num[1],row.f?v:Math.round(v)));
+  const lim=CVAR_RANGE[n];if(lim)return Math.max(lim[0],Math.min(lim[1],Math.round(v)));
   return v?1:0;
 }
 function setCvar(name,val){
   const n=CVAR_NAMES[String(name).toLowerCase()];if(!n)return false;
   const v=cvarClamp(n,val);if(v==null)return false;
   CVARS[n]=v;
-  if(n==='cm_noAreas'&&GV)GV.key='';
+  if(GV&&(n==='cm_noAreas'||n==='r_novis')){GV.key='';GV.skey='';}
+  if(GV&&n==='r_lockpvs'){GV.key='';GV.marked=false;if(v)gvMark(GV,gvPointLeaf(GV,cam.pos));}
+  if(GV&&(n==='r_farplane'||n==='r_farplane_nocull'))GV.dirty=true;
   if(n==='ai_fallheight')ROUTES=null;
+  if(n==='ai_shownode'||n==='ai_showallnode')NODELIST=null;
+  // the Entities list follows the game the entities spawn for
+  if(curTab==='ent'&&(n==='g_gametype'||n==='skill'||n==='developer'||n==='sv_maxclients'))renderList();
   saveOpts();cvarCountRender();cvarMenuRender();requestDraw();
   return true;
 }
-function cvarsSet(){return Object.keys(CVAR_DEFAULTS).filter(k=>CVARS[k]!==CVAR_DEFAULTS[k]);}
+function cvarsSet(){return Object.keys(CVAR_DEFAULTS).filter(k=>String(CVARS[k])!==String(CVAR_DEFAULTS[k]));}
 function cvarCountRender(){
   const el=$('cvarCount');if(!el)return;
   const on=cvarsSet();
@@ -3249,30 +4242,37 @@ function cvarMenuKey(ev){
     else if(t&&t.id==='cvSearch'){cvarConsole(t.value);ev.preventDefault();}
   }
   ev.stopPropagation();}
-// The filter box as the game's console: "name value" sets it, "name" alone tells its value.
+// The filter box as the game's console: "name value" sets it (a colour takes three
+// words), "name" alone tells its value.
 function cvarConsole(text){
   const w=String(text||'').trim().split(/\s+/).filter(Boolean);
   if(!w.length)return;
   const n=CVAR_NAMES[w[0].toLowerCase()];
   if(!n){
-    const rows=cvarRowsFor(w[0]);
+    const rows=cvarRowsFor(w[0]).filter(r=>!r.h);
     if(rows.length===1&&w.length===1){cvarRowClick(rows[0]);return;}
-    cvMsg='Unknown cvar "'+w[0]+'" (this list has '+Object.keys(CVAR_DEFAULTS).join(', ')+')';cvarMenuRender();return;}
-  if(w.length===1){cvMsg='"'+n+'" is:"'+CVARS[n]+'" default:"'+CVAR_DEFAULTS[n]+'"';cvarMenuRender();return;}
-  if(!setCvar(n,w[1])){cvMsg='"'+w[1]+'" isn\'t a number';cvarMenuRender();return;}
+    cvMsg='Unknown cvar "'+w[0]+'": the list has '+Object.keys(CVAR_DEFAULTS).length+' (type part of a name to find one)';cvarMenuRender();return;}
+  if(w.length===1){cvMsg='"'+n+'" is:"'+CVARS[n]+'" default:"'+CVAR_DEFAULTS[n]+'"'+
+    (n in CVAR_GAMEDEF?' (the game\'s default is '+CVAR_GAMEDEF[n]+')':'');cvarMenuRender();return;}
+  const val=typeof CVAR_DEFAULTS[n]==='string'?w.slice(1).join(' '):w[1];
+  if(!setCvar(n,val)){cvMsg='"'+w[1]+'" isn\'t a number';cvarMenuRender();return;}
   // the reason a cvar can't work here is already the line under the message
   const why=cvarWhyNot((CVAR_ROWS.find(r=>r.n===n)||{}).need);
-  cvMsg=n+' '+CVARS[n]+(why&&CVARS[n]!==CVAR_DEFAULTS[n]?' (no effect on this page: see below)':'');
+  cvMsg=n+' '+CVARS[n]+(why&&String(CVARS[n])!==String(CVAR_DEFAULTS[n])?' (no effect on this page: '+why+')':'');
   const s=$('cvSearch');if(s)s.value='';
   cvarMenuRender();
 }
+// the rows the filter keeps, each group's header with them
 function cvarRowsFor(f){
   f=String(f||'').toLowerCase();
-  return CVAR_ROWS.filter(r=>!f||(r.n+(r.num?'':' '+r.v)).toLowerCase().indexOf(f)>=0||r.d.toLowerCase().indexOf(f)>=0);
+  const hit=r=>!f||(r.n+(r.num||r.str?'':' '+r.v)).toLowerCase().indexOf(f)>=0||r.d.toLowerCase().indexOf(f)>=0;
+  const out=[];let last=null;
+  for(const r of CVAR_ROWS){if(r.h||!hit(r))continue;if(r.grp&&r.grp!==last){out.push(r.grp);last=r.grp;}out.push(r);}
+  return out;
 }
 function cvarRowClick(r){
   const why=cvarWhyNot(r.need);
-  if(r.num){const i=cvEl&&cvEl.querySelector('input[data-cvar="'+r.n+'"]');if(i){i.focus();i.select();}return;}
+  if(r.num||r.str){const i=cvEl&&cvEl.querySelector('input[data-cvar="'+r.n+'"]');if(i){i.focus();i.select();}return;}
   setCvar(r.n,CVARS[r.n]===r.v?CVAR_DEFAULTS[r.n]:r.v);
   if(why&&CVARS[r.n]===r.v){cvMsg=r.n+' '+r.v+' (no effect on this page: see below)';cvarMenuRender();}
 }
@@ -3313,14 +4313,16 @@ function cvarMenuRender(){
   const se=cvEl.querySelector('#cvSearch'),f=(se.value.trim().split(/\s+/)[0]||'');
   const rows=cvarRowsFor(CVAR_NAMES[f.toLowerCase()]||f);
   for(const r of rows){
-    const why=cvarWhyNot(r.need),on=!r.num&&CVARS[r.n]===r.v;
+    if(r.h){const d=document.createElement('div');d.className='amGrp';d.textContent=r.h;bd.appendChild(d);continue;}
+    const why=cvarWhyNot(r.need),box=r.num||r.str,on=box?String(CVARS[r.n])!==String(CVAR_DEFAULTS[r.n]):CVARS[r.n]===r.v;
     const d=document.createElement('div');d.className='amItem'+(on?' on':'')+(why?' na':'');
-    d.innerHTML='<span class="arw">'+(r.num?'#':(on?'✓':''))+'</span><span class="lbl">'+esc(r.n+(r.num?'':' '+r.v))+'</span>'+
-      (r.num?'<input type="number" min="'+r.num[0]+'" max="'+r.num[1]+'" step="1" data-cvar="'+r.n+'" value="'+CVARS[r.n]+'"><span class="cnt">'+esc(r.d)+'</span>'
-            :'<span class="cnt">'+esc(r.d)+'</span>');
-    d.title=r.t+(why?'\n\n'+why:'')+(r.num?'':'\n\nClick to '+(on?'set it back to '+CVAR_DEFAULTS[r.n]:'set it')+'.');
+    d.innerHTML='<span class="arw">'+(box?'#':(on?'✓':''))+'</span><span class="lbl">'+esc(r.n+(box?'':' '+r.v))+'</span>'+
+      (r.num?'<input type="number" min="'+r.num[0]+'" max="'+r.num[1]+'" step="'+(r.step||1)+'" data-cvar="'+r.n+'" value="'+esc(CVARS[r.n])+'">':
+       r.str?'<input type="text" class="wide" spellcheck="false" data-cvar="'+r.n+'" value="'+esc(CVARS[r.n])+'">':'')+
+      '<span class="cnt">'+esc(r.d)+'</span>';
+    d.title=r.t+(why?'\n\n'+why:'')+(box?'':'\n\nClick to '+(on?'set it back to '+CVAR_DEFAULTS[r.n]:'set it')+'.');
     d.onclick=ev=>{if(ev.target.tagName==='INPUT')return;ev.stopPropagation();cvarRowClick(r);};
-    if(r.num){const i=d.querySelector('input');i.onchange=()=>setCvar(r.n,i.value);}
+    if(box){const i=d.querySelector('input');i.onchange=()=>setCvar(r.n,i.value);}
     bd.appendChild(d);
   }
   if(!rows.length){const d=document.createElement('div');d.className='amNote';
@@ -3330,7 +4332,25 @@ function cvarMenuRender(){
   cvarWhereRender();
   bd.scrollTop=sv;
 }
-// the list's foot: the last message, and where the camera is in the game's tree
+// g_nodecheck: the game builds the nodes again and stops the level with "Node check
+// failed" once a node has 48 paths to check (PathNode::CheckPathTo, which prints the place
+// of the node it was checking). The .pth keeps whether the build it was saved from failed;
+// the nodes it gives 48 connections or more certainly did (the game counts every path it
+// checks, the .pth only those it kept).
+let NODECHECK=null;
+function nodeCheckText(){
+  if(NODECHECK!=null)return NODECHECK;
+  const P=D.paths,C=D.f32(P.c),nc=C.length/9,cnt=new Int32Array(Math.max(1,P.n)),O=D.f32(P.o);
+  for(let k=0;k<nc;k++){const i=C[k*9]|0;if(i>=0&&i<P.n)cnt[i]++;}
+  const big=[];for(let i=0;i<P.n;i++)if(cnt[i]>=48)big.push(i);
+  let h='<div>g_nodecheck: '+(P.fail?'<span class="warn">the build this .pth was saved from failed the node check (Node check failed)</span>':
+    'the build this .pth was saved from passed the node check')+'</div>';
+  if(big.length)h+='<div class="warn">'+big.length+' node'+(big.length>1?'s':'')+' with 48 connections or more: '+
+    big.slice(0,8).map(i=>i+' ('+fnum(O[i*3])+' '+fnum(O[i*3+1])+' '+fnum(O[i*3+2])+')').join(', ')+(big.length>8?' …':'')+'</div>';
+  else h+='<div>no node keeps 48 connections or more</div>';
+  return NODECHECK=h;
+}
+// the list's foot: the last message, and what the cvars that are set found
 function cvarWhereRender(){
   if(!cvEl)return;
   const el=cvEl.querySelector('#cvWhere');let h='';
@@ -3338,13 +4358,28 @@ function cvarWhereRender(){
   if(GV){
     const l=gvPointLeaf(GV,cam.pos),c=GV.lf[l*14],a=GV.lf[l*14+1];
     h+='<div>camera: '+(c<0?'outside the map (in a leaf with no cluster: the game draws every leaf)':'cluster '+c+' of '+Math.max(GV.ncl,1)+', area '+a+(GV.na>1?' of '+GV.na:''))+'</div>';
+    if(CVARS.r_lockpvs&&GV.marked)h+='<div>r_lockpvs: drawing what '+(GV.markCl<0?'a leaf outside the map (every leaf)':'cluster '+GV.markCl+', area '+GV.markArea)+' sees</div>';
+    if(CVARS.r_novis)h+='<div>r_novis: every leaf is drawn</div>';
     // every direction: the game also drops what is outside the view, which isn't seen anyway
     if(CVARS.r_showtris&&GV.stats)h+='<div>drawn from here, all directions: '+GV.stats+'</div>';
+    if(CVARS.r_shownormals&&GV.vn&&GV.nstats)h+='<div>r_shownormals, all directions: '+GV.nstats+'</div>';
+    if(CVARS.r_showsky&&GV.skyTris!=null)h+='<div>r_showsky: '+GV.skyTris+' sky triangle'+(GV.skyTris===1?'':'s')+' in view, '+(GV.skyBlocks||0)+' blocks of the sky box</div>';
     if(!GV.pvs)h+='<div>this .bsp has no vis data: every cluster sees every other</div>';
   }else h+='<div>'+esc(cvarWhyNot('vis'))+'</div>';
+  if(Math.trunc(CVARS.r_farplane)||CVARS.r_farplane_nofog){const ff=fogFar();
+    h+='<div>farplane '+(ff>0?fnum(ff)+(Math.trunc(CVARS.r_farplane)?' (r_farplane)':' (the map\'s)'):'none')+(fogOn()?', fog '+fogCol().map(fnum).join(' '):', no fog')+'</div>';}
+  if(CVARS.r_lightmap===2&&B.lmBright!=null)h+='<div>Brightest lightmap value: '+B.lmBright+'</div>';
+  if(CVARS.r_light_showgrid&&LGRID)h+='<div>light grid: '+(LGRID.n||0)+' points within 256 units, '+LGRID.s.map(fnum).join(' x ')+' apart</div>';
+  if(CVARS.cg_rain_drawcoverage&&D.rain&&!cvarWhyNot('rain'))h+='<div>rain_min_dist '+fnum(D.rain.min)+' ('+(D.rain.set?esc(D.rain.src):'the game\'s default: the map script doesn\'t set it')+')</div>';
+  if(CVARS.sv_showentnums||CVARS.g_entinfo||CVARS.sv_showbboxes){gameEnts();const n=GAMEENTS.count;
+    h+='<div>'+n+' entities spawn for g_gametype '+CVARS.g_gametype+', skill '+CVARS.skill+(CVARS.developer?', developer 1':'')+
+      (n?': numbers '+CVARS.sv_maxclients+' to '+(CVARS.sv_maxclients+n-1):'')+', the world 1022</div>';}
   if(pathsOk()){
     const np=MAP.ents.reduce((s,e)=>s+(e.cls==='info_pathnode'?1:0),0);
     h+='<div>AI paths: '+esc(D.paths.src||'')+', '+D.paths.n+' nodes'+(np!==D.paths.n?' <span class="warn">but the map has '+np+' info_pathnode: the file is from another version of the map (the game rebuilds it)</span>':'')+'</div>';
+    if(CVARS.ai_shownode>0&&NODELIST)h+='<div>ai_shownode: '+(NODELIST.list.length?NODELIST.list.length+' node'+(NODELIST.list.length===1?'':'s')+' found from here':'no node in this cell at your height')+
+      (NODELIST.lift>0.5?' (your feet lifted '+fnum(NODELIST.lift)+' units out of a brush)':'')+'</div>';
+    if(CVARS.g_nodecheck)h+=nodeCheckText();
   }else h+='<div>'+esc(cvarWhyNot('paths'))+'</div>';
   if(el._h!==h){el._h=h;el.innerHTML=h;cvarMenuPlace();}
 }
@@ -3452,7 +4487,11 @@ function setHover(h){
 setHover.key=null;setHover.h=null;
 // a click that selects what is under the mouse takes its hover outline away
 function refreshHover(){if(!gl)return;setHover.key=undefined;setHover(setHover.h);}
-function selectionChanged(){rebuildSelection();refreshHover();updateSelPanel();if($('info').classList.contains('on'))showInfo(infoMode==='errs'?'sel':infoMode);requestDraw();}
+function selectionChanged(){rebuildSelection();refreshHover();updateSelPanel();if($('info').classList.contains('on'))showInfo(infoMode==='errs'?'sel':infoMode);requestDraw();listSoon();}
+// The Find lists show what is selected in green, however it was selected (a click in the
+// view, Enter in the search box, a list row): they are drawn again once, a frame after.
+let _listRaf=0;
+function listSoon(){if(_listRaf)return;_listRaf=requestAnimationFrame(()=>{_listRaf=0;if(MAP&&SC)renderList();});}
 function clickSelect(h,mods){
   if(mods.ctrl&&mods.shift&&!mods.alt){faceInfoAt(h);return;}
   if(mods.ctrl&&mods.alt){selectPath(h,mods.shift);return;}
@@ -3527,11 +4566,14 @@ function selectSameTargetname(ei){
   selectionChanged();
   flash(l.length<2?'No other entity is named $'+tn:n+' x $'+tn+' selected'+(l.length>n?', '+(l.length-n)+' hidden':''));
 }
+// Everything shown that uses a texture (texUse): each world brush with a face in it, each brush
+// entity, and each entity whose model draws it (a static prop's or a script_model's).
 function selectByTexture(ti,add){
-  if(!add)SEL.clear();let n=0;
-  for(const f of matFaces[ti]||[]){if(faceVis&&!faceVis[f])continue;const ei=SC.faceEnt[f];
-    const k=(ei>0&&!isWorldlike(ei))?'e'+ei:'p'+SC.facePrim[f];if(!SEL.has(k)){SEL.add(k);n++;}}
-  flash(n+' brush'+(n===1?'':'es')+' / entities with '+(TEX[ti]?TEX[ti].n.replace(/^textures\//,''):'?')+' selected');
+  if(!add)SEL.clear();let nb=0,ne=0;
+  for(const[k,o]of texUse(ti).keys){if(!useShown(o))continue;SEL.add(k);if(k[0]==='e')ne++;else nb++;}
+  const nm=TEX[ti]?TEX[ti].n.replace(/^textures\//,''):'?';
+  flash(nb||ne?nm+': '+[nb?nb+' brush'+(nb===1?'':'es'):'',ne?ne+' entit'+(ne===1?'y':'ies'):''].filter(Boolean).join(' and ')+' selected'
+    :nm+': nothing that is shown uses it');
 }
 function selectClass(cls,add){if(!add)SEL.clear();for(let ei=1;ei<MAP.ents.length;ei++)if(MAP.ents[ei].cls===cls)SEL.add('e'+ei);selectionChanged();}
 function selBounds(){
@@ -3586,6 +4628,7 @@ function loop(t){
   if(flyAnim){const k=Math.min(1,(t-flyAnim.t0)/flyAnim.dur),s=k*k*(3-2*k);
     for(let i=0;i<3;i++)cam.pos[i]=flyAnim.from[i]+(flyAnim.to[i]-flyAnim.from[i])*s;
     if(flyAnim.yaw!=null){cam.yaw=flyAnim.y0+(flyAnim.yaw-flyAnim.y0)*s;cam.pitch=flyAnim.p0+(flyAnim.pitch-flyAnim.p0)*s;}
+    if(flyAnim.roll!=null)cam.roll=flyAnim.r0+(flyAnim.roll-flyAnim.r0)*s;
     if(k>=1)flyAnim=null;moved=true;}
   const k=c=>keys.has(c), fast=k('Shift')?4:1, a=camAxes(), sp=moveSpeed*fast*dt;
   if(keys.size&&!typing()){
@@ -3598,7 +4641,9 @@ function loop(t){
       if(U){const P=cam.pitch*Math.PI/180,c=Math.cos(P),s=Math.sin(P);
         moveBy([c*a.u[0]-s*a.f[0],c*a.u[1]-s*a.f[1],c*a.u[2]-s*a.f[2]],sp*U);moved=true;}
       if(k('arrowleft')){lookBy(-90*dt*fast,0);moved=true;} if(k('arrowright')){lookBy(90*dt*fast,0);moved=true;}
-      if(k('q')){cam.roll-=60*dt;moved=true;} if(k('e')){cam.roll+=60*dt;moved=true;}
+      // Q tilts the head to the left shoulder, E to the right, as in the Model Viewer: a
+      // positive roll turns camAxes' right axis up (the horizon's right end drops on screen).
+      if(k('q')){cam.roll+=60*dt;moved=true;} if(k('e')){cam.roll-=60*dt;moved=true;}
     }else if(!k('Control')){
       const F=k('arrowup')?1:k('arrowdown')?-1:0, R=k('.')?1:k(',')?-1:0, U=k('d')?1:k('c')?-1:0;
       if(F){moveBy(a.f,sp*F);moved=true;} if(R){moveBy(a.r,sp*R);moved=true;} if(U){moveBy([0,0,1],sp*U);moved=true;}
@@ -3641,8 +4686,19 @@ function lookFrom(target,dist){
   const a=camAxes();
   return[target[0]-a.f[0]*dist,target[1]-a.f[1]*dist,target[2]-a.f[2]*dist];
 }
-function flyTo(pos,yaw,pitch){flyAnim={t0:performance.now(),dur:450,from:cam.pos.slice(),to:pos,y0:cam.yaw,p0:cam.pitch,yaw:yaw,pitch:pitch};
-  if(yaw!=null){let d=yaw-cam.yaw;while(d>180)d-=360;while(d<-180)d+=360;flyAnim.yaw=cam.yaw+d;}}
+function flyTo(pos,yaw,pitch,roll){flyAnim={t0:performance.now(),dur:450,from:cam.pos.slice(),to:pos,y0:cam.yaw,p0:cam.pitch,r0:cam.roll,yaw:yaw,pitch:pitch,roll:null};
+  if(yaw!=null){let d=yaw-cam.yaw;while(d>180)d-=360;while(d<-180)d+=360;flyAnim.yaw=cam.yaw+d;}
+  if(roll!=null){let d=roll-cam.roll;while(d>180)d-=360;while(d<-180)d+=360;flyAnim.roll=cam.roll+d;}}
+// The camera's angles as the game writes them, ( pitch yaw roll ): pitch and yaw as camAxes
+// takes them (AngleVectors: looking down is a positive pitch), the roll the other way round,
+// since camAxes turns the right axis up for a positive roll and AngleVectors turns it down.
+// Pitch and roll in -180..180, yaw in 0..360.
+function wrap180(a){a=((a%360)+360)%360;return a>180?a-360:a;}
+function camAngles(){return[wrap180(cam.pitch),((cam.yaw%360)+360)%360,wrap180(-cam.roll)];}
+// Turn the camera to angles the game way round (as camAngles gives them), where it is.
+function turnTo(p,y,r){flyTo(cam.pos.slice(),y,Math.max(-89,Math.min(89,wrap180(p))),-r);}
+// the numbers of a vector typed or pasted, its brackets and commas aside
+function vecNums(s){return(String(s).match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi)||[]).map(Number);}
 function focusSelection(){
   const b=selBounds();if(!b){flash('Nothing selected');return;}
   const c=[(b.mins[0]+b.maxs[0])/2,(b.mins[1]+b.maxs[1])/2,(b.mins[2]+b.maxs[2])/2];
@@ -3760,12 +4816,16 @@ window.addEventListener('keydown',e=>{
   if(combo==='ctrl+a'){showAllGroups();flash('Every group is shown');e.preventDefault();return;}   // and A
   if((e.ctrlKey||e.metaKey)&&kl==='f'){$('findIn').focus();$('findIn').select();e.preventDefault();return;}
   if((e.ctrlKey||e.metaKey)&&(kl==='\\'||e.code==='Backslash')){toggleClip();e.preventDefault();return;}
-  // camera keys (held)
+  // camera keys (held). An auto-repeat of a key the camera has let go of doesn't take it up
+  // again, only a new press does: once stopCamera has cleared the keys (the launcher took
+  // the mouse or the keyboard), repeats still on their way from the key held then would
+  // start the camera again, and its release goes to the launcher.
   const camSet=camMode==='free'?CAM_KEYS_FREE:CAM_KEYS_RAD;
-  if(e.key==='Shift'||e.key==='Control'){keys.add(e.key);return;}
+  if(e.key==='Shift'||e.key==='Control'){if(!e.repeat||keys.has(e.key))keys.add(e.key);return;}
   if(camSet.has(kl)&&!e.altKey&&!(e.ctrlKey&&camMode==='free')){
     if(camMode==='rad'&&e.ctrlKey){if(['arrowup','arrowdown',',','.'].includes(kl)){gridStep(kl);e.preventDefault();}return;}
-    keys.add(kl);e.preventDefault();return;}
+    if(!e.repeat||keys.has(kl))keys.add(kl);
+    e.preventDefault();return;}
   if(e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.code==='Backquote'){toggleCvarMenu();e.preventDefault();return;}   // as the game's console key
   switch(kl){
@@ -3784,7 +4844,9 @@ window.addEventListener('keydown',e=>{
     case 'x':stopCamera();flash('Camera stopped');break;
     case 'l':toggleLegend();break;
     case 't':themeBtn.click();break;
-    case 'end':cam.pitch=0;cam.roll=0;camChanged();requestDraw();break;
+    // U levels the view (no pitch, no tilt). It was End, whose own job in a browser is to
+    // scroll what has the focus to its end: the side panel jumped to its bottom.
+    case 'u':cam.pitch=0;cam.roll=0;camChanged();requestDraw();break;
     case 'pageup':changeFloor(true);e.preventDefault();break;
     case 'pagedown':changeFloor(false);e.preventDefault();break;
     case '[':setClipDist(clipDist-256);if(!clipOn)toggleClip();break;
@@ -3804,6 +4866,14 @@ window.addEventListener('keyup',e=>{const kl=e.key.length===1?e.key.toLowerCase(
 // on the launcher itself also calls this), and each frame while the page doesn't have the
 // focus (see loop).
 function stopCamera(){keys.clear();radFly=null;drag=null;flyAnim=null;requestDraw();}
+// Let go of the held keys only; a drag, Radiant-look's flight and a fly-to go on. The launcher
+// calls this when the keyboard went elsewhere: a key pressed or let go in the launcher, or the
+// last camera key let go while the page wasn't listening (App._watch_camera_stop).
+function releaseCameraKeys(){if(keys.size){keys.clear();requestDraw();}}
+// A right-click that opens the browser's own menu (anywhere but the 3D view, whose right
+// button flies and looks): the menu takes the keyboard while it is open, so a key let go
+// then never reaches the page and the camera flew on. It stops as the menu opens.
+window.addEventListener('contextmenu',e=>{if(!e.defaultPrevented)stopCamera();});
 window.addEventListener('blur',stopCamera);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopCamera();});
 // Ctrl + arrows / comma / period in Radiant-look: one grid step (MOHRadiant's CameraGrid* commands).
@@ -3881,9 +4951,12 @@ function buildPanel(){
   const fv=$('fov');fv.value=fovX;$('fovV').textContent=fovX;fv.oninput=()=>{fovX=+fv.value;$('fovV').textContent=fovX;saveOpts();requestDraw();};
   const cd=$('clipD');cd.value=clipDist;$('clipV').textContent=clipDist;cd.oninput=()=>setClipDist(+cd.value);
   $('bClip').onclick=toggleClip;$('bClip').classList.toggle('on',clipOn);
-  $('gotoIn').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const v=($('gotoIn').value.match(/-?\d+(\.\d+)?/g)||[]).map(Number);
+  $('gotoIn').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const v=vecNums($('gotoIn').value);
     if(v.length>=3){flyTo([v[0],v[1],v[2]],null,null);$('gotoIn').blur();}else flash('Type three numbers: x y z');});
   $('bCopyCam').onclick=()=>copyText(fvec(cam.pos));
+  $('angIn').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const v=vecNums($('angIn').value);
+    if(v.length>=3){turnTo(v[0],v[1],v[2]);$('angIn').blur();}else flash('Type three numbers: pitch yaw roll');});
+  $('bCopyAng').onclick=()=>copyText(fvec(camAngles()));
   $('bInfo').onclick=()=>showInfo('sel');$('bFocus').onclick=focusSelection;$('bHide').onclick=hideSelection;
   $('bClear').onclick=()=>{SEL.clear();selectionChanged();};$('bUnhide').onclick=unhideAll;$('bUndoHide').onclick=undoHide;
   $('bSame').onclick=()=>{if(lastHit)selectSameKind(lastHit,false);};
@@ -3892,6 +4965,7 @@ function buildPanel(){
   $('bDoor').onclick=doorUse;
   $('infoClose').onclick=hideInfo;$('infoCopy').onclick=()=>copyText($('infoBody').innerText);
   $('tabFind').onclick=()=>setTab('find');$('tabCls').onclick=()=>setTab('cls');$('tabTex').onclick=()=>setTab('tex');
+  $('tabEnt').onclick=()=>setTab('ent');
   const fi=$('findIn');let ft=null;
   fi.addEventListener('input',()=>{clearTimeout(ft);ft=setTimeout(()=>{setTab('find');},150);});
   fi.addEventListener('keydown',e=>{if(e.key==='Enter'){setTab('find');selectFindResults();e.preventDefault();}});
@@ -3899,9 +4973,10 @@ function buildPanel(){
 // All (Ctrl+A), In-game look (G) and Editor look (Shift+G). The two looks also set the light
 // and the sky: MOHRadiant is always full bright.
 function showAllGroups(){hiddenMask=0;filtersChanged();}
-function gameLook(){hiddenMask=C_CAULK|C_CLIP|C_TRIGGER|C_HINT|C_ORIGIN|C_PORTAL|C_NODRAW|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_VIS|C_RAIN|C_FOLIAGE;
-  simpleSky=false;fullBright=false;filtersChanged();requestDraw();}
-function editorLook(){hiddenMask=C_HINT|C_PORTAL|C_RAIN;simpleSky=true;fullBright=true;filtersChanged();requestDraw();}
+const GAME_LOOK=C_CAULK|C_CLIP|C_TRIGGER|C_HINT|C_ORIGIN|C_PORTAL|C_NODRAW|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_VIS|C_RAIN|C_FOLIAGE,
+  EDIT_LOOK=C_HINT|C_PORTAL|C_RAIN;
+function gameLook(){hiddenMask=GAME_LOOK;simpleSky=false;fullBright=false;filtersChanged();requestDraw();}
+function editorLook(){hiddenMask=EDIT_LOOK;simpleSky=true;fullBright=true;filtersChanged();requestDraw();}
 function syncButtons(){
   for(const d of DISPLAY){const b=$('d_'+d.k);if(b)b.classList.toggle('on',!!view[d.k]);}
   // A button is on while what it covers is shown. Entities covers several kinds that have
@@ -3914,6 +4989,9 @@ function syncButtons(){
   $('bFull').classList.toggle('on',fullBright||!LIT);
   $('bSimpleSky').classList.toggle('on',simpleSky);
   $('bSimpleMod').classList.toggle('on',simpleModels);
+  // a look is on while everything it sets is still as it set it
+  $('bGameView').classList.toggle('on',hiddenMask===GAME_LOOK&&!simpleSky&&!fullBright);
+  $('bEditView').classList.toggle('on',hiddenMask===EDIT_LOOK&&simpleSky&&fullBright);
   $('bFree').classList.toggle('on',camMode==='free');$('bRad').classList.toggle('on',camMode==='rad');
   $('camHelpFree').style.display=camMode==='free'?'':'none';$('camHelpRad').style.display=camMode==='rad'?'':'none';
 }
@@ -3938,7 +5016,7 @@ function filtersChanged(){syncButtons();saveOpts();rebuildWorld();updateSelPanel
 function setCamMode(m){camMode=m;keys.clear();radFly=null;syncButtons();saveOpts();requestDraw();}
 function setClipDist(v){clipDist=Math.max(128,Math.min(32768,v));$('clipD').value=clipDist;$('clipV').textContent=clipDist;saveOpts();requestDraw();}
 function toggleClip(){clipOn=!clipOn;$('bClip').classList.toggle('on',clipOn);saveOpts();requestDraw();}
-function saveOpts(){const cv={};for(const k of cvarsSet())cv[k]=CVARS[k];
+function saveOpts(){const cv={};for(const k of cvarsSet())if(!CVAR_NOSAVE.has(k))cv[k]=CVARS[k];
   LS.set('mohaaMapViewerOpts',JSON.stringify({ov:2,view:view,hidden:hiddenMask,mode:camMode,speed:moveSpeed,fov:fovX,clip:clipOn,clipD:clipDist,fb:fullBright,ss:simpleSky,sm:simpleModels,cv:cv}));}
 function loadOpts(){try{const o=JSON.parse(LS.get('mohaaMapViewerOpts')||'null');if(!o)return;
   for(const k in view)if(k in (o.view||{}))view[k]=!!o.view[k];
@@ -3985,7 +5063,7 @@ function updateSelPanel(){
 
 // ---- find / classes / textures lists -----------------------------------------------------
 let curTab='find', findRes=[];
-function setTab(t){curTab=t;for(const[id,k]of[['tabFind','find'],['tabCls','cls'],['tabTex','tex']])$(id).classList.toggle('on',k===t);renderList();}
+function setTab(t){curTab=t;for(const[id,k]of[['tabFind','find'],['tabCls','cls'],['tabTex','tex'],['tabEnt','ent']])$(id).classList.toggle('on',k===t);renderList();}
 let SEARCH=null;
 function searchText(ei){if(!SEARCH)SEARCH=MAP.ents.map(e=>e.kv.map(kv=>kv[0]+' '+kv[1]).join(' \u0001 ').toLowerCase());return SEARCH[ei];}
 function runFind(q){
@@ -3999,6 +5077,29 @@ let _texCounts=null;
 function texCounts(){if(_texCounts)return _texCounts;const m=new Map();for(let f=0;f<SC.nf;f++){const t=SC.faceTex[f];m.set(t,(m.get(t)||0)+1);}
   for(const R of MODELS)for(const s of R.surfs)m.set(s.ti,(m.get(s.ti)||0)+R.inst.length);
   _texCounts=[...m.entries()].sort((a,b)=>TEX[a[0]].n<TEX[b[0]].n?-1:1);return _texCounts;}
+// What uses a texture: its brush faces, under the selection key each belongs to (a world
+// brush, or the whole brush entity), and the entities whose model draws it on one surface or
+// more (mi: [entity, how many of its model's surfaces], counted as texCounts counts them).
+// Made once per texture.
+let TEXUSE=null;
+function texUse(ti){
+  if(!TEXUSE)TEXUSE=new Map();
+  let u=TEXUSE.get(ti);if(u)return u;
+  const keys=new Map(),at=k=>{let o=keys.get(k);if(!o)keys.set(k,o={f:[],ei:-1});return o;},mi=[];
+  for(const f of matFaces[ti]||[]){const ei=SC.faceEnt[f];at((ei>0&&!isWorldlike(ei))?'e'+ei:'p'+SC.facePrim[f]).f.push(f);}
+  for(const R of MODELS){const n=R.surfs.reduce((s,x)=>s+(x.ti===ti?1:0),0);if(!n)continue;
+    for(const ei of R.inst){at('e'+ei).ei=ei;mi.push([ei,n]);}}
+  u={keys:keys,mi:mi};TEXUSE.set(ti,u);return u;}
+// One of a texture's users is shown: its model, or one of its faces that has the texture.
+function useShown(o){if(o.ei>=0&&entShown(o.ei))return true;for(const f of o.f)if(!faceVis||faceVis[f])return true;return false;}
+// A texture row: its uses (faces and model surfaces), how many of them are hidden (Hide or a
+// Show button), and whether everything shown that uses it is selected.
+function texState(ti){
+  const u=texUse(ti);let n=0,nh=0,any=false,sel=true;
+  for(const f of matFaces[ti]||[]){n++;if(faceVis&&!faceVis[f])nh++;}
+  for(const[ei,k]of u.mi){n+=k;if(!entShown(ei))nh+=k;}
+  for(const[key,o]of u.keys){if(!useShown(o))continue;any=true;if(!SEL.has(key)){sel=false;break;}}
+  return {n:n,nh:nh,sel:any&&sel};}
 const openCls=new Set();
 // the entities of each class, in map order (worldspawn first)
 function classLists(){
@@ -4017,14 +5118,24 @@ function renderList(){
     return '<div class="li'+(sub?' sub':'')+(sel?' sel':'')+(hid?' hid':'')+'" data-e="'+ei+'"'+(hid?' title="hidden"':'')+'><span class="sw" style="background:rgb('+X.col.map(v=>Math.round(v*255)).join(',')+')"'+
       (ei?' title="Shift+click: '+(hid?'show':'hide')+' this entity"':'')+'></span><span class="nm">'+
       esc(sub?(e.kvl.targetname?'$'+e.kvl.targetname:'entity '+ei):(e.kvl.classname||'?')+(e.kvl.targetname?'  $'+e.kvl.targetname:''))+'</span><span class="ct">'+esc(where)+'</span></div>';};
+  // the Entities tab: the targetname, else "entity" and its entity number; the number on the
+  // right when the name doesn't give it. The tooltip has its class, numbers and origin.
+  const numRow=(ei,R)=>{const e=MAP.ents[ei],X=ENTS[ei],tn=e.kvl.targetname,sel=SEL.has('e'+ei),hid=!shown(ei);
+    const tip=(e.kvl.classname||'?')+(tn?' $'+tn:'')+'\nentity number '+R.num+', radnum '+R.rad+(X.anchor?'\n'+fvec(X.anchor):'')+(hid?'\nhidden':'');
+    return '<div class="li'+(sel?' sel':'')+(hid?' hid':'')+'" data-e="'+ei+'" title="'+esc(tip)+'"><span class="sw" style="background:rgb('+X.col.map(v=>Math.round(v*255)).join(',')+')" title="Shift+click: '+(hid?'show':'hide')+' this entity"></span><span class="nm">'+
+      esc(tn?'$'+tn:'entity '+R.num)+'</span><span class="ct">'+(tn?R.num:'')+'</span></div>';};
   if(curTab==='find'){
     runFind($('findIn').value);
     if(!$('findIn').value.trim())head.push('<div class="co">Type above to search every key and value (classname, targetname, target, model, spawnflags...) and every texture name. Enter selects everything found.</div>');
     else if(!findRes.length)head.push('<div class="co">Nothing matches.</div>');
-    else head.push('<div class="co">'+findRes.length+' found · Enter selects them all</div>');
+    else{
+      head.push('<div class="co">'+findRes.length+' found</div>');
+      head.push('<div class="co">· Press Enter in search box to select all</div>');
+      head.push('<div class="co">· Shift-click a colored square to hide it</div>');
+    }
     let n=0;for(const r of findRes){if(++n>600){rows.push('<div class="co">... '+(findRes.length-600)+' more (Enter selects them all)</div>');break;}
       if(r.e!=null)rows.push(entRow(r.e,false));
-      else rows.push(texRow(r.t,r.c));}
+      else rows.push(texRow(r.t));}
   }else if(curTab==='cls'){
     const cnt=classLists();
     const names=[...cnt.keys()].sort((a,b)=>a.toLowerCase()<b.toLowerCase()?-1:1);
@@ -4033,21 +5144,46 @@ function renderList(){
     head.push('<div class="co">· shift-click a colored square to hide them</div>');
     for(const c of names){const l=cnt.get(c),open=openCls.has(c),X=ENTS[l[0]];
       const nh=l.reduce((s,ei)=>s+(shown(ei)?0:1),0), st=!nh?'':nh===l.length?' hid':' part';
-      rows.push('<div class="li'+st+'" data-c="'+esc(c)+'"'+(nh?' title="'+(nh===l.length?'all hidden':nh+' of '+l.length+' hidden')+'"':'')+'><span class="ar" data-o="'+esc(c)+'">'+(open?'▾':'▸')+'</span><span class="sw" style="background:rgb('+(X.ccol||X.col).map(v=>Math.round(v*255)).join(',')+')"'+
+      // green while every one of them that is shown is selected
+      const ns=l.filter(ei=>ei>0&&shown(ei)), cs=ns.length>0&&ns.every(ei=>SEL.has('e'+ei));
+      rows.push('<div class="li'+(cs?' sel':'')+st+'" data-c="'+esc(c)+'"'+(nh?' title="'+(nh===l.length?'all hidden':nh+' of '+l.length+' hidden')+'"':'')+'><span class="ar" data-o="'+esc(c)+'">'+(open?'▾':'▸')+'</span><span class="sw" style="background:rgb('+(X.ccol||X.col).map(v=>Math.round(v*255)).join(',')+')"'+
         (c!=='worldspawn'?' title="Shift+click: '+(nh===l.length?'show':'hide')+' every '+esc(c)+'"':'')+'></span><span class="nm">'+esc(c)+'</span><span class="ct">'+(nh?nh+' / ':'')+l.length+'</span></div>');
       if(open)for(const ei of l.slice(0,500))rows.push(entRow(ei,true));}
+  }else if(curTab==='ent'){
+    // the entities the game numbers, in their order (gameEnts: for the cvars' g_gametype,
+    // skill, developer and sv_maxclients); not the world (1022), nor one that removes itself
+    // as it spawns, whose number is left unused
+    const G=gameEnts(),l=[];
+    for(let ei=1;ei<MAP.ents.length;ei++){const R=G[ei];if(R.num>=0&&!R.gone)l.push(ei);}
+    l.sort((a,b)=>G[a].num-G[b].num);
+    const lo=l.length?G[l[0]].num:0,hi=l.length?G[l[l.length-1]].num:0;
+    head.push('<div class="co" title="'+esc('The entities the game spawns with an entity number (as sv_showentnums shows them), for g_gametype '+CVARS.g_gametype+', skill '+CVARS.skill+
+      (CVARS.developer?', developer 1':'')+' (the last group of the game cvars)'+(l.length?': numbers '+lo+' to '+hi:'')+'. The world is 1022 and the players come first (sv_maxclients '+CVARS.sv_maxclients+
+      '). Simple entities (path nodes, player starts, waypoints...), lights and static props have no number; one that removes itself as it spawns (misc_model, func_remove) leaves its number unused.')+'">'+l.length+' real entities with entnums</div>');
+    head.push('<div class="co">· click an entity to select it</div>');
+    head.push('<div class="co">· shift-click a colored square to hide it</div>');
+    for(const ei of l)rows.push(numRow(ei,G[ei]));
   }else{
     const used=texCounts();
-    head.push('<div class="co">'+used.length+' textures · click one to select every brush using it</div>');
-    for(const[ti,c]of used)rows.push(texRow(ti,c));
+    head.push('<div class="co">'+used.length+' textures</div>');
+    head.push('<div class="co">· click one to select everything using it</div>');
+    head.push('<div class="co">· shift-click a texture square to hide them</div>');
+    for(const[ti]of used)rows.push(texRow(ti));
   }
   $('listHead').innerHTML=head.join('');
   box.innerHTML=rows.join('');
   $('listSect').style.display=rows.length?'':'none';
 }
-function texRow(ti,c){const te=TEX[ti],u=TEXURL[ti];
-  return '<div class="li" data-t="'+ti+'">'+(u?'<img src="'+u+'" alt="">':'<span class="sw" style="width:18px;height:18px;background:rgb('+(te.c||[.5,.5,.5]).map(v=>Math.round(v*255)).join(',')+')"></span>')+
-    '<span class="nm">'+esc(te.n.replace(/^textures\//,''))+(te.f&TF_MISSING?' <span style="color:var(--err)">(missing)</span>':'')+'</span><span class="ct">'+c+'</span></div>';}
+// A texture row: green while everything shown that uses it is selected; red when all of it is
+// hidden, yellow when some (with the count hidden). Shift+click its square (.tsq) hides or
+// shows everything using it.
+function texRow(ti){
+  const te=TEX[ti],u=TEXURL[ti],S=texState(ti),all=S.nh===S.n,st=!S.nh?'':all?' hid':' part';
+  const tip=' title="Shift+click: '+(all?'show':'hide')+' every brush and entity using it"';
+  const sq=u?'<img class="tsq" src="'+u+'" alt=""'+tip+'>'
+    :'<span class="sw tsq" style="width:18px;height:18px;background:rgb('+(te.c||[.5,.5,.5]).map(v=>Math.round(v*255)).join(',')+')"'+tip+'></span>';
+  return '<div class="li'+(S.sel?' sel':'')+st+'" data-t="'+ti+'"'+(S.nh?' title="'+(all?'all hidden':S.nh+' of '+S.n+' hidden')+'"':'')+'>'+sq+
+    '<span class="nm">'+esc(te.n.replace(/^textures\//,''))+(te.f&TF_MISSING?' <span style="color:var(--err)">(missing)</span>':'')+'</span><span class="ct">'+(S.nh?S.nh+' / ':'')+S.n+'</span></div>';}
 // The second click of a double-click on a class or texture row. The first click rebuilds the
 // list, so the row under the mouse is a new element by the second one, and the browser may
 // neither fire dblclick nor count the click as a second one (e.detail): a click on the same
@@ -4060,6 +5196,8 @@ function secondClick(e,key){
 }
 $('listBox').addEventListener('click',e=>{
   const r=e.target.closest('.li');
+  // Shift+click a texture's square: hide everything that uses it (again: show it)
+  if(e.shiftKey&&r&&r.hasAttribute('data-t')&&e.target.closest('.tsq')){toggleHideTex(+r.getAttribute('data-t'));return;}
   // Shift+click a row's coloured square: hide that entity, or every entity of the class
   // (again: show them)
   if(e.shiftKey&&r&&e.target.closest('.sw')&&(r.hasAttribute('data-e')||r.hasAttribute('data-c'))){
@@ -4102,10 +5240,45 @@ function filterNamesOf(list){
   let bits=0;const ents=new Set();
   for(const ei of list){bits|=ENTS[ei].cat&hiddenMask;if(ENTS[ei].hasGeo)ents.add(ei);}
   if(ents.size)for(let f=0;f<SC.nf;f++)if(ents.has(SC.faceEnt[f]))bits|=SC.faceCat[f]&hiddenMask;
+  return filterNamesFor(bits);
+}
+// ...and those that hide what uses a texture: its faces' kinds and its models' entities'
+function texFilterNames(ti){
+  let bits=0;for(const f of matFaces[ti]||[])bits|=SC.faceCat[f]&hiddenMask;
+  for(const[ei]of texUse(ti).mi)bits|=ENTS[ei].cat&hiddenMask;
+  return filterNamesFor(bits);
+}
+function filterNamesFor(bits){
   // the buttons that are off: Entities only when all of it is (not just its Lights, say)
   let names=FILTERS.filter(f=>(f.m&bits)&&(hiddenMask&f.m)===f.m).map(f=>f.l);
   if(!names.length)names=FILTERS.filter(f=>f.m&bits).map(f=>f.l);
   return names.length?'the '+names.join(' / ')+' button'+(names.length>1?'s':''):'a Show button';
+}
+// Shift+click a texture's square: hide everything shown that uses it (each world brush, brush
+// entity and model entity, as Hide does: Ctrl+Z undoes it), or, when all of it is hidden
+// already, show again what Hide hid. What a Show button hides stays hidden: the message
+// names the button.
+function toggleHideTex(ti){
+  const u=texUse(ti),nm=TEX[ti]?TEX[ti].n.replace(/^textures\//,''):'?';
+  const vis=[...u.keys].filter(([,o])=>useShown(o)).map(([k])=>k);
+  if(vis.length){
+    const step={e:[],p:[]};
+    for(const k of vis){const i=+k.slice(1);
+      if(k[0]==='e'){if(!hidEnt.has(i)){hidEnt.add(i);step.e.push(i);}}else if(!hidPrim.has(i)){hidPrim.add(i);step.p.push(i);}
+      SEL.delete(k);}
+    if(step.e.length||step.p.length){HIDE_UNDO.push(step);if(HIDE_UNDO.length>500)HIDE_UNDO.shift();}
+    rebuildWorld();selectionChanged();
+    const n=step.e.length+step.p.length;
+    flash(nm+': '+n+' hidden - Shift+click the square again to show '+(n===1?'it':'them')+', Ctrl+Z undoes');
+    return;}
+  const back={e:[],p:[]};
+  for(const k of u.keys.keys()){const i=+k.slice(1);
+    if(k[0]==='e'){if(hidEnt.has(i)){hidEnt.delete(i);back.e.push(i);}}else if(hidPrim.has(i)){hidPrim.delete(i);back.p.push(i);}}
+  const nb=back.e.length+back.p.length;
+  if(nb){HIDE_UNDO.push({show:true,e:back.e,p:back.p});if(HIDE_UNDO.length>500)HIDE_UNDO.shift();rebuildWorld();selectionChanged();}
+  const still=[...u.keys.values()].filter(o=>!useShown(o)).length;
+  flash(nb?nm+': '+nb+' shown again'+(still?', '+still+' still hidden by '+texFilterNames(ti):'')
+    :nm+': hidden by '+texFilterNames(ti)+', not by Hide');
 }
 function selectFindResults(){runFind($('findIn').value);SEL.clear();
   for(const r of findRes){if(r.e!=null&&r.e>0)SEL.add('e'+r.e);else if(r.t!=null)selectByTexture(r.t,true);}
@@ -4227,6 +5400,10 @@ function infoEntity(ei){
   h+='<div><span class="sw" style="background:rgb('+X.col.map(v=>Math.round(v*255)).join(',')+')"></span><b>'+esc(cls)+'</b>'+(tn?'  <span style="color:var(--accent)">$'+esc(tn)+'</span>':'')+'</div>';
   h+='<div class="note">entity '+ei+' in the .map'+(e.prims.length?' · '+e.prims.filter(p=>p&&p.kind===0).length+' brush(es)'+(e.patches.length?', '+e.patches.length+' patch(es)':'')+(e.terrains.length?', '+e.terrains.length+' terrain block(s)':''):'')+
      (X.model>=0?' · model '+esc(D.models[X.model].p):'')+'</div>';
+  // the number the game gives it (sv_showentnums, script errors), for the game the list's cvars set
+  if(ei>0){const R=gameEnts()[ei];
+    h+='<div class="note">in game: '+(R.num>=0?'entity number '+R.num+', radnum '+R.rad+(R.gone?' ('+esc(R.why)+')':''):esc(R.why||'no entity number'))+
+      ' <span class="co">(g_gametype '+CVARS.g_gametype+', skill '+CVARS.skill+(CVARS.developer?', developer 1':'')+')</span></div>';}
   if(b){
     const o=b.origin, amin=[o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]], amax=[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]];
     const ss='setsize '+fvec(b.mins)+' '+fvec(b.maxs);
@@ -4448,6 +5625,7 @@ async function main(){
     setLoad('Reading the .map…',0.15);await tick();
     D.srcText=new TextDecoder('windows-1252').decode(D.bytes(D.src));
     MAP=readMap(D.srcText);
+    spawnKeys();
     TEX=(D.tex||[]).map((t,i)=>Object.assign({},t,{i:i}));
     for(const t of TEX)TEXI.set(t.n,t);
     setLoad('Building brushes, patches and terrain…',0.3);await tick();

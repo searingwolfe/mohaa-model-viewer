@@ -10,7 +10,7 @@
 #  Usage:
 #     python3 mohaa_view.py model.skd [--anim base.skc] [--no-open] [--3dviewer]
 # ==============================================================================
-import sys, os, struct, glob, json, re, webbrowser, math, subprocess, pathlib
+import sys, os, struct, glob, json, re, webbrowser, math, subprocess, pathlib, base64
 
 def _cap(b,n,rec,what,path):
     """Clamp a count read from a model header to what the file can physically hold.
@@ -309,8 +309,9 @@ def _parse_skb(b,path):
         tris=[]; to=so+ofsTri
         for _t in range(numTri):
             tris.append((_i32(b,to),_i32(b,to+4),_i32(b,to+8))); to+=12
-        verts=[]; uvs=[]; vo=so+ofsVrt
+        verts=[]; uvs=[]; nrm=[]; vo=so+ofsVrt
         for _ in range(numVrt):
+            nrm.append((_f32(b,vo),_f32(b,vo+4),_f32(b,vo+8)))   # normal (r_shownormals)
             uvs.append((_f32(b,vo+12),_f32(b,vo+16)))   # texCoords (s,t)
             nw=_cap(b,_i32(b,vo+20),20,"SKB weight",path)  # numWeights (no morph count in SKB)
             wo=vo+24                                     # weights follow the 24-byte header
@@ -320,11 +321,14 @@ def _parse_skb(b,path):
                 ofx=(_f32(b,wo+8),_f32(b,wo+12),_f32(b,wo+16))
                 weights.append((bi,wt,ofx)); wo+=20
             verts.append(weights); vo=wo
-        surfaces.append({"name":sname,"tris":tris,"verts":verts,"uvs":uvs})
+        # No collapse data is read: TIKI_LoadSKB never calls GetLODFile, so an SKB model is
+        # always drawn whole (tiki_skel.cpp).
+        surfaces.append({"name":sname,"tris":tris,"verts":verts,"uvs":uvs,"normals":nrm,"mesh":0})
         if ofsEnd<=0: break                          # non-advancing ofsEnd = infinite loop
         so+=ofsEnd
     return {"bones":bones,"name2idx":name2idx,"surfaces":surfaces,"numBone":numBone,
-            "morphNames":[]}      # SKB has no morph block (24-byte vertex header)
+            "morphNames":[],      # SKB has no morph block (24-byte vertex header)
+            "lodhdr":None}        # ...and no level of detail
 
 def parse_skd(path):
     # Dispatch on the ident: SKD ("SKMD", v5/6) or SKB ("SKL ", v3/4), both valid TIKI
@@ -354,6 +358,13 @@ def _skd_morph_names(b):
 
 def _parse_skmd(b,path):
     morph_names=_skd_morph_names(b)
+    # Level-of-detail header (skelHeader_t, tiki_shared.h:198-213): version @4, lodIndex[10]
+    # @0x5C, numBoxes @0x84. GetLODFile reads lodIndex[10] one past the array, which in
+    # skelHeaderGame_t is numBoxes (tiki_skel.cpp:814-820), so it is kept as an 11th entry.
+    version=_i32(b,0x04)
+    lodhdr=None
+    if len(b)>=0x88:
+        lodhdr={"ver":version,"li":list(struct.unpack_from("<10i",b,0x5C))+[_i32(b,0x84)]}
     numBone=_cap(b,_i32(b,0x4C),0x54,"SKD bone",path); ofsBone=_i32(b,0x50)
     bones=[]; off=ofsBone
     for _ in range(numBone):
@@ -411,8 +422,21 @@ def _parse_skmd(b,path):
         tris=[]; to=s0+ofsTri
         for _t in range(numTri):
             tris.append((_i32(b,to),_i32(b,to+4),_i32(b,to+8))); to+=12
-        verts=[]; uvs=[]; morphs=[]; vo=s0+ofsVrt
+        # Level of detail: the collapse map and the collapse index, numVerts int32 each at
+        # ofsCollapse / ofsCollapseIndex (skelSurface_t, tiki_shared.h; read into skelIndex_t
+        # by TIKI_LoadSKD, tiki_skel.cpp:389-403; the index exists for version > 3 only).
+        # RB_SkelMesh keeps the vertices whose index is at least the cutoff and remaps the
+        # others through the map (tr_model.cpp:1086-1187).
+        collapse=None; cidx=None
+        if numVrt>0:
+            oc=s0+_i32(b,s0+0x58); oci=s0+_i32(b,s0+0x60)
+            if s0<oc and oc+numVrt*4<=len(b):
+                collapse=list(struct.unpack_from("<%di"%numVrt,b,oc))
+            if version>3 and s0<oci and oci+numVrt*4<=len(b):
+                cidx=list(struct.unpack_from("<%di"%numVrt,b,oci))
+        verts=[]; uvs=[]; morphs=[]; nrm=[]; vo=s0+ofsVrt
         for _ in range(numVrt):
+            nrm.append((_f32(b,vo),_f32(b,vo+4),_f32(b,vo+8)))   # normal (r_shownormals)
             uvs.append((_f32(b,vo+12),_f32(b,vo+16)))   # texture coords (s,t)
             nw=_cap(b,_i32(b,vo+20),20,"SKD weight",path); nm=_cap(b,_i32(b,vo+24),16,"SKD morph",path)
             # skeletorMorph_t { int morphIndex; vec3_t offset; } (16 bytes) follows the 28-byte
@@ -432,7 +456,8 @@ def _parse_skmd(b,path):
                 weights.append((bi,wt,ofx)); wo+=20
             verts.append(weights); vo=wo
         surfaces.append({"name":sname,"tris":tris,"verts":verts,"uvs":uvs,
-                         "morphs":morphs if any(morphs) else None})
+                         "morphs":morphs if any(morphs) else None,
+                         "normals":nrm,"collapse":collapse,"cidx":cidx,"mesh":0})
     # Helper bones (HoseRot/AvRot) carry most of the leg-garment skin weight. Solvable
     # helpers are posed by _solve_helper_world and keep their weights; unsolvable ones are
     # redistributed onto the nearest real ancestor.
@@ -453,7 +478,47 @@ def _parse_skmd(b,path):
                 tot=sum(w[1] for w in kept) or 1.0
                 s["verts"][vi]=[(w[0],w[1]/tot,w[2]) for w in kept]
     return {"bones":bones,"name2idx":name2idx,"surfaces":surfaces,"numBone":numBone,
-            "morphNames":morph_names}
+            "morphNames":morph_names,"lodhdr":lodhdr}
+
+def skd_lod_control(skd, skd_path):
+    """The level-of-detail control the renderer builds for one skelmodel, or None when the
+    model is drawn whole. Mirrors GetLODFile (tiki_skel.cpp:750-831): only an SKD with a
+    surface whose collapse index differs between its first and last vertex can lose detail;
+    its curve comes from the .lod beside it (the .skd path with "skd" turned into "lod":
+    minMetric, maxMetric and five curve points, 96 or 48 bytes), else from the default
+    curve built from lodIndex. TIKI_CalcLodConsts and GetLodCutoff run in the page."""
+    h=skd.get("lodhdr")
+    if not h: return None                         # SKB: TIKI_LoadSKB has no LOD
+    if not any(s.get("cidx") and s["cidx"][0]!=s["cidx"][-1] for s in skd["surfaces"]):
+        return None
+    li=h["li"]
+    # The launcher writes pak names lower-cased while the .skd keeps the .tik's spelling, so
+    # match the name without case (a Windows folder does that anyway).
+    d=os.path.dirname(os.path.abspath(skd_path)); want=os.path.splitext(os.path.basename(skd_path))[0].lower()+".lod"
+    lp=None
+    try:
+        for fn in os.listdir(d):
+            if fn.lower()==want and os.path.isfile(os.path.join(d,fn)): lp=os.path.join(d,fn); break
+    except OSError: pass
+    if lp:
+        try:
+            b=open(lp,"rb").read()
+            if len(b)>=48:                        # memcpy of what the file holds; consts are recomputed
+                f=struct.unpack_from("<12f",b,0)
+                return {"min":f[0],"max":f[1],"curve":[[f[2+2*i],f[3+2*i]] for i in range(5)],
+                        "src":os.path.basename(lp)}
+        except OSError: pass
+    # Default curve (tiki_skel.cpp:800-826): pos 0/.5/.8/.95/1, val 0 then lodIndex[1] three
+    # times, then lodIndex[i] stepping i down from 10 while lodIndex[i] > lodIndex[3]; index 10
+    # is numBoxes, usually 0, so far away goes back to full detail.
+    i=10
+    while li[i]>li[3]:
+        if i<=2: break
+        i-=1
+    curve=[[0.0,0.0],[0.5,float(li[1])],[0.8,float(li[1])],[0.95,float(li[1])],[1.0,float(li[i])]]
+    for k in range(1,4):
+        if curve[k][0]<curve[k-1][0]: curve[k][1]=curve[k-1][0]
+    return {"min":1.0,"max":0.2,"curve":curve,"src":None}
 
 def merge_skds(skds):
     """Assemble several part .skd models (body first, then head/hands/etc.) into ONE model that
@@ -465,13 +530,15 @@ def merge_skds(skds):
     if len(skds)==1: return skds[0]
     bones=[dict(b) for b in skds[0]["bones"]]
     name2idx={b["name"]:i for i,b in enumerate(bones)}
-    surfaces=list(skds[0]["surfaces"])
+    # Each part stays its own mesh for the level of detail (one LOD control per skelmodel,
+    # R_AddSkelSurfaces / RB_SkelMesh walk tiki->mesh[]), so every surface records its part.
+    surfaces=[dict(s,mesh=0) for s in skds[0]["surfaces"]]
     # Morph targets are merged like bones: the engine builds one morph list per tiki,
     # loading each mesh's names in turn (skeletor.cpp:246-252). Matched case-insensitively
     # (head6.skd "VISEME_though" vs the .skc's "VISEME_Though").
     morph_names=list(skds[0].get("morphNames") or [])
     mkey={n.lower():i for i,n in enumerate(morph_names)}
-    for skd in skds[1:]:
+    for mi,skd in enumerate(skds[1:],1):
         for b in skd["bones"]:
             if b["name"] not in name2idx:
                 name2idx[b["name"]]=len(bones); bones.append(dict(b))
@@ -486,8 +553,10 @@ def merge_skds(skds):
             sm=s.get("morphs")
             surfaces.append({"name":s["name"],"uvs":s["uvs"],"tris":s["tris"],
                 "verts":[[(remap[bi],wt,ofx) for (bi,wt,ofx) in v] for v in s["verts"]],
-                "morphs":([[(mremap[mi] if 0<=mi<len(mremap) else mi,off) for (mi,off) in vm]
-                           for vm in sm] if sm else None)})
+                "morphs":([[(mremap[k] if 0<=k<len(mremap) else k,off) for (k,off) in vm]
+                           for vm in sm] if sm else None),
+                "normals":s.get("normals"),"collapse":s.get("collapse"),"cidx":s.get("cidx"),
+                "mesh":mi})
     for b in bones:
         b["parentIdx"]=name2idx.get(b["parent"],-1)
         if b.get("boneType") in (5,6):   # re-resolve HoseRot/AvRot refs against the union skeleton
@@ -496,7 +565,8 @@ def merge_skds(skds):
             b["solvable"]=(b["parentIdx"]>=0 and len([r for r in b["refIdx"] if r>=0])>=need)
             b["legHelper"]=_classify_leg_helper(bones,b)
     return {"bones":bones,"name2idx":name2idx,"surfaces":surfaces,"numBone":len(bones),
-            "morphNames":morph_names}
+            "morphNames":morph_names,
+            "lods":[p.get("lodctl") for p in skds],"meshNames":[p.get("meshName") for p in skds]}
 
 def parse_skc(path):
     b=open(path,"rb").read()
@@ -516,6 +586,12 @@ def parse_skc(path):
                          f"numFrames={numFrames} ofsChan={ofsChan} size={n}) - skipping animation")
     names=[_cstr(b,ofsChan+i*32,32) for i in range(numChan)]
     frames=[]
+    # Each 48-byte frame record (skelAnimFileFrame_t) also holds the frame's bounds (mins,
+    # maxs) and radius: the animation's bounds are the union of its frames'
+    # (skeletor_loadanimation.cpp ConvertSkelFileToGame), and the idle animation's are the
+    # model's own (TIKI_InitTiki), which sv_showbboxes 7 draws; the radius is the one the
+    # renderer's level of detail uses (skeletor_c::GetRadius, R_AddSkelSurfaces).
+    fbounds=[]; frad=[]
     for f in range(numFrames):
         meta=0x30+f*48; ofsVals=_i32(b,meta+0x2C); vals={}
         if ofsVals<0 or ofsVals+numChan*16>n:        # each frame's channel block must be in range
@@ -525,8 +601,9 @@ def parse_skc(path):
             o=ofsVals+ci*16
             vals[names[ci]]=[_f32(b,o),_f32(b,o+4),_f32(b,o+8),_f32(b,o+12)]
         frames.append(vals)
+        fbounds.append(struct.unpack_from("<6f",b,meta)); frad.append(_f32(b,meta+0x18))
     return {"frameTime":frameTime,"numChan":numChan,"numFrames":numFrames,
-            "names":names,"frames":frames}
+            "names":names,"frames":frames,"fbounds":fbounds,"frad":frad}
 
 def morph_track(skc, morph_names):
     """Per-frame blend-shape weights for a facial (MORPH) .skc, or None if it isn't one.
@@ -1709,10 +1786,34 @@ def solve_anim(bones,a,helper_idx=None,leg_chains=None,movement=None):
         frames.append(d)
     out={"name":a["name"],"frameTime":round(a["data"]["frameTime"],5),"frames":frames}
     if a.get("fx"): out["fx"]=a["fx"]     # per-anim TIKI client/server fx (spawn bursts, surface nodraw)
+    # Each frame's radius from the .skc: the skeletor's m_frameRadius, which the renderer's
+    # level of detail measures a model by (skeletor.cpp:406-483, R_AddSkelSurfaces).
+    _fr=a["data"].get("frad")
+    if _fr and len(_fr)==len(frames): out["rad"]=[round(r,2) for r in _fr]
     return out
 
-def build_payload(skd,anims_data,base_channels,referenced,convention,wT_payload,textures=None,emitters=None,dontdraw=False,setsize=None,scale=1.0,classname=None,animskind=None,initfx=None,animcat=None,animdir=None,animfx=None,tiknodraw=None):
+def _b64_i16(vals):
+    """int list -> base64 of little-endian int16, wrapped like skelIndex_t (a short) holds it."""
+    return base64.b64encode(struct.pack("<%dh"%len(vals),*[((int(v)+32768)&0xFFFF)-32768 for v in vals])).decode("ascii")
+
+def _b64_normals(skd):
+    """Every vertex normal, in the payload's vertex order, as base64 int8 triples (x127).
+    r_shownormals draws 2-unit lines along them (DrawNormals, tr_shade.c:333-351)."""
+    out=bytearray()
+    for s in skd["surfaces"]:
+        ns=s.get("normals") or []
+        for vi in range(len(s["verts"])):
+            n=ns[vi] if vi<len(ns) else (0.0,0.0,1.0)
+            for c in n:
+                c=0.0 if not (c==c) else c        # NaN guard
+                out.append(max(-127,min(127,int(round(c*127))))&0xFF)
+    return base64.b64encode(bytes(out)).decode("ascii")
+
+def build_payload(skd,anims_data,base_channels,referenced,convention,wT_payload,textures=None,emitters=None,dontdraw=False,setsize=None,scale=1.0,classname=None,animskind=None,initfx=None,animcat=None,animdir=None,animfx=None,tiknodraw=None,game=None):
     bones=skd["bones"]
+    # One level-of-detail control per skelmodel part (None: that part is always drawn whole).
+    lods=skd.get("lods") if skd.get("lods") is not None else [skd.get("lodctl")]
+    mnames=skd.get("meshNames") or [skd.get("meshName")]
     out_bones=[{"name":bn["name"],"parent":bn["parentIdx"]} for bn in bones]
     base=[]
     _bwR,_bwT=compute_world(bones,base_channels)   # resolves solvable HoseRot/AvRot helper frames + IK legs
@@ -1744,6 +1845,12 @@ def build_payload(skd,anims_data,base_channels,referenced,convention,wT_payload,
         for (a,b,c) in s["tris"]: tris.append([vbase+a,vbase+b,vbase+c])
         vbase+=len(s["verts"])
         sr={"name":s["name"],"start":start,"end":len(tris),"vstart":vstart,"vend":vbase}
+        # Level of detail: the part this surface belongs to and its collapse map / index, for
+        # parts that have a LOD control.
+        _m=s.get("mesh",0); _nv=len(s["verts"])
+        if (0<=_m<len(lods) and lods[_m] and s.get("collapse") and s.get("cidx")
+                and len(s["collapse"])==_nv and len(s["cidx"])==_nv):
+            sr["m"]=_m; sr["lc"]=_b64_i16(s["collapse"]); sr["li"]=_b64_i16(s["cidx"])
         # cull_* garment shaders disable backface culling; their thin two-sided panels break up
         # if culled. Use the shader's `cull` keyword when textures provide it, with the cull*
         # surface-name convention as a fallback.
@@ -1816,7 +1923,13 @@ def build_payload(skd,anims_data,base_channels,referenced,convention,wT_payload,
             # Surface +/-nodraw ops applied at spawn, in file order; patterns are resolved in the
             # page by surfIdxByName() against the assembled surface list.
             "tikNodraw":(tiknodraw or []),
-            "animCat":animcat,"animDir":animdir}
+            "animCat":animcat,"animDir":animdir,
+            # Game cvars: vertex normals (r_shownormals), each part's LOD control (r_uselod),
+            # and what the game makes of the model as an entity (sv_showbboxes).
+            "normals":_b64_normals(skd),
+            "lods":[(dict(c,name=(mnames[i] if i<len(mnames) else None)) if c else None)
+                    for i,c in enumerate(lods)] if any(lods) else [],
+            "game":game or {}}
 
 def _html_esc(s):
     return (str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
@@ -1951,6 +2064,7 @@ VIEWER_KEYS={
    _kx("wheel","zoom in / out",("Wheel","zoom")),
    _kx_sub("Both cameras","cam"),
    _kx("R","reset the camera (and clear the tag selection)",("R","reset")),
+   _kx("X","stop the camera (if it keeps moving after a click outside the viewer)",("X","stop","stop the camera")),
    _kx("V","switch Free-look / Tag-lock",("V","camera")),
   ]},
   {"title":"Playback and display","rows":[
@@ -1968,6 +2082,8 @@ VIEWER_KEYS={
        ("5","Nodes","Nodes: the tag and bone circles on / off"),
        ("6","Labels","Labels: the tag and bone names on / off"),
        ("7","Face","Face Anims: the face animation riding on the body animation (when it has one)")),
+   _kx("`","the game cvars list: sv_showbboxes, r_shownormals, r_uselod ... (type a cvar and its "
+       "value, then Enter, as in the game's console)",("`","cvars","open / close the game cvars list")),
    _kx("L","light / dark theme",("L","theme")),
    _kx_sub("Tag list (side panel)","sel"),
    _kx("click","select a tag or bone (Tag-lock orbits it); again to deselect",("Click","select","select a tag or bone in the list")),
@@ -2370,7 +2486,7 @@ ANIM_PRELOAD_MAX=150
 # Page format revision, baked into each HTML as <!--mohaa-viewer-rev:N-->. Bump it when
 # the page gains features a cached HTML must pick up, and raise VIEWER_REV_REQUIRED in
 # mohaa_launcher.py to match so older pages are rebuilt. History: docs/CHANGELOG.md.
-VIEWER_REV=70
+VIEWER_REV=76
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!--mohaa-viewer-rev:__REV__-->
@@ -2439,6 +2555,17 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
  .attMdl{display:inline-flex;align-items:center;gap:5px;max-width:152px}
  .attMdl .albl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
  .attMdl .acar{color:var(--dim);font-size:10px;flex:none}
+ /* An attachment's first line: remove, then the bone and model pickers. The bone picker is
+    one fixed width (a 16-character name such as "Bip01 L Finger01" fits) so the model pickers
+    line up, and the model picker narrows with an ellipsis rather than wrapping when the
+    panel's scrollbar takes its room. */
+ .row.attTop{flex-wrap:nowrap}
+ .attTop .attMdl{flex:0 1 auto;min-width:0}
+ .attTop .attMdl.attTag{flex:none;width:128px}
+ /* Copy-as-script-line button after an attachment's angles. */
+ .attCopy{display:inline-flex;align-items:center;justify-content:center;padding:3px 5px;
+   margin-left:6px;vertical-align:middle;line-height:1}
+ .attCopy svg{display:block}
  *{box-sizing:border-box} html,body{margin:0;height:100%;background:var(--bg);
    color:var(--txt);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
  #wrap{display:flex;height:100vh}
@@ -2506,8 +2633,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
  .legend span{display:inline-flex;align-items:center;gap:5px;margin-right:12px}
  .legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
  kbd{background:var(--btn);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:11px}
- #hint{position:absolute;left:10px;bottom:8px;color:var(--dim);font-size:11px;
-   background:rgba(var(--labelbg),.55);padding:2px 8px;border-radius:6px;pointer-events:none}
+ #hint{position:absolute;left:10px;bottom:8px;color:var(--dim);font-size:11px;pointer-events:none;
+   display:flex;gap:10px;align-items:flex-end}
+ #hint>span{background:rgba(var(--labelbg),.55);padding:2px 8px;border-radius:6px;white-space:nowrap}
+ #hint>span:empty{display:none}
+ /* a short message beside "H hotkeys" (flash): "Camera stopped" */
+ #hintFlash{color:var(--accent)}
  #sideTab{position:absolute;right:0;top:50%;transform:translateY(-50%);z-index:15;
    background:var(--panel);color:var(--dim);border:1px solid var(--line);border-right:none;
    border-radius:8px 0 0 8px;padding:14px 5px;cursor:pointer;font-size:12px;line-height:1;
@@ -2517,6 +2648,35 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
  ::-webkit-scrollbar-thumb:hover{background:var(--btnhover)}
  ::-webkit-scrollbar-track{background:transparent}
+ /* ---- the game cvars list (Display > game cvars, or `): the map viewer's list -------- */
+ #cvarRow{margin-top:7px;flex-wrap:nowrap}
+ #cvarBtn{display:flex;align-items:center;gap:6px;max-width:150px;flex:none;padding:3px 8px;font-size:11px}
+ #cvarBtn .albl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+ #cvarBtn .acar{color:var(--dim);font-size:10px}
+ #cvarCount{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ #cvarCount.on{color:var(--accent)}
+ #lodRow{flex-wrap:nowrap}
+ #lodTxt{color:var(--dim)} #lodTxt.on{color:var(--accent)}
+ #cvPanel{width:340px}
+ #cvPanel .amItem:hover{background:var(--btnhover)}
+ #cvPanel .amItem .arw{flex:none;width:12px;text-align:center;color:var(--accent);font-size:11px}
+ #cvPanel .amItem .lbl{flex:none;min-width:0;overflow:hidden;text-overflow:ellipsis}
+ #cvPanel .amItem .cnt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--dim);font-size:11px;text-align:right}
+ #cvPanel .amItem.on .lbl{color:var(--accent)}
+ #cvPanel .amItem.na .lbl,#cvPanel .amItem.na .arw{opacity:.5}
+ #cvPanel .amItem input{flex:none;width:70px;padding:1px 4px;background:var(--btn);color:var(--txt);border:1px solid var(--line);
+   border-radius:4px;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+ #cvPanel .amItem input:focus{outline:1px solid var(--accent);outline-offset:0}
+ #cvPanel .amSearch:focus{outline:1px solid var(--accent);outline-offset:0}
+ #cvPanel .amGrp{padding:6px 8px 2px 8px;color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+   border-top:1px solid var(--line);margin-top:3px;cursor:default}
+ #cvPanel .amGrp:first-child{border-top:0;margin-top:0;padding-top:2px}
+ #cvWhere{border-top:1px solid var(--line);margin-top:4px;padding-top:5px}
+ #cvWhere div{margin:1px 0} #cvWhere .msg{color:var(--accent)} #cvWhere .warn{color:var(--err)}
+ /* the game's console lines over the stage, as its notify lines show them */
+ #cvCon{position:absolute;left:10px;top:8px;max-width:calc(100% - 60px);pointer-events:none;
+   color:#e6e6e6;background:rgba(0,0,0,.5);padding:3px 8px;border-radius:6px;
+   font:11px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow:hidden}
 __KEYS_CSS__
 </style>
 <script>
@@ -2546,7 +2706,9 @@ __KEYS_CSS__
 </script></head>
 <body><div id="animMenu"></div><div id="wrap">
  <div id="stage"><canvas id="gl"></canvas><canvas id="c"></canvas>
-  <div id="hint"><kbd>H</kbd> hotkeys</div>
+  <div id="hint"><span><kbd>H</kbd> hotkeys</span><span id="hintFlash"></span></div>
+  <!-- the game's console lines (cg_showemitters, cg_showtempmodels, vss_showsources 2) -->
+  <div id="cvCon" style="display:none"></div>
   <div id="sideTab" title="Collapse the control panel (\)">&#10095;</div>
   <!-- keyboard shortcuts (H): the keyboard map, built from VIEWER_KEYS on first open -->
   <div id="helpOv" class="kx-ov" style="display:none"><div id="helpCard" class="kx-card"></div></div>
@@ -2599,6 +2761,7 @@ __KEYS_CSS__
        <div class="row co">mouse drag = look around</div>
        <div class="row co">mouse wheel = zoom in / out</div>
        <div class="row co"><kbd>R</kbd> reset camera</div>
+       <div class="row co"><kbd>X</kbd> stop camera</div>
        <div class="row co">&nbsp;</div>
        <div class="row co"><kbd>W</kbd>/<kbd>S</kbd> move forward / back</div>
        <div class="row co"><kbd>A</kbd>/<kbd>D</kbd> strafe side to side</div>
@@ -2624,6 +2787,8 @@ __KEYS_CSS__
        <input type="color" id="bgcol" value="#0e1116" style="width:44px;height:22px;padding:1px;border:1px solid var(--line);border-radius:6px;background:var(--btn);cursor:pointer" title="Backdrop colour behind the model. Overrides the theme's default; remembered.">
        <button id="bgReset" title="Return the backdrop to the current theme's default colour">Default</button>
      </div>
+     <div class="row co" id="cvarRow"><button id="cvarBtn" title="The game's debugging cvars, doing here what they do in game: the boxes and hit spheres of sv_showbboxes, the vertex normals of r_shownormals, the level of detail of r_uselod and the particle counts of cg_showemitters. Type a cvar and a value in its box as in the game's console. (` like the game's console key)"><span class="albl">&mdash; game cvars &mdash;</span><span class="acar">&#9668;</span></button><span id="cvarCount">none set</span></div>
+     <div class="row co" id="lodRow" style="display:none"><span title="Level of detail (r_uselod): how far from the player the game measures the model. At the left end it follows the camera; drag right to see the model as the game draws it that far away while the camera stays where it is.">LOD</span><input type="range" id="lodDist" min="0" max="1000" step="1" value="0" style="flex:1;min-width:60px"><span id="lodTxt" style="white-space:nowrap"></span></div>
      <div class="row legend">
        <span><i style="background:var(--tag)"></i>Tag/Bone</span>
        <span><i style="background:var(--origin)"></i>Origin</span>
@@ -2914,6 +3079,9 @@ const surfTex=DATA.surfRanges.map(mkSurfTex);
 // Live draw arrays: the model's own geometry plus any attachments. Both renderers read
 // these instead of DATA.*, so an attachment is just more surfaces.
 let LT=DATA.tris, LUV=DATA.uvs, LSR=DATA.surfRanges, LTEX=surfTex;
+// The host model's own triangles and surface ranges as drawn: DATA's, or the level of detail's
+// (r_uselod) when it drops triangles. attRebuild appends attachments to these.
+let HOST_T=DATA.tris, HOST_SR=DATA.surfRanges;
 function isLodSprite(si){const t=LTEX[si];return !!(t&&t.autosprite2&&t.distfade&&t.distfade.inv);}
 const hasLodSprite=DATA.surfRanges.some(s=>s.autosprite2&&s.distfade&&s.distfade.inv);
 const hasEffectSurf=DATA.surfRanges.some(s=>s.autosprite||s.additive||s.pulse||(s.frames&&s.frames.length>1));
@@ -3847,7 +4015,8 @@ function stepParts(dt){
    if(effT<(e.startdelay||0))continue;
    spawnAcc[ei]+=dt*rate;
    // VSS spawn events go through spawnBurst so the count*life puff multiplier applies.
-   while(spawnAcc[ei]>=1){spawnAcc[ei]-=1;
+   // EMIT_N counts the intervals for cg_showemitters (UpdateEmitter's count).
+   while(spawnAcc[ei]>=1){spawnAcc[ei]-=1;EMIT_N[ei]++;
      if(_isVol)spawnBurst(ei,(e.count||1)); else spawnParticle(ei);}
  }
  // VSS inter-puff repulsion (VSS_AddRepulsion, cg_volumetricsmoke.cpp:76-135): each pair
@@ -4549,6 +4718,9 @@ function drawQuadPersp(src,TL,TR,BL,BR){
  ctx.restore();
 }
 function draw(){if(camMode==='free')syncCenterFromEye();
+ // r_uselod: the triangles the game draws from here (see lodTick). Before the page has
+ // finished setting up, a failure just leaves the triangles as they were.
+ try{lodTick();}catch(e){}
  // WebGL draws the grid and skinned model with a real depth buffer; the 2D canvas on top
  // draws what always goes over the model (autosprite billboards, particles, nodes/labels,
  // setsize box). With the 2D renderer selected (GLR null), draw2DScene() paints everything.
@@ -4557,6 +4729,7 @@ function draw(){if(camMode==='free')syncCenterFromEye();
  if(!GLR)draw2DScene(); else drawBillboards2D();
  drawTagOverlay();
  drawSetsizeBox();_buildOcclusionDepth();drawParticles();
+ drawGameCvars();             // sv_showbboxes, r_shownormals, vss_showsources
  drawSelectedTagTop();}
 // Autosprite billboard pass for the GL path (draw2DScene keeps its own inline version).
 // deformVertexes autoSprite / autoSprite2 (tr_shade_calc.c AutospriteDeform :578-646,
@@ -4978,16 +5151,571 @@ function drawSetsizeBox(){if(!view.setsize||!DATA.setsize)return;
  ctx.save();ctx.strokeStyle=TH.setsize||'#ff5b6e';ctx.lineWidth=1.5;ctx.setLineDash([]);ctx.beginPath();
  for(const[a,b]of E){const pa=P[a],pb=P[b];if(pa[2]>0&&pb[2]>0){ctx.moveTo(pa[0],pa[1]);ctx.lineTo(pb[0],pb[1]);}}
  ctx.stroke();ctx.restore();}
-let drag=false,lx=0,ly=0;
+// =============================================================================
+//  Game cvars: the list under Display (or `, the game's console key)
+// =============================================================================
+// Some of the game's debugging cvars, doing to this model what they do to it in game, and
+// the game settings they depend on. A click on a row sets it (or back to its default); the
+// list's filter box takes "name value" then Enter, as the game's console does. The values
+// are kept for this browser, as a console setting lasts the session in game.
+//   DATA.game  what the game makes of the model as an entity (built by mohaa_view.py):
+//              ischar (`ischaracter`), sent (a Sentient: "player" or its classname),
+//              ssrc (where DATA.setsize came from) and tikb (the .tik's idle bounds).
+const GAME=DATA.game||{};
+const CVAR_DEFAULTS={sv_showbboxes:0,r_shownormals:0,r_uselod:0,r_lodscale:1.1,r_lodcap:1,cg_fov:80,
+  cg_showemitters:0,cg_showtempmodels:0,vss_showsources:0};
+// Where the viewer starts somewhere other than the game: r_uselod is 1 in game, but the
+// viewer opens every model with all of its triangles.
+const CVAR_GAMEDEF={r_uselod:1};
+const CVARS=Object.assign({},CVAR_DEFAULTS);
+// the values a cvar without a number box takes (the rest are switches, 0 or 1)
+const CVAR_RANGE={vss_showsources:[0,2]};
+// CM_GetHitLocationInfo / CM_GetHitLocationInfoSecondary (cm_trace_lbd.cpp): the tag, the
+// sphere's radius and its offset along the tag's axes, then the secondary sphere's, in game
+// units. sv_showbboxes 10 to 27 show one location: value - 10.
+const HITLOC=[
+ ['Bip01 Head',5,[2.5,3.5,0],0,[0,0,0]],      ['Bip01 Head',5.5,[8.5,1,0],5.5,[7,-2.5,0]],
+ ['Bip01 Neck',4,[3.5,-1,0],4,[2,2,0]],        ['Bip01 Spine2',9,[5,1,3],9,[5,1,-3]],
+ ['Bip01 Spine1',8,[2,1,3],8,[2,1,-3]],        ['Bip01 Spine',9,[1,1,3],9,[1,1,-3]],
+ ['Bip01 Pelvis',9,[-3,1,4],9,[-3,1,-4]],      ['Bip01 R UpperArm',7,[4,0,0],6,[11.5,0,0]],
+ ['Bip01 L UpperArm',7,[4,0,0],6,[11.5,0,0]],  ['Bip01 R Thigh',8,[12,0,0],8,[22,0,0]],
+ ['Bip01 L Thigh',8,[12,0,0],8,[22,0,0]],      ['Bip01 R Forearm',5.5,[5,1,0],5,[11.5,0,0]],
+ ['Bip01 L Forearm',5.5,[5,1,0],5,[11.5,0,0]], ['Bip01 R Calf',7.5,[8,0,0],6.5,[19,0,0]],
+ ['Bip01 L Calf',7.5,[8,0,0],6.5,[19,0,0]],    ['Bip01 R Hand',6,[5,1,0],0,[0,0,0]],
+ ['Bip01 L Hand',6,[5,1,0],0,[0,0,0]],         ['Bip01 R Foot',6,[3,2,0],5,[4,9,0]],
+ ['Bip01 L Foot',6,[3,2,0],5,[4,9,0]]];
+const HIT_NAMES=['the head','the head\'s second sphere','the neck','the upper chest','the chest','the stomach','the pelvis',
+  'the right upper arm','the left upper arm','the right thigh','the left thigh','the right forearm','the left forearm',
+  'the right calf','the left calf','the right hand','the left hand','the right foot','the left foot'];
+const CVAR_ROWS=[
+ {h:'Boxes and hit spheres'},
+ {n:'sv_showbboxes',v:1,need:'solid',d:'its box',
+  t:'A yellow box round the model (its uprights blue), turned with it: its setsize, or without one in the .tik the bounds of its idle animation times its scale, as the game sizes an entity (Entity::setModel). A player model, and an AI (class Actor) once it starts (Actor::EventStart), have a standing player\'s box instead, ( -15 -15 0 ) ( 15 15 94 ), whatever the setsize. Only for a solid entity, within 1000 units of the player (here the camera). Positive values are for every entity but the player, negative ones for the player'},
+ {n:'sv_showbboxes',v:2,need:'solid',d:'world-aligned',
+  t:'The magenta box the server links the entity with: the bounds of its turned box, a unit bigger all round (SV_LinkEntity). Only for a solid entity'},
+ {n:'sv_showbboxes',v:3,need:'drawn',d:'with a model',t:'The yellow box of 1, for an entity that has a .tik model and is drawn'},
+ {n:'sv_showbboxes',v:4,d:'any entity',t:'The yellow box of 1, for every entity'},
+ {n:'sv_showbboxes',v:7,need:'tikb',d:'the .tik\'s bounds',
+  t:'A cyan box: the bounds of the .tik\'s idle animation times its scale (TIKI_CalculateBounds, the model\'s own size whatever its setsize), turned with the model'},
+ {n:'sv_showbboxes',v:8,need:'drawn',d:'box and origin',t:'The yellow box of 1 and a small cyan box on the model\'s origin'},
+ {n:'sv_showbboxes',v:9,d:'hit spheres',
+  t:'The 19 spheres the game tests a bullet against to find where it hit a person (head twice, neck, spine, pelvis, arms, legs, hands, feet: cm_trace_lbd.cpp), as circles facing you: blue, and purple for each location\'s second sphere. They sit on the Bip01 bones, so they follow the animation. Only on a Sentient (an AI or a player); anything else solid gets a plain yellow box, not turned. Negative values are the player\'s own (-9 to -27)'},
+ {n:'sv_showbboxes',num:[-28,128],d:'10 to 27: one location',
+  t:'10 to 27 show one hit location: 10 the head, 11 its second sphere, 12 the neck, 13 to 16 the spine and pelvis, 17 and 18 the upper arms, 19 and 20 the thighs, 21 and 22 the forearms, 23 and 24 the calves, 25 and 26 the hands, 27 the right foot (28 shows nothing: the left foot only shows with 9). 100 and up are for the entity g_monitor names'},
+ {h:'The mesh'},
+ {n:'r_shownormals',v:1,need:'mesh',d:'vertex normals',
+  t:'A white line 2 units long along each vertex\'s normal, over everything (DrawNormals): the direction the game lights the vertex by. Only the vertices drawn: the level of detail and hidden surfaces leave theirs out. In game it also takes developer 1'},
+ {h:'Level of detail'},
+ {n:'r_uselod',v:1,need:'lod',d:'detail by distance',
+  t:'The game\'s level of detail: the farther the model is from the player, the fewer of its triangles are drawn (R_CalcLod, GetLodCutoff, RB_SkelMesh), each part along its .lod file\'s curve (or the default curve when it has no .lod). The LOD slider under the list\'s button moves the model away without moving the camera. The game\'s default is 1; the viewer starts at 0 and draws every triangle (in game 0 keeps each curve\'s first value, which is 0 for most .lod files)'},
+ {n:'r_lodscale',num:[0,100],step:0.1,f:1,need:'lodon',d:'how far detail holds',
+  t:'Higher keeps more detail farther away: the game multiplies how much the model\'s size on screen is over each part\'s least-detail size by this (the game\'s default is 1.1)'},
+ {n:'r_lodcap',num:[0,1],step:0.05,f:1,need:'lodon',d:'the most detail, 0 to 1',
+  t:'Caps the detail: 1 lets a part go up to all of its triangles (the game\'s default), 0 keeps it at its least'},
+ {n:'cg_fov',num:[1,160],need:'lodon',d:'degrees',
+  t:'The player\'s field of view (the game\'s default is 80): the level of detail measures the model\'s size on screen as its radius times 100 / fov over its distance. Measured at 4:3, where the game\'s fov_x is cg_fov'},
+ {h:'Particles'},
+ {n:'cg_showemitters',v:1,need:'fx',d:'what each emitter emits',
+  t:'Each frame, a line for each emitter that emitted: entity:emitter:N tempmodels emitted, N being how many times it emitted (UpdateEmitter). The model counts as entity 0. In game these lines print only with developer 1'},
+ {n:'cg_showtempmodels',v:1,need:'fx',d:'tempmodels drawn',
+  t:'Each frame, TC:N, the number of tempmodels drawn (CG_AddTempModels): every particle but the volumetric smoke'},
+ {n:'vss_showsources',v:1,need:'vss',d:'smoke sources',
+  t:'Each volumetric smoke source marked with a ring its radius wide, where the game draws the sprite VSSSource.spr'},
+ {n:'vss_showsources',v:2,need:'vss',d:'and how many',t:'The rings of 1, and each frame a line VSS Sources In Use: N'}];
+const CVAR_NAMES={};for(const k in CVAR_DEFAULTS)CVAR_NAMES[k.toLowerCase()]=k;
+// each row's group header, for the filter
+{let g=null;for(const r of CVAR_ROWS){if(r.h)g=r;else r.grp=g;}}
+function cvarValRow(n){return CVAR_ROWS.find(r=>r.n===n&&(r.num||r.str));}
+function cvEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function cvNum(v){return String(Math.round(v*100)/100);}
+const IS_SENT=!!GAME.sent;
+const HAS_VSS=EM.some(e=>e.volumetric||(e.flags&&e.flags.indexOf('volumetric')>=0));
+// what a row needs from the model, and why it does nothing here without it
+function cvarWhyNot(need){
+  if(need==='solid'||need==='drawn'||need==='mesh'){if(DATA.dontdraw)return 'this model isn\'t drawn in game (rendereffects +dontdraw, or hidden): the game counts it neither solid nor drawn';return '';}
+  if(need==='tikb'){if(GAME.tikb)return '';return 'no idle animation found for this model, so no .tik bounds';}
+  if(need==='lod'){if(HAS_LOD)return '';return 'no part of this model has a level of detail (an .skb, or an .skd whose detail never drops)';}
+  if(need==='lodon'){if(!HAS_LOD)return cvarWhyNot('lod');if(CVARS.r_uselod)return '';return 'only with r_uselod 1';}
+  if(need==='fx'){if(EM.length)return '';return 'this model has no particle emitters';}
+  if(need==='vss'){if(HAS_VSS)return '';return EM.length?'this model\'s emitters make no volumetric smoke':'this model has no particle emitters';}
+  return '';
+}
+// a value as the cvar takes it: in its range, a whole number unless it takes fractions,
+// the switches 0 or 1
+function cvarClamp(n,v){
+  const row=cvarValRow(n);
+  v=Number(v);if(!isFinite(v))return null;
+  if(row)return Math.max(row.num[0],Math.min(row.num[1],row.f?v:Math.round(v)));
+  const lim=CVAR_RANGE[n];if(lim)return Math.max(lim[0],Math.min(lim[1],Math.round(v)));
+  return v?1:0;
+}
+function cvarsSet(){return Object.keys(CVAR_DEFAULTS).filter(k=>String(CVARS[k])!==String(CVAR_DEFAULTS[k]));}
+function cvarSave(){const o={};for(const k of cvarsSet())o[k]=CVARS[k];
+  try{localStorage.setItem('mohaaViewerCvars',JSON.stringify(o));}catch(_e){}}
+function setCvar(name,val){
+  const n=CVAR_NAMES[String(name).toLowerCase()];if(!n)return false;
+  const v=cvarClamp(n,val);if(v==null)return false;
+  CVARS[n]=v;
+  if(n==='r_uselod'||n==='r_lodscale'||n==='r_lodcap'||n==='cg_fov'){LOD_ST=null;lodRowSync();}
+  if(n==='cg_showemitters'||n==='cg_showtempmodels'||n==='vss_showsources')cvConSync();
+  cvarSave();cvarCountRender();cvarMenuRender();requestDraw();
+  return true;
+}
+function cvarCountRender(){
+  const el=document.getElementById('cvarCount');if(!el)return;
+  const on=cvarsSet();
+  el.textContent=on.length?on.map(k=>k+' '+CVARS[k]).join(' · '):'none set';
+  el.classList.toggle('on',on.length>0);
+  el.title=on.length?on.map(k=>k+' '+CVARS[k]).join('\n'):'Every cvar in the list is at the viewer’s default';
+}
+// ---- the list ------------------------------------------------------------------------
+let cvEl=null,cvBack=null,cvMsg='';
+const CV_W=340,CV_GAP=6;
+function cvarMenuClose(){
+  if(cvEl){cvEl.remove();cvEl=null;}
+  if(cvBack){cvBack.remove();cvBack=null;}
+  cvMsg='';
+  document.removeEventListener('keydown',cvarMenuKey,true);}
+// Capture-phase while open: every key stays in the list (typing "1" in the filter mustn't
+// switch Texture off). Esc or ` closes it; Enter runs what the filter box holds.
+function cvarMenuKey(ev){
+  const t=ev.target;
+  if(ev.key==='Escape'||(ev.code==='Backquote'&&!ev.ctrlKey&&!ev.altKey&&!ev.metaKey)){
+    cvarMenuClose();ev.preventDefault();ev.stopPropagation();return;}
+  if(ev.key==='Enter'){
+    if(t&&t.dataset&&t.dataset.cvar){setCvar(t.dataset.cvar,t.value);ev.preventDefault();}
+    else if(t&&t.id==='cvSearch'){cvarConsole(t.value);ev.preventDefault();}
+  }
+  ev.stopPropagation();}
+// The filter box as the game's console: "name value" sets it, "name" alone tells its value.
+function cvarConsole(text){
+  const w=String(text||'').trim().split(/\s+/).filter(Boolean);
+  if(!w.length)return;
+  const n=CVAR_NAMES[w[0].toLowerCase()];
+  if(!n){
+    const rows=cvarRowsFor(w[0]).filter(r=>!r.h);
+    if(rows.length===1&&w.length===1){cvarRowClick(rows[0]);return;}
+    cvMsg='Unknown cvar "'+w[0]+'" (this list has '+Object.keys(CVAR_DEFAULTS).join(', ')+')';cvarMenuRender();return;}
+  if(w.length===1){cvMsg='"'+n+'" is:"'+CVARS[n]+'" default:"'+CVAR_DEFAULTS[n]+'"'+
+    (n in CVAR_GAMEDEF?' (the game\'s default is '+CVAR_GAMEDEF[n]+')':'');cvarMenuRender();return;}
+  if(!setCvar(n,w[1])){cvMsg='"'+w[1]+'" isn\'t a number';cvarMenuRender();return;}
+  // the reason a cvar can't work here is already in its row's tooltip and the foot
+  const why=cvarWhyNot((CVAR_ROWS.find(r=>r.n===n)||{}).need);
+  cvMsg=n+' '+CVARS[n]+(why&&String(CVARS[n])!==String(CVAR_DEFAULTS[n])?' (no effect on this model: '+why+')':'');
+  const s=document.getElementById('cvSearch');if(s)s.value='';
+  cvarMenuRender();
+}
+// the rows the filter keeps, each group's header with them
+function cvarRowsFor(f){
+  f=String(f||'').toLowerCase();
+  const hit=r=>!f||(r.n+(r.num?'':' '+r.v)).toLowerCase().indexOf(f)>=0||r.d.toLowerCase().indexOf(f)>=0;
+  const out=[];let last=null;
+  for(const r of CVAR_ROWS){if(r.h||!hit(r))continue;if(r.grp&&r.grp!==last){out.push(r.grp);last=r.grp;}out.push(r);}
+  return out;
+}
+function cvarRowClick(r){
+  if(r.num){const i=cvEl&&cvEl.querySelector('input[data-cvar="'+r.n+'"]');if(i){i.focus();i.select();}return;}
+  const why=cvarWhyNot(r.need);
+  setCvar(r.n,CVARS[r.n]===r.v?CVAR_DEFAULTS[r.n]:r.v);
+  if(why&&CVARS[r.n]===r.v){cvMsg=r.n+' '+r.v+' (no effect on this model: '+why+')';cvarMenuRender();}
+}
+function cvarMenuPlace(){
+  if(!cvEl)return;
+  const b=document.getElementById('cvarBtn'),r=b.getBoundingClientRect(),vw=window.innerWidth,vh=window.innerHeight;
+  let left=r.left-CV_GAP-CV_W;
+  if(left<4)left=Math.min(r.right+CV_GAP,Math.max(4,vw-4-CV_W));
+  if(left+CV_W>vw-4)left=Math.max(4,vw-4-CV_W);
+  cvEl.style.left=left+'px';
+  mnFit(cvEl,r,vh);
+}
+function cvarMenuOpen(){
+  cvarMenuClose();
+  // a click anywhere else closes the list, including on its button (how it toggles)
+  cvBack=document.createElement('div');
+  cvBack.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;z-index:70';
+  cvBack.onclick=ev=>{if(!cvEl||!cvEl.contains(ev.target))cvarMenuClose();};
+  document.body.appendChild(cvBack);
+  cvEl=document.createElement('div');cvEl.className='amPanel';cvEl.id='cvPanel';
+  cvEl.style.cssText='position:fixed;z-index:71';
+  cvEl.innerHTML='<div class="amHead"><span class="amPathTxt">game cvars</span><span class="amCnt" id="cvHeadCnt"></span></div>'+
+    '<input class="amSearch" id="cvSearch" type="text" spellcheck="false" autocomplete="off" placeholder="filter, or a cvar and value then Enter…">'+
+    '<div class="amBody" id="cvBody"></div><div class="amNote" id="cvWhere"></div>';
+  const se=cvEl.querySelector('#cvSearch');
+  se.oninput=()=>{cvMsg='';cvarMenuRender();};
+  // keep the focus in the filter box while rows are clicked (a row's mousedown would take
+  // it); the value boxes take it as usual
+  cvEl.addEventListener('mousedown',ev=>{if(ev.target.tagName==='INPUT')return;ev.preventDefault();});
+  cvBack.appendChild(cvEl);
+  document.addEventListener('keydown',cvarMenuKey,true);
+  cvarMenuRender();cvarMenuPlace();se.focus();
+}
+function cvarMenuRender(){
+  if(!cvEl)return;
+  const bd=cvEl.querySelector('#cvBody'),sv=bd.scrollTop;bd.innerHTML='';
+  const se=cvEl.querySelector('#cvSearch'),f=(se.value.trim().split(/\s+/)[0]||'');
+  const rows=cvarRowsFor(CVAR_NAMES[f.toLowerCase()]||f);
+  for(const r of rows){
+    if(r.h){const d=document.createElement('div');d.className='amGrp';d.textContent=r.h;bd.appendChild(d);continue;}
+    const why=cvarWhyNot(r.need),box=!!r.num,on=box?String(CVARS[r.n])!==String(CVAR_DEFAULTS[r.n]):CVARS[r.n]===r.v;
+    const d=document.createElement('div');d.className='amItem'+(on?' on':'')+(why?' na':'');
+    d.innerHTML='<span class="arw">'+(box?'#':(on?'✓':''))+'</span><span class="lbl">'+cvEsc(r.n+(box?'':' '+r.v))+'</span>'+
+      (box?'<input type="number" min="'+r.num[0]+'" max="'+r.num[1]+'" step="'+(r.step||1)+'" data-cvar="'+r.n+'" value="'+cvEsc(CVARS[r.n])+'">':'')+
+      '<span class="cnt">'+cvEsc(r.d)+'</span>';
+    d.title=r.t+(why?'\n\n'+why:'')+(box?'':'\n\nClick to '+(on?'set it back to '+CVAR_DEFAULTS[r.n]:'set it')+'.');
+    d.onclick=ev=>{if(ev.target.tagName==='INPUT')return;ev.stopPropagation();cvarRowClick(r);};
+    if(box){const i=d.querySelector('input');i.onchange=()=>setCvar(r.n,i.value);}
+    bd.appendChild(d);
+  }
+  if(!rows.length&&!CVAR_NAMES[f.toLowerCase()]){const d=document.createElement('div');d.className='amNote';
+    d.textContent='No cvar in this list matches that. Enter tries it as a command.';bd.appendChild(d);}
+  const on=cvarsSet();
+  cvEl.querySelector('#cvHeadCnt').textContent=on.length?on.length+' set':'all at default';
+  cvarWhereRender();
+  bd.scrollTop=sv;
+}
+function toggleCvarMenu(){if(cvEl)cvarMenuClose();else cvarMenuOpen();}
+
+// ---- the model as an entity -------------------------------------------------------------
+// The page's model is one entity at the origin, turned by the placement angles (EROT). Game
+// units are the viewer's times load_scale (SS_SCALE), with Z up; the camera stands for the
+// player.
+function cvG2V(g){return[g[0]/SS_SCALE,g[2]/SS_SCALE,g[1]/SS_SCALE];}
+function cvEye(){const e=camEye();return[e[0]*SS_SCALE,e[2]*SS_SCALE,e[1]*SS_SCALE];}
+function cvRot(v){return EROT?erotV(v[0],v[1],v[2]):v;}
+// The entity's mins / maxs. A player sizes itself in code (Player: the pmove box, standing
+// MINS_X..MAXS_Z), and so does an AI (class Actor) as it starts (Actor::EventStart:
+// setSize(MINS, MAXS), the same standing box, after its spawn args and its .tik have set
+// theirs); anything else by its .tik's setsize (or the one being edited with the pencil),
+// else by its .tik's bounds (Entity::setModel). A .map's box isn't the game's.
+function gameSize(){
+  if(GAME.sent==='player'||GAME.sent==='actor')return{mins:[-15,-15,0],maxs:[15,15,94],src:GAME.sent};
+  let edit=false;try{edit=ssEdit;}catch(_e){}
+  if(DATA.setsize&&(GAME.ssrc==='tik'||edit))return{mins:DATA.setsize[0],maxs:DATA.setsize[1],src:edit?'edit':'tik'};
+  const tb=GAME.tikb;
+  if(tb)return{mins:tb.mins.map(v=>v*SS_SCALE),maxs:tb.maxs.map(v=>v*SS_SCALE),src:'tikb'};
+  return{mins:[0,0,0],maxs:[0,0,0],src:'none'};}
+// G_DebugRotatedBBox's corners (i&1: mins x, i&2: mins y, i&4: mins z), game units
+function cvCorners(mins,maxs,turn){const P=[];
+  for(let i=0;i<8;i++){const v=[(i&1)?mins[0]:maxs[0],(i&2)?mins[1]:maxs[1],(i&4)?mins[2]:maxs[2]];
+    P.push(turn?cvRot(v):v);}
+  return P;}
+// the box the server links it with (SV_LinkEntity): the turned box's bounds, 1 unit bigger
+function cvLinked(sz){const P=cvCorners(sz.mins,sz.maxs,true),mn=[1e30,1e30,1e30],mx=[-1e30,-1e30,-1e30];
+  for(const p of P)for(let k=0;k<3;k++){if(p[k]<mn[k])mn[k]=p[k];if(p[k]>mx[k])mx[k]=p[k];}
+  return{mins:mn.map(v=>v-1),maxs:mx.map(v=>v+1)};}
+// a 3D segment into the current path, cut at the near plane
+function cvSeg(a,b){let pa=project(a),pb=project(b);const N=0.5;
+  if(pa[2]<=N&&pb[2]<=N)return;
+  if(pa[2]<=N||pb[2]<=N){const t=(N-pa[2])/(pb[2]-pa[2]);
+    const m=project([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t]);
+    if(pa[2]<=N)pa=m;else pb=m;}
+  ctx.moveTo(pa[0],pa[1]);ctx.lineTo(pb[0],pb[1]);}
+// G_DebugRotatedBBox / G_DebugBBox: the top and bottom loops in the colour, the uprights blue
+function cvBox(Pg,col){const P=Pg.map(cvG2V);
+  ctx.strokeStyle=col;ctx.beginPath();
+  for(const L of [[0,1,3,2,0],[4,5,7,6,4]])for(let i=0;i<4;i++)cvSeg(P[L[i]],P[L[i+1]]);
+  ctx.stroke();ctx.strokeStyle='rgb(0,0,255)';ctx.beginPath();
+  for(let i=0;i<4;i++)cvSeg(P[i],P[i+4]);ctx.stroke();}
+const CV_YELLOW='rgb(255,255,0)',CV_MAGENTA='rgb(255,0,255)',CV_CYAN='rgb(0,255,255)';
+// G_DebugCircle: 24 segments in the plane of the player's view (its right and up), within
+// 1000 units of the player plus the radius. c: game units.
+function cvCircle(c,r,col,eye){
+  const dx=c[0]-eye[0],dy=c[1]-eye[1],dz=c[2]-eye[2];
+  if(dx*dx+dy*dy+dz*dz>(1000+r)*(1000+r))return false;
+  const b=camBasis(),f=b.f,rt=b.r,up=[f[1]*rt[2]-f[2]*rt[1],f[2]*rt[0]-f[0]*rt[2],f[0]*rt[1]-f[1]*rt[0]];
+  const cr=Math.cos(roll),sr=Math.sin(roll);
+  const R=[cr*rt[0]-sr*up[0],cr*rt[1]-sr*up[1],cr*rt[2]-sr*up[2]],U=[sr*rt[0]+cr*up[0],sr*rt[1]+cr*up[1],sr*rt[2]+cr*up[2]];
+  const C=cvG2V(c),rv=r/SS_SCALE;let prev=null;
+  ctx.strokeStyle=col;ctx.beginPath();
+  for(let i=0;i<=24;i++){const a=(i*15)*Math.PI/180,s=Math.sin(a)*rv,k=Math.cos(a)*rv;
+    const p=[C[0]+s*U[0]-k*R[0],C[1]+s*U[1]-k*R[1],C[2]+s*U[2]-k*R[2]];
+    if(prev)cvSeg(prev,p);prev=p;}
+  ctx.stroke();return true;}
+let BONE_IDX=null;
+function cvBone(name){
+  if(!BONE_IDX){BONE_IDX={};DATA.bones.forEach((b,i)=>{if(!(b.name in BONE_IDX))BONE_IDX[b.name]=i;
+    const l=b.name.toLowerCase();if(!(('\u0001'+l) in BONE_IDX))BONE_IDX['\u0001'+l]=i;});}
+  let i=BONE_IDX[name];if(i===undefined)i=BONE_IDX['\u0001'+name.toLowerCase()];
+  return i===undefined?-1:i;}
+// What sv_showbboxes drew this frame, for the list's foot.
+let CV_BB=null;
+// Entity::DrawBoundingBox for the model, after G_ClientDrawBoundingBoxes picked it: the
+// entities within 1000 units of the player (findradius: to the linked box's centre).
+function cvDrawBoxes(m){
+  CV_BB={m:m};
+  if(m>=100){CV_BB.why='monitor';return;}            // only the entity g_monitor / g_monitorNum names
+  const sz=gameSize(),L=cvLinked(sz),eye=cvEye();
+  const cen=[(L.mins[0]+L.maxs[0])/2,(L.mins[1]+L.maxs[1])/2,(L.mins[2]+L.maxs[2])/2];
+  const dd=Math.hypot(cen[0]-eye[0],cen[1]-eye[1],cen[2]-eye[2]);
+  CV_BB.sz=sz;CV_BB.dist=dd;
+  if(dd>1000){CV_BB.why='far';return;}
+  const solid=!DATA.dontdraw,drawn=!DATA.dontdraw,org=[0,0,0];
+  ctx.save();ctx.lineWidth=1.5;ctx.setLineDash([]);
+  switch(m){
+    case 1:if(solid)cvBox(cvCorners(sz.mins,sz.maxs,true),CV_YELLOW);break;
+    case 2:if(solid)cvBox(cvCorners(L.mins,L.maxs,false),CV_MAGENTA);break;
+    case 3:if(drawn)cvBox(cvCorners(sz.mins,sz.maxs,true),CV_YELLOW);break;
+    case 4:cvBox(cvCorners(sz.mins,sz.maxs,true),CV_YELLOW);break;
+    case 7:if(drawn&&GAME.tikb){const tb=GAME.tikb,mn=tb.mins.map(v=>v*SS_SCALE),mx=tb.maxs.map(v=>v*SS_SCALE);
+      if(mn.some(v=>v)||mx.some(v=>v))cvBox(cvCorners(mn,mx,true),CV_CYAN);}break;
+    case 8:if(drawn){cvBox(cvCorners(sz.mins,sz.maxs,true),CV_YELLOW);cvBox(cvCorners([-4,-4,-4],[4,4,4],false),CV_CYAN);}break;
+  }
+  if((m>=9&&m<=28)||(m>=-28&&m<=-9)){
+    const own=m<0,v=Math.abs(m);
+    // negative values are the player's own; a player model counts as the player and as any
+    // other player, so both signs show it
+    if(!solid)CV_BB.why='notsolid';
+    else if(own&&GAME.sent!=='player')CV_BB.why='notplayer';
+    else if(!IS_SENT){cvBox(cvCorners(sz.mins,sz.maxs,false),CV_YELLOW);CV_BB.why='box';}
+    else cvHitSpheres(v,eye);
+  }
+  ctx.restore();
+}
+// The hit spheres: each location's tag in the current pose (curWorld, already turned by the
+// placement angles), the offset along the tag's own axes (MatrixTransformVector), the circle
+// in blue (0,.5,1), then the secondary one off the same tag in purple (.5,0,1). A missing tag
+// ends the loop, as in game.
+function cvHitSpheres(v,eye){
+  let i=0,cap=19;
+  if(v>9){i=v-10;if(i>=18){CV_BB.n=0;return;}cap=i+1;}
+  const W=curWorld,S=SS_SCALE;let n=0;CV_BB.n=0;CV_BB.first=i;CV_BB.cap=cap;
+  for(;i<cap;i++){const H=HITLOC[i],b=cvBone(H[0]);
+    if(b<0||!W.R[b]){CV_BB.miss=H[0];CV_BB.missAt=i;break;}
+    const R=W.R[b],T=W.T[b];
+    const at=o=>[T[0]*S+R[0]*o[0]+R[1]*o[1]+R[2]*o[2],T[1]*S+R[3]*o[0]+R[4]*o[1]+R[5]*o[2],T[2]*S+R[6]*o[0]+R[7]*o[1]+R[8]*o[2]];
+    if(cvCircle(at(H[2]),H[1],'rgb(0,128,255)',eye))n++;
+    cvCircle(at(H[4]),H[3],'rgb(128,0,255)',eye);
+  }
+  CV_BB.n=n;
+}
+// ---- r_shownormals ----------------------------------------------------------------------
+// DrawNormals: from each vertex the game draws, 2 units along its normal, white, never hidden.
+// The normal is turned by its first weight's bone (SkelVertGetNormal); units are game units,
+// so 2 / load_scale in the viewer's.
+let NRM=null,CV_NN=0;
+function cvDrawNormals(){
+  CV_NN=0;
+  if(DATA.dontdraw||!DATA.normals)return;
+  if(!NRM){const s=atob(DATA.normals);NRM=new Int8Array(s.length);for(let i=0;i<s.length;i++)NRM[i]=(s.charCodeAt(i)<<24)>>24;}
+  const W=curWorld,V=DATA.verts,M=model,L=2/SS_SCALE/127;
+  ctx.save();ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.setLineDash([]);ctx.beginPath();
+  for(let si=0;si<HOST_SR.length;si++){if(hiddenSurf.has(si))continue;
+    const s=HOST_SR[si],rc=lodCount(si);
+    for(let v=s.vstart;v<s.vstart+rc;v++){const w=V[v];if(!w||!w.length)continue;
+      const R=W.R[w[0][0]];if(!R)continue;
+      const nx=NRM[v*3],ny=NRM[v*3+1],nz=NRM[v*3+2];
+      const gx=R[0]*nx+R[1]*ny+R[2]*nz,gy=R[3]*nx+R[4]*ny+R[5]*nz,gz=R[6]*nx+R[7]*ny+R[8]*nz;
+      const p=[M[v*3],M[v*3+1],M[v*3+2]];
+      cvSeg(p,[p[0]+gx*L,p[1]+gz*L,p[2]+gy*L]);CV_NN++;}}
+  ctx.stroke();ctx.restore();}
+// ---- vss_showsources: a ring on each volumetric smoke source ------------------------------
+function cvDrawVss(){
+  ctx.save();ctx.lineWidth=1;
+  for(const p of parts){if(!p.vol)continue;const sp=project([p.x,p.y,p.z]);if(sp[2]<=0.5)continue;
+    const a=p.v?Math.max(0.15,Math.min(1,p.v.d)):1;
+    ctx.strokeStyle='rgba(255,255,255,'+a.toFixed(3)+')';ctx.beginPath();
+    ctx.arc(sp[0],sp[1],Math.max(1,(p.sc||1)*sp[3]),0,6.2832);ctx.stroke();}
+  ctx.restore();}
+// Everything the cvars draw over the scene, after the particles. A cvar left on from another
+// page may draw before the rest of the page is set up, so a failure skips the frame's overlay.
+function drawGameCvars(){
+  try{
+    CV_BB=null;
+    if(CVARS.r_shownormals)cvDrawNormals();
+    if(CVARS.sv_showbboxes)cvDrawBoxes(CVARS.sv_showbboxes);
+    if(CVARS.vss_showsources&&HAS_VSS)cvDrawVss();
+    if(cvEl)cvarWhereRender();
+  }catch(e){}
+}
+
+// ---- level of detail (r_uselod) ---------------------------------------------------------
+// One control per skelmodel part (GetLODFile): minMetric (the measure at which the part is
+// whole), maxMetric (at which it is at its least) and five curve points from the .lod file or
+// the default curve, with TIKI_CalcLodConsts' line through each pair. GetLodCutoff turns the
+// model's size on screen into a collapse-index cutoff; RB_SkelMesh keeps a surface's vertices
+// down to the cutoff, folds the others into them and drops the triangles that fold flat.
+function lodMake(c){
+  const L={min:c.min,max:c.max,curve:c.curve.map(p=>[p[0],p[1]]),src:c.src,name:c.name,k:[]};
+  for(let i=0;i<4;i++){const a=L.curve[i],b=L.curve[i+1],common=(b[1]-a[1])/(b[0]-a[0]);
+    L.k.push({base:a[1]+(L.min/(L.min-L.max)-a[0])*common,scale:common/(L.max-L.min),cutoff:L.min+(L.max-L.min)*a[0]});}
+  return L;}
+const LODS=(DATA.lods||[]).map(c=>c?lodMake(c):null);
+const HAS_LOD=LODS.some(Boolean)&&DATA.surfRanges.some(s=>s.li);
+function lodCutoff(L,v){
+  const f=(L.min-L.max)*CVARS.r_lodcap+L.max;
+  let c=(v-L.max)*CVARS.r_lodscale+L.max;if(c>f)c=f;
+  let r;
+  if(c>=L.min||!CVARS.r_uselod)r=L.curve[0][1];
+  else if(c<=L.max)r=L.curve[4][1];
+  else if(c<=L.k[3].cutoff)r=c*L.k[3].scale+L.k[3].base;
+  else if(c<=L.k[2].cutoff)r=c*L.k[2].scale+L.k[2].base;
+  else if(c<=L.k[1].cutoff)r=c*L.k[1].scale+L.k[1].base;
+  else r=c*L.k[0].scale+L.k[0].base;
+  r=Math.trunc(r);return isFinite(r)?r:0;}
+function lodDec(b){const s=atob(b),n=s.length>>1,a=new Int16Array(n);
+  for(let i=0;i<n;i++)a[i]=((s.charCodeAt(2*i)|(s.charCodeAt(2*i+1)<<8))<<16)>>16;return a;}
+// RB_SkelMesh's render_count: none when the third vertex is already under the cutoff, else a
+// binary search from vertex 3 for the first one under it (tr_model.cpp:1093-1130).
+function lodRenderCount(s,cut){
+  const nv=s.vend-s.vstart;if(nv<=3)return nv;
+  if(!s._li){s._li=lodDec(s.li);s._lc=lodDec(s.lc);}
+  const ci=s._li;if(ci[2]<cut)return 0;
+  let low=3,mid=3,high=nv;
+  while(high>=low){mid=(low+high)>>1;
+    if(ci[mid]<cut){high=mid-1;if(ci[mid-1]>=cut)break;}
+    else{mid++;low=mid;if(high===mid||ci[mid]<cut)break;}}
+  return mid;}
+// The radius R_CalcLod measures the model by, in game units: 92 for a character, else the
+// skeletor's frame radius (at least 2) times load_scale: the playing animation's frame, or
+// the idle animation's first.
+function lodRadius(){
+  if(GAME.ischar)return 92;
+  let r=null;
+  if(curAnim>=0){const a=DATA.anims[curAnim];if(a&&a.rad&&a.rad.length)r=a.rad[Math.min(Math.max(curFrame,0),a.rad.length-1)];}
+  if(r==null)r=GAME.tikb?GAME.tikb.rad:2;
+  return Math.max(2,r)*SS_SCALE;}
+let LOD_ST=null;          // the level of detail drawn: {key, rc[], cuts[], val, dist, tris, full}
+let lodPin=0;             // the LOD slider's distance in game units (0: the camera's)
+function lodCount(si){const s=HOST_SR[si];const n=s.vend-s.vstart;
+  if(!LOD_ST||!LOD_ST.rc)return n;const r=LOD_ST.rc[si];return (r==null||r<0)?n:r;}
+// Run at the start of every draw: works out each surface's render count for where the model
+// is, and rebuilds the host's triangles only when one changed. With r_uselod 0 it puts DATA's
+// back and does nothing more.
+function lodTick(){
+  if(!HAS_LOD)return;
+  if(!CVARS.r_uselod){
+    if(HOST_T!==DATA.tris){HOST_T=DATA.tris;HOST_SR=DATA.surfRanges;attLive();}
+    LOD_ST=null;lodTxtSet('');return;}
+  const e=cvEye(),dist=lodPin>0?lodPin:Math.hypot(e[0],e[1],e[2]);
+  const val=Math.abs(lodRadius())*(100/Math.max(1,CVARS.cg_fov))/Math.max(1e-6,dist);
+  const cuts=LODS.map(L=>L?lodCutoff(L,val):0);
+  const SR=DATA.surfRanges,rc=new Array(SR.length);let key='';
+  for(let si=0;si<SR.length;si++){const s=SR[si];
+    if(s.li&&LODS[s.m]){rc[si]=lodRenderCount(s,cuts[s.m]);key+=rc[si]+',';}else{rc[si]=-1;key+='-,';}}
+  if(LOD_ST&&LOD_ST.key===key){LOD_ST.val=val;LOD_ST.dist=dist;LOD_ST.cuts=cuts;}
+  else{
+    const T=[],NS=[],TR=DATA.tris;
+    for(let si=0;si<SR.length;si++){const s=SR[si],st=T.length,nv=s.vend-s.vstart,n=rc[si];
+      if(n<0||n===nv){for(let t=s.start;t<s.end;t++)T.push(TR[t]);}
+      else if(n>0){
+        // collapse[i] = i under the render count, else collapse[collapse_map[i]]; the game stops
+        // at the first triangle that folds flat (TIKI_SortLOD put them last), which keeps the
+        // same triangles as dropping every flat one
+        const lc=s._lc,col=new Int32Array(nv);
+        for(let i=0;i<n;i++)col[i]=i;
+        for(let i=n;i<nv;i++){const j=lc[i];col[i]=(j>=0&&j<nv)?col[j]:0;}
+        for(let t=s.start;t<s.end;t++){const tr=TR[t],a=col[tr[0]-s.vstart],b=col[tr[1]-s.vstart],c=col[tr[2]-s.vstart];
+          if(a===b||b===c||c===a)continue;
+          T.push([s.vstart+a,s.vstart+b,s.vstart+c]);}
+      }
+      NS.push(Object.assign({},s,{start:st,end:T.length}));}
+    HOST_T=T;HOST_SR=NS;
+    LOD_ST={key:key,rc:rc,cuts:cuts,val:val,dist:dist,tris:T.length};
+    attLive();
+  }
+  lodTxtSet((lodPin>0?'at ':'camera ')+Math.round(dist)+'u · '+LOD_ST.tris+' / '+DATA.tris.length+' tris');
+}
+const lodRowEl=document.getElementById('lodRow'),lodIn=document.getElementById('lodDist'),lodTxtEl=document.getElementById('lodTxt');
+function lodTxtSet(s){if(lodTxtEl&&lodTxtEl.textContent!==s){lodTxtEl.textContent=s;lodTxtEl.classList.toggle('on',lodPin>0);}}
+// The slider: 0 follows the camera; the rest runs (log scale) from a little before the
+// nearest distance where a part starts losing detail to a little past the farthest where
+// every part is at its least, for the model at rest.
+function lodSpan(){
+  let rr=GAME.ischar?92:Math.max(2,GAME.tikb?GAME.tikb.rad:2)*SS_SCALE;rr*=100/Math.max(1,CVARS.cg_fov);
+  const sc=CVARS.r_lodscale>0?CVARS.r_lodscale:1;let lo=Infinity,hi=0;
+  for(const L of LODS){if(!L)continue;
+    const vn=L.max+(L.min-L.max)/sc,vf=L.max;
+    if(vn>0)lo=Math.min(lo,rr/vn);if(vf>0)hi=Math.max(hi,rr/vf);}
+  if(!isFinite(lo)||!(hi>lo)){lo=16;hi=4096;}
+  return[lo*0.8,hi*1.25];}
+function lodRowSync(){
+  if(!lodRowEl)return;
+  const show=HAS_LOD&&!!CVARS.r_uselod;
+  lodRowEl.style.display=show?'':'none';
+  if(!show){lodPin=0;if(lodIn)lodIn.value=0;}}
+if(lodIn)lodIn.oninput=()=>{const t=+lodIn.value;
+  if(t<=0)lodPin=0;else{const sp=lodSpan();lodPin=sp[0]*Math.pow(sp[1]/sp[0],t/1000);}
+  requestDraw();};
+
+// ---- the game's console lines --------------------------------------------------------------
+// cg_showemitters counts each emitter's spawn intervals in the continuous loop of stepParts
+// (UpdateEmitter's count); the animation's and init one-shots print nothing, as SpawnTempModel
+// doesn't. cg_showtempmodels counts the particles but the volumetric smoke, and vss_showsources
+// 2 those. Printed after each step of the effect clock, kept to the last lines.
+const EMIT_N=new Int32Array(Math.max(1,EM.length));
+const cvConEl=document.getElementById('cvCon');
+let CV_LINES=[],_cvConTxt='';
+const CV_MAXL=14;
+function cvConOn(){return EM.length>0&&!!(CVARS.cg_showemitters||CVARS.cg_showtempmodels||CVARS.vss_showsources===2);}
+function cvConSync(){if(!cvConEl)return;const on=cvConOn();cvConEl.style.display=on?'':'none';if(!on){CV_LINES=[];_cvConTxt='';cvConEl.textContent='';}}
+function cvConFrame(){
+  if(!cvConOn()){EMIT_N.fill(0);return;}
+  const out=CV_LINES;
+  if(CVARS.cg_showemitters){for(let i=0;i<EM.length;i++)if(EMIT_N[i])out.push('0:'+(EM[i].name||('emitter'+i))+':'+EMIT_N[i]+' tempmodels emitted');}
+  if(CVARS.cg_showtempmodels||CVARS.vss_showsources===2){let nt=0,nv=0;for(const p of parts){if(p.vol)nv++;else nt++;}
+    if(CVARS.cg_showtempmodels)out.push('TC:'+nt);
+    if(CVARS.vss_showsources===2)out.push('VSS Sources In Use: '+nv);}
+  EMIT_N.fill(0);
+  if(out.length>CV_MAXL)out.splice(0,out.length-CV_MAXL);
+  const s=out.join('\n');if(s!==_cvConTxt){_cvConTxt=s;cvConEl.textContent=s;}}
+
+// ---- the list's foot: what the cvars that are set found ------------------------------------
+function cvarWhereRender(){
+  if(!cvEl)return;
+  const el=cvEl.querySelector('#cvWhere');let h='';
+  if(cvMsg)h+='<div class="msg">'+cvEsc(cvMsg)+'</div>';
+  const m=CVARS.sv_showbboxes;
+  if(m){const B=CV_BB||{},sz=gameSize(),S=v=>v.map(cvNum).join(' ');
+    const src={player:'the box a player gives itself (standing, pmove)',actor:'the box an AI gives itself as it starts, a standing player\'s (Actor::EventStart), whatever its setsize',tik:'the .tik\'s setsize',edit:'the setsize being edited',
+      tikb:'no setsize in the .tik: '+(GAME.tikb&&GAME.tikb.idle?'its idle animation\'s bounds ('+(GAME.tikb.src||'')+')':'the bounds of '+((GAME.tikb&&GAME.tikb.src)||'its pose')+', standing in for an idle animation (a bare .skd has none)')+' x scale '+cvNum(SS_SCALE),
+      none:'no setsize and no idle animation: a point'}[sz.src];
+    h+='<div>box: ( '+S(sz.mins)+' ) ( '+S(sz.maxs)+' ), '+cvEsc(src)+'</div>';
+    if(sz.src==='actor'||sz.src==='player'){let edit=false;try{edit=ssEdit;}catch(_e){}
+      if(edit)h+='<div>the setsize being edited doesn\'t change it: '+(sz.src==='actor'?'the AI replaces its box as it starts':'a player sizes itself')+'</div>';}
+    if(B.why==='far')h+='<div class="warn">the camera is '+Math.round(B.dist)+' units from the model: the game draws these within 1000 units of the player</div>';
+    else if(B.why==='monitor')h+='<div class="warn">100 and up show only the entity g_monitor names</div>';
+    else if(B.why==='notsolid')h+='<div class="warn">the game counts this model not solid: nothing</div>';
+    else if(B.why==='notplayer')h+='<div class="warn">negative values are the player\'s: this isn\'t a player model</div>';
+    else if(B.why==='box')h+='<div>not a Sentient'+(DATA.classname?' (classname '+cvEsc(DATA.classname)+')':'')+': a plain yellow box, not turned, for the hit spheres</div>';
+    else if(B.n!=null){const nm=v=>v>=10?' ('+HIT_NAMES[v-10]+')':'';
+      if(Math.abs(m)>=28)h+='<div>28 shows nothing (the left foot only shows with 9)</div>';
+      else h+='<div>'+B.n+' hit location'+(B.n===1?'':'s')+' drawn'+nm(Math.abs(m))+'</div>';
+      if(B.miss)h+='<div class="warn">no tag '+cvEsc(B.miss)+': the game stops there</div>';}
+    if(Math.abs(m)>=1&&Math.abs(m)<=8&&m<0)h+='<div class="warn">negative values 1 to 8 draw nothing</div>';
+  }
+  if(CVARS.r_shownormals)h+='<div>r_shownormals: '+CV_NN+' normal'+(CV_NN===1?'':'s')+'</div>';
+  if(CVARS.r_uselod&&HAS_LOD&&LOD_ST){
+    h+='<div>level of detail: '+LOD_ST.tris+' of '+DATA.tris.length+' triangles at '+Math.round(LOD_ST.dist)+' units'+(lodPin>0?' (the LOD slider)':'')+
+      ', size on screen '+cvNum(LOD_ST.val)+(GAME.ischar?' (a character: radius 92)':'')+'</div>';
+    const per=LODS.map(()=>[0,0]);
+    DATA.surfRanges.forEach((s,si)=>{if(s.li&&LODS[s.m]){const o=per[s.m];o[1]+=s.end-s.start;o[0]+=HOST_SR[si]?HOST_SR[si].end-HOST_SR[si].start:0;}});
+    LODS.forEach((L,i)=>{if(!L)return;
+      h+='<div>'+cvEsc(L.name||('part '+i))+': '+per[i][0]+' / '+per[i][1]+' tris, cutoff '+LOD_ST.cuts[i]+' ('+cvEsc(L.src||'no .lod: the default curve')+')'+
+        (L.curve[0][1]>0?' <span class="warn">its curve starts at '+cvNum(L.curve[0][1])+', so the game never draws it whole</span>':'')+'</div>';});
+  }
+  if(cvConOn()&&!EM.length)h+='<div>'+cvEsc(cvarWhyNot('fx'))+'</div>';
+  if(el._h!==h){el._h=h;el.innerHTML=h;cvarMenuPlace();}
+}
+// boot: the values kept from before, the button, the console
+try{const s=JSON.parse(localStorage.getItem('mohaaViewerCvars')||'{}');
+  for(const k in s)if(k in CVAR_DEFAULTS){const v=cvarClamp(k,s[k]);if(v!=null)CVARS[k]=v;}}catch(_e){}
+{const b=document.getElementById('cvarBtn');if(b)b.onclick=ev=>{ev.stopPropagation();toggleCvarMenu();};}
+cvarCountRender();lodRowSync();cvConSync();
+let drag=false,dragBtn=0,lx=0,ly=0;
 // Coalesce redraws to one per animation frame, and draw the fast (flat) view while the
 // camera moves, returning to full textures shortly after it settles.
 let interacting=false,_drawReq=false,_settle=null;
 function requestDraw(){if(_drawReq)return;_drawReq=true;requestAnimationFrame(()=>{_drawReq=false;draw();});}
 function poke(){interacting=true;requestDraw();if(_settle)clearTimeout(_settle);
  _settle=setTimeout(()=>{interacting=false;draw();},150);}
-cv.addEventListener('mousedown',e=>{drag=true;lx=e.clientX;ly=e.clientY;});
-window.addEventListener('mouseup',()=>{if(drag){drag=false;interacting=false;if(_settle)clearTimeout(_settle);draw();}});
+function endDrag(){if(drag){drag=false;interacting=false;if(_settle)clearTimeout(_settle);draw();}}
+cv.addEventListener('mousedown',e=>{drag=true;dragBtn=e.button;lx=e.clientX;ly=e.clientY;});
+window.addEventListener('mouseup',endDrag);
 window.addEventListener('mousemove',e=>{if(!drag)return;
+ // The button was let go outside the page (over the launcher, say), where the page never
+ // heard it: the drag is over.
+ const bm=[1,4,2,8,16][dragBtn];
+ if(bm&&!(e.buttons&bm)){endDrag();return;}
  const mdx=e.clientX-lx, mdy=e.clientY-ly;
  // Rotate the drag by the camera roll so screen up/down always maps to look up/down.
  const cr=Math.cos(roll),sr=Math.sin(roll), rdx=cr*mdx-sr*mdy, rdy=sr*mdx+cr*mdy;
@@ -5006,19 +5734,46 @@ let panX=0,panY=0;
 const FLY_KEYS=['w','a','s','d','q','e','c',' ',
                 'W','A','S','D','Q','E','C',
                 'ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
+// A held key by its lower-case letter, so a key let go with Shift down (keyup "W" for the
+// "w" pressed before Shift) still lets it go.
+function heldKey(e){return e.key.length===1?e.key.toLowerCase():e.key;}
 window.addEventListener('keydown',e=>{
  if(e.key==='r'||e.key==='R'){yaw=0.7;pitch=-0.4;roll=0;dist=rad*2.6;panX=0;panY=0;cx=cx0;cy=cy0;cz=cz0;
    eye=null;if(camMode==='free')enterFreeLook();selectedIdx=-1;if(typeof restyle==='function')restyle();draw();return;}
- keysDown.add(e.key);
+ // An auto-repeat of a key the camera has let go of doesn't take it up again, only a new
+ // press does: once stopCamera has cleared the keys (the launcher took the mouse or the
+ // keyboard), repeats still on their way from the key held then would start the camera
+ // again, and its release goes to the launcher.
+ const hk=heldKey(e);
+ if(!e.repeat||keysDown.has(hk))keysDown.add(hk);
  if(view.wasd&&FLY_KEYS.includes(e.key))e.preventDefault();
 });
-window.addEventListener('keyup',e=>keysDown.delete(e.key));
-window.addEventListener('blur',()=>keysDown.clear());
+window.addEventListener('keyup',e=>{keysDown.delete(heldKey(e));keysDown.delete(e.key);});
+// Stop every movement: the keys held and a drag. X does it by hand. It also happens when the
+// page loses the keyboard or the window, since a key or button let go elsewhere never
+// reaches the page (in the launcher's pane a click on the launcher itself also calls this,
+// App._stop_view_camera), and each frame while the page doesn't have the focus (flyLoop).
+function stopCamera(){keysDown.clear();endDrag();requestDraw();}
+// Let go of the held keys only; a drag goes on. The launcher calls this when the keyboard
+// went elsewhere: a key pressed or let go in the launcher, or the last camera key let go
+// while the page wasn't listening (App._watch_camera_stop).
+function releaseCameraKeys(){if(keysDown.size){keysDown.clear();requestDraw();}}
+// A short message in the accent colour beside "H hotkeys" for a moment, as the Map Viewer's.
+let _flashT=null;
+function flash(msg){const h=document.getElementById('hintFlash');if(!h)return;h.textContent=msg;
+ clearTimeout(_flashT);_flashT=setTimeout(()=>{h.textContent='';},1600);}
+window.addEventListener('blur',stopCamera);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopCamera();});
+// A right-click that opens the browser's own menu: the menu takes the keyboard while it is
+// open, so a key let go then never reaches the page and the camera flew on. It stops as
+// the menu opens.
+window.addEventListener('contextmenu',e=>{if(!e.defaultPrevented)stopCamera();});
 // MOHRadiant-style fly camera: W/S forward-back, A/D strafe, Q/E roll (tilt),
 // Space/C rise-lower. Runs while keys are held; renders fast (flat) during motion.
 let _wasFlying=false;
 (function flyLoop(){
  requestAnimationFrame(flyLoop);
+ if(keysDown.size&&!document.hasFocus())stopCamera();
  if(view.wasd&&keysDown.size){
   if(!eye)enterFreeLook();
   const mv=rad*0.02, tn=0.03, k=s=>keysDown.has(s), b=camBasis();
@@ -5403,16 +6158,30 @@ const ATT_SR_KEYS=['additive','autosprite','autosprite2','lightglow','twosided',
 function attRebuild(){
   // Rebuild the live arrays: the host geometry, then every ready attachment appended as extra
   // surfaces with indices shifted past the host's vertices.
+  attLive();
+  // ...an attachment may bring the page its first texture, on a host that resolved none.
+  try{texSyncBtn();}catch(e){}
+  applyFrame();                                  // re-skin so `model` includes the attachments
+  if(typeof GLR!=='undefined'&&GLR&&GLR.rebuildSurfaces)GLR.rebuildSurfaces();
+  try{attPanelRender();}catch(e){}
+  try{draw();}catch(e){}}
+// The live arrays alone: the host's geometry as drawn (HOST_T / HOST_SR), then every ready
+// attachment appended as extra surfaces with indices shifted past the host's vertices. Also
+// run by the level of detail, which changes only the host's triangles.
+function attLive(){
   const ready=ATT.filter(a=>a.ready&&ATTGEO[a.key]);
   if(!ready.length){
-    LT=DATA.tris;LUV=DATA.uvs;LSR=DATA.surfRanges;LTEX=surfTex;ATT_VN=0;
+    LT=HOST_T;LUV=DATA.uvs;LSR=HOST_SR;LTEX=surfTex;ATT_VN=0;
   }else{
-    const T=DATA.tris.slice(),UV=DATA.uvs?DATA.uvs.slice():[],SR=DATA.surfRanges.slice(),TX=surfTex.slice();
+    const T=HOST_T.slice(),UV=DATA.uvs?DATA.uvs.slice():[],SR=HOST_SR.slice(),TX=surfTex.slice();
     let vbase=DATA.verts.length;
     for(const a of ready){
       const g=ATTGEO[a.key];
       a.vbase=vbase;a.vn=g.v.length;
-      for(const s of (g.sr||[])){
+      // Texture records are made once per attachment surface: the level of detail rebuilds
+      // these arrays as the camera moves, and a new record would decode its images again.
+      const gtx=g._tx||(g._tx=[]);
+      for(let gi=0;gi<(g.sr||[]).length;gi++){const s=g.sr[gi];
         const st=T.length;
         // Vertex range for the per-surface passes (centre/radius, distFade, autosprite quads):
         // the span of the surface's own indices, as build_payload gives host surfaces.
@@ -5425,7 +6194,8 @@ function attRebuild(){
         // Forward the sidecar's shader hints; this is the only path an attachment's surfaces take
         // into LSR/LTEX.
         for(const k of ATT_SR_KEYS)if(s[k])rec[k]=s[k];
-        SR.push(rec);TX.push(mkSurfTex(rec));
+        if(gtx[gi]===undefined)gtx[gi]=mkSurfTex(rec);
+        SR.push(rec);TX.push(gtx[gi]);
       }
       for(const uv of (g.uv||[]))UV.push(uv[0],uv[1]);
       vbase+=g.v.length;
@@ -5433,13 +6203,7 @@ function attRebuild(){
     LT=T;LUV=UV;LSR=SR;LTEX=TX;ATT_VN=vbase-DATA.verts.length;
     // An attachment may bring the page its first effect surface...
     try{if(liveEffectSurf())startEffLoop();}catch(e){}
-  }
-  // ...or its first texture, on a host that resolved none.
-  try{texSyncBtn();}catch(e){}
-  applyFrame();                                  // re-skin so `model` includes the attachments
-  if(typeof GLR!=='undefined'&&GLR&&GLR.rebuildSurfaces)GLR.rebuildSurfaces();
-  try{attPanelRender();}catch(e){}
-  try{draw();}catch(e){}}
+  }}
 
 // world = R_tag * (M * scale * local + offset) + T_tag. An attachment is rigid (the whole
 // entity follows one tag matrix), and the final [X,Z,Y] swap matches skin() so attachment
@@ -5867,8 +6631,10 @@ try{surfPanelInit();}catch(e){}
 // Bones and tags: the engine attaches to any named node, and scripts use both ("Bip01 L
 // Finger11" for the cigarette, tag_weapon_right for a rifle). A human rig has 85 nodes, so
 // this uses the searchable popup instead of a <select>. Unlike the surfaces list there's
-// no on/off state, and picking a row closes it (one pick creates one attachment slot).
+// no on/off state, and picking a row closes it. Opened from the attach button, a pick
+// creates an attachment slot; opened from a slot's bone button, it moves that slot.
 let attBoneEl=null,attBoneBack=null,attBoneFilter='';
+let attBoneFor=null;    // the slot being moved to another node; null = the pick adds a slot
 // Which nodes are labelled as tags, using the same test as the Display panel's Tags/Bones
 // views (kind 'tag' or an origin marker). Every node is attachable either way.
 const ATT_ISTAG=(function(){const m=[];
@@ -5878,7 +6644,7 @@ const ATT_ISTAG=(function(){const m=[];
 function attBoneClose(){
   if(attBoneEl){attBoneEl.remove();attBoneEl=null;}
   if(attBoneBack){attBoneBack.remove();attBoneBack=null;}
-  attBoneFilter='';
+  attBoneFilter='';attBoneFor=null;
   document.removeEventListener('keydown',attBoneKey,true);}
 
 function attBoneHits(){
@@ -5890,15 +6656,29 @@ function attBoneHits(){
 // the global hotkeys.
 function attBoneKey(ev){
   if(ev.key==='Escape'){attBoneClose();ev.preventDefault();ev.stopPropagation();return;}
-  // Enter takes the top visible row, so "weap" + Enter attaches to tag_weapon_left.
-  if(ev.key==='Enter'){const h=attBoneHits();if(h.length)attBonePick(h[0]);
+  // Enter takes the top visible row, so "weap" + Enter attaches to tag_weapon_left. When
+  // moving a slot with nothing typed, the highlighted row is its own node, so Enter keeps it.
+  if(ev.key==='Enter'){
+    if(attBoneFor&&!attBoneFilter)attBoneClose();
+    else{const h=attBoneHits();if(h.length)attBonePick(h[0]);}
     ev.preventDefault();ev.stopPropagation();return;}
   ev.stopPropagation();}
+
+// A slot's control by class, found through the slot's current index. The rows are rebuilt
+// whenever an attachment is added, removed or finishes building, which can happen while a
+// list is open or a copy is in flight.
+function attSlotEl(a,cls){
+  const i=ATT.indexOf(a);
+  return i<0?null:document.querySelector('#attList .'+cls+'[data-slot="'+i+'"]');}
+// The control the list opens beside: the attach button, or the bone button of the slot
+// being moved (looked up on every placement, see attSlotEl).
+function attBoneAnchor(){
+  return attBoneFor?attSlotEl(attBoneFor,'attTag'):document.getElementById('attBoneBtn');}
 
 function attBonePlace(){
   // Same placement as the other menus: to the left of the button, tops aligned, falling back
   // to the right if there's no room.
-  const btn=document.getElementById('attBoneBtn');
+  const btn=attBoneAnchor();
   if(!attBoneEl||!btn)return;
   const r=btn.getBoundingClientRect(),vw=window.innerWidth,vh=window.innerHeight;
   let left=r.left-AM_GAP-AM_W;
@@ -5908,14 +6688,22 @@ function attBonePlace(){
   mnFit(attBoneEl,r,vh);}
 
 function attBonePick(i){
+  const mv=attBoneFor;
   attBoneClose();                       // close first; the ceiling note below is a message
+  if(mv){
+    // Moving keeps the model, scale, offset and angles: only the node changes. The slot can
+    // be gone if its build failed while the list was open.
+    if(ATT.indexOf(mv)<0||mv.tag===i)return;
+    mv.tag=i;attRebuild();return;}
   if(ATT.length>=ATT_MAX){amNote('attachmodels: the engine allows '+ATT_MAX+' at once',true);return;}
   ATT.push({tag:i,key:null,path:'',scale:1,off:[0,0,0],ang:[0,0,0],bang:[0,0,0],ready:false});
   attPanelRender();}
 
-function attBoneOpen(){
+// mv: the slot to move, or nothing to add a slot.
+function attBoneOpen(mv){
   attBoneClose();
   if(!(DATA.bones||[]).length)return;
+  attBoneFor=mv||null;
   // Full-window backdrop: a click anywhere else closes the list, including a click on its
   // button (which is how it toggles).
   attBoneBack=document.createElement('div');
@@ -5941,7 +6729,11 @@ function attBoneOpen(){
   attBoneBack.appendChild(attBoneEl);
   attBonePlace();
   document.addEventListener('keydown',attBoneKey,true);
-  attBoneRender();se.focus();}
+  attBoneRender();
+  // Moving a slot: open with its current node in the middle of the list.
+  const cur=attBoneFor&&bd.querySelector('.amItem.sel');
+  if(cur)bd.scrollTop=cur.offsetTop-bd.offsetTop-(bd.clientHeight-cur.offsetHeight)/2;
+  se.focus();}
 
 function attBoneRender(){
   const bd=document.getElementById('attBoneBody');if(!bd)return;
@@ -5957,7 +6749,8 @@ function attBoneRender(){
       c.textContent='tag';
       c.title='a tag node - the kind MOHAA\u2019s own attachmodel calls name';
       d.appendChild(c);}
-    d.title='attach a model to '+DATA.bones[i].name;
+    if(attBoneFor&&attBoneFor.tag===i)d.classList.add('sel');
+    d.title=(attBoneFor?'move the attachment to ':'attach a model to ')+DATA.bones[i].name;
     d.onclick=(ev)=>{ev.stopPropagation();attBonePick(i);};
     bd.appendChild(d);}
   if(!hits.length){const d=document.createElement('div');d.className='amNote';
@@ -5982,17 +6775,22 @@ function attPanelRender(){
     // Two lines per attachment: bone, model picker, scale, offset and angles don't fit one
     // 300px row.
     const box=document.createElement('div');box.className='attBox';
-    const r1=document.createElement('div');r1.className='row co';
+    const r1=document.createElement('div');r1.className='row co attTop';
     const rm=document.createElement('button');rm.textContent='\u00d7';
     rm.title='Remove this attachment';rm.style.cssText='min-width:20px;padding:0 5px';
     rm.onclick=()=>{ATT.splice(idx,1);attBrowseClose();attRebuild();};
     r1.appendChild(rm);
-    const nm=document.createElement('span');
-    nm.textContent=' '+(DATA.bones[a.tag]?DATA.bones[a.tag].name:'?')+' ';
-    nm.style.cssText='min-width:104px;max-width:104px;display:inline-block;overflow:hidden;'
-                    +'text-overflow:ellipsis;white-space:nowrap;vertical-align:middle';
-    nm.title=(DATA.bones[a.tag]?DATA.bones[a.tag].name:'');
-    r1.appendChild(nm);
+    // The bone is a picker like the model beside it: the tags & bones list, opened for this
+    // slot, moves the attachment and keeps its model, scale, offset and angles.
+    const bn=DATA.bones[a.tag]?DATA.bones[a.tag].name:'?';
+    const bb=document.createElement('button');bb.className='attMdl attTag';
+    bb.dataset.slot=String(idx);
+    const bl=document.createElement('span');bl.className='albl';bl.textContent=bn;
+    const bc=document.createElement('span');bc.className='acar';bc.textContent='\u25c4';
+    bb.appendChild(bl);bb.appendChild(bc);
+    bb.title=bn+' \u2013 click to move this attachment to another tag or bone';
+    bb.onclick=(e)=>{e.stopPropagation();attBoneOpen(a);};
+    r1.appendChild(bb);
     const mb=document.createElement('button');mb.className='attMdl';
     const ml=document.createElement('span');ml.className='albl';
     ml.textContent=a.path?a.path.replace(/^models\//,''):'choose model';
@@ -6003,17 +6801,21 @@ function attPanelRender(){
     // click closes it, as with the animation menu.
     mb.onclick=(e)=>{e.stopPropagation();attBrowseOpen(idx,mb);};
     r1.appendChild(mb);
-    if(a.path&&!a.ready){const w=document.createElement('span');w.className='dim';
-      w.textContent=' building\u2026';r1.appendChild(w);}
     box.appendChild(r1);
+    // On a line of its own, under the model picker: the first line doesn't wrap.
+    if(a.path&&!a.ready){const w=document.createElement('div');w.className='row co';
+      w.style.cssText='padding-left:164px';w.textContent='building\u2026';box.appendChild(w);}
 
     const r2=document.createElement('div');r2.className='row co';
     r2.style.cssText='padding-left:24px';
+    // A typed value commits on change (Enter, or focus leaving the box) and only re-poses the
+    // model: rebuilding these rows would replace the button being clicked between its
+    // mousedown and mouseup, losing that click (type an offset, then click copy).
     const num=(val,w,title,set)=>{
       const e=document.createElement('input');e.type='text';e.value=String(val);
       e.style.cssText='width:'+w+'px';e.title=title;
       e.onchange=()=>{const v=parseFloat(e.value);set(isFinite(v)?v:0);
-        e.value=String(set.get());attRebuild();};
+        e.value=String(set.get());applyFrame();};
       return e;};
     // Each label and its brackets form one nowrap group, so wrapping only happens between
     // groups and never strands a ")".
@@ -6041,8 +6843,76 @@ function attPanelRender(){
         Object.assign((v)=>{a.ang=a.ang||[0,0,0];a.ang[k]=v;},
                       {get:()=>(a.ang||[0,0,0])[k]})));
     g3.appendChild(document.createTextNode(')'));
+    // Copy: the slot as the script line that makes it in game (attScriptLine). The tooltip
+    // shows that line, rebuilt on hover since the boxes change without redrawing this row.
+    const cp=document.createElement('button');cp.className='attCopy';cp.innerHTML=ATT_ICON_COPY;
+    cp.dataset.slot=String(idx);
+    if(a.path)cp.title=attCopyTip(a);
+    else{cp.disabled=true;cp.title='Choose a model to copy its attachmodel line';}
+    cp.onmouseenter=()=>{if(a.path&&!cp.classList.contains('on'))cp.title=attCopyTip(a);};
+    cp.onclick=(e)=>{e.stopPropagation();attCopyLine(a,cp);};
+    g3.appendChild(cp);
     box.appendChild(r2);
     list.appendChild(box);});}
+
+// One slot as a script line. attachmodel's arguments are modelname tagname scale targetname
+// detach_at_death removetime fadeintime fadeoutdelay fadetime offset (EV_AttachModel,
+// entity.cpp:379-395; Entity::AttachModelEvent, :4294-4386). The middle is fixed: a
+// placeholder targetname to rename, detach at death (1), and -1 (off) for the remove and
+// fade timers. The offset boxes are already in world units (ATT_OFS). attachmodel has no
+// angles argument, so the angle boxes aren't part of the line.
+function attScriptLine(a){
+  // Plain decimals: no exponent form, no float noise.
+  const n=v=>String(Number((+v||0).toFixed(6)));
+  // CanonicalTikiName (g_utils.cpp:1524-1535) puts models/ in front of any path without it,
+  // so writing it out gives the path the game resolves.
+  let p=String(a.path||'').replace(/\\/g,'/');
+  if(p&&p.slice(0,7).toLowerCase()!=='models/')p='models/'+p;
+  const bone=DATA.bones[a.tag]?DATA.bones[a.tag].name:'';
+  const o=a.off||[0,0,0];
+  return 'local.entity attachmodel '+p+' "'+bone+'" '+n(a.scale||1)
+        +' "entity_targetname" 1 -1 -1 -1 -1 ( '+n(o[0])+' '+n(o[1])+' '+n(o[2])+' )';}
+function attCopyTip(a){
+  return 'Copy as a script line:\n'+attScriptLine(a)
+        +'\n(attachmodel has no angles argument, so the angles are not included)';}
+
+const ATT_ICON_COPY='<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" '
+  +'stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8.5" '
+  +'height="8.5" rx="1.5"/><path d="M10.5 3.5V3A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 '
+  +'10.5h.5"/></svg>';
+const ATT_ICON_DONE='<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" '
+  +'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+  +'<path d="M3 8.5l3.2 3.2L13 4.8"/></svg>';
+
+// The line goes on the clipboard with the Clipboard API (a file:// page is a secure context,
+// and this runs from a click), falling back to a copy command whose event carries the text.
+// If neither works the line is shown in the note under the animation list to copy by hand.
+function attCopyLine(a,btn){
+  const line=attScriptLine(a);
+  const done=ok=>{
+    if(!ok){amNote('could not reach the clipboard \u2013 copy this line by hand: '+line,true);return;}
+    // A tick and a "Copied" tooltip for a moment, on the slot's current button.
+    const b=(btn&&btn.isConnected)?btn:attSlotEl(a,'attCopy');
+    if(!b)return;
+    clearTimeout(b._tick);
+    b.classList.add('on');b.innerHTML=ATT_ICON_DONE;b.title='Copied:\n'+line;
+    b._tick=setTimeout(()=>{b.classList.remove('on');b.innerHTML=ATT_ICON_COPY;
+      if(a.path)b.title=attCopyTip(a);},1200);};
+  const viaCommand=()=>{
+    let ok=false;
+    // Capture phase, and stopped there, so the page's own copy handler (selected editors ->
+    // one line) doesn't run for this copy.
+    const h=ev=>{if(!ev.clipboardData)return;ev.clipboardData.setData('text/plain',line);
+      ev.preventDefault();ev.stopImmediatePropagation();ok=true;};
+    document.addEventListener('copy',h,true);
+    try{document.execCommand('copy');}catch(e){}
+    document.removeEventListener('copy',h,true);
+    done(ok);};
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(line).then(()=>done(true),viaCommand);return;}
+  }catch(e){}
+  viaCommand();}
 
 // Ask the launcher to resolve a model (cached by path on its side, so repeats are free).
 function attRequest(path){
@@ -6491,7 +7361,7 @@ function effLoop(now){
       if(_initfxLast<-1e8)fireInitFx();
       else if(loopAnim&&(effT-_initfxLast)>=INITFX.period)fireInitFx();
     }
-    if(EM.length)stepParts(dt);
+    if(EM.length){stepParts(dt);cvConFrame();}   // cvConFrame: the game's console lines (cvars)
     if(hasFlap){applyFlap();if(GLR)GLR.markDirty();}   // wind re-deforms every frame
   }
   if(!interacting)requestDraw();  // still redraw so the frozen scene follows camera orbit
@@ -6669,7 +7539,7 @@ function toggleHelp(force){const show=(force!==undefined)?force:(helpOv.style.di
                    {onClose:()=>toggleHelp(false)});}
     catch(e){document.getElementById('helpCard').textContent='The keyboard shortcuts could not be shown: '+e;}}
   helpOv.style.display=show?'flex':'none';
-  if(KX){if(show){keysDown.clear();KX.show(camMode==='free'?'free':'lock');}else KX.hide();}}
+  if(KX){if(show){stopCamera();KX.show(camMode==='free'?'free':'lock');}else KX.hide();}}
 function closeViewer(){
   // Embedded (#embed): the WebView2 host handles 'mohaa-close' and returns to its start page
   // (App._close_viewer). In a browser tab, just close it.
@@ -6686,6 +7556,8 @@ window.addEventListener('keydown',e=>{
  const tg=e.target&&e.target.tagName;
  if(tg==='SELECT'||tg==='INPUT'||tg==='TEXTAREA')return;
  if(e.ctrlKey||e.metaKey||e.altKey)return;
+ // ` opens the game cvars list, as the game's console key
+ if(e.code==='Backquote'){toggleCvarMenu();e.preventDefault();return;}
  switch(e.key){
   case '1':document.getElementById('bTex').click();break;
   case '2':document.getElementById('bMesh').click();break;
@@ -6699,6 +7571,7 @@ window.addEventListener('keydown',e=>{
   case 'p':case 'P':playBtn.click();break;
   case 'f':case 'F':setPaused(!paused);break;
   case 'v':case 'V':(camMode==='free'?document.getElementById('bLock'):document.getElementById('bFree')).click();break;
+  case 'x':case 'X':stopCamera();flash('Camera stopped');break;
   case 'l':case 'L':themeBtn.click();break;
   case '[':stepFrame(-1);e.preventDefault();break;
   case ']':stepFrame(1);e.preventDefault();break;
@@ -7130,6 +8003,8 @@ def main(argv):
     mclassname=None          # tik init/server `classname` (case-sensitive), for the info panel
     extra_skds=[]            # attached part models (head/hands/...) for .tik assembly
     tikanims=[]              # the tik's animations{} aliases (name -> .skc + frame commands)
+    setsize_src=None         # "tik" (its own setsize) or "map" (a sibling .map's clip box)
+    _tt=""                   # the opened .tik's text ($include'd files spliced in by the launcher)
     if skd_path.lower().endswith(".tik"):
         # emitter / effect tik: parse its particle emitters and resolve its skelmodel
         # (placed next to the tik by the launcher) so we get a still frame to anchor them.
@@ -7159,6 +8034,7 @@ def main(argv):
                 _per=max(_per,_s["delay"]+float(prm.get("life") or 1.0))
             initfx={"spawn":_sp,"period":round(max(1.0,_per),3)}
         setsize=parse_tik_setsize(_tt)   # bounding box for the info panel (if the tik declares one)
+        if setsize: setsize_src="tik"
         mscale=parse_tik_scale(_tt)      # load_scale, to align the setsize wireframe with the model
         mclassname=parse_tik_classname(_tt)   # classname for the info panel (if the tik declares one)
         # Hidden `classname animate` fx tiks (rendereffects +dontdraw: firefill, explosion_mine,
@@ -7216,21 +8092,33 @@ def main(argv):
             if os.path.exists(_mp):
                 _mb=parse_map_bounds(_mp)
                 if _mb:
-                    setsize=_mb
+                    setsize=_mb; setsize_src="map"
                     print(f"- setsize from {os.path.basename(_mp)}: {_mb[0]} .. {_mb[1]} (world units)")
                     break
     print(f"<><><> {os.path.basename(skd_path)} <><><>")
     skd=parse_skd(skd_path)
+    # Each skelmodel's level-of-detail control (GetLODFile): its .lod beside it, else the
+    # default curve; None when the part is always drawn whole.
+    def _lodctl(_sk,_p):
+        _sk["meshName"]=os.path.basename(_p)
+        try: _sk["lodctl"]=skd_lod_control(_sk,_p)
+        except Exception: _sk["lodctl"]=None
+        return _sk
+    _lodctl(skd,skd_path)
     if extra_skds:
         merged=[skd]
         for ep in extra_skds:
-            try: merged.append(parse_skd(ep))
+            try: merged.append(_lodctl(parse_skd(ep),ep))
             except Exception as e: print(f"- could not load part {os.path.basename(ep)}: {e}")
         if len(merged)>1:
             skd=merge_skds(merged)
             print(f"- assembled {len(merged)} parts (body + {len(merged)-1} attached) "
                   f"-> {skd['numBone']} bones, {len(skd['surfaces'])} surfaces")
     print(f"- {skd['numBone']} bones, {len(skd['surfaces'])} surfaces")
+    _lods=skd.get("lods") if skd.get("lods") is not None else [skd.get("lodctl")]
+    _mn=skd.get("meshNames") or [skd.get("meshName")]
+    _ld=[(_mn[i] if i<len(_mn) else "?")+(" ("+(c["src"] or "default curve")+")") for i,c in enumerate(_lods) if c]
+    if _ld: print("- level of detail: "+", ".join(_ld))
 
     # ---- ON-DEMAND ANIMATION BUILD ------------------------------------------
     # `--animbuild=<id>[,<id>...] --animsrc=<dir> --animout=<dir>`: solve just those
@@ -7864,10 +8752,63 @@ def main(argv):
                      f"(struck through in the surfaces list)")
         else:  print(f"- tik surface nodraw: {_pat} declared, but no loaded surface matches "
                      f"(that part model is not among the assembled skelmodels)")
+    # ---- the model as the game sees it: game cvars in the page -------------------------
+    #   ischar  `ischaracter` in setup (tiki_parse.cpp:1083-1084): the renderer measures the
+    #           level of detail by a fixed 92-unit radius (R_AddSkelSurfaces).
+    #   sent    a Sentient (classname Actor..., or a player model) gets the hit spheres of
+    #           sv_showbboxes 9-27; anything else gets a plain box (Entity::DrawBoundingBox).
+    #           A player model, and an Actor as it starts (Actor::EventStart), size
+    #           themselves to a standing player's box, whatever their setsize.
+    #   ssrc    where DATA.setsize came from: the game sizes an entity by the .tik's setsize,
+    #           never by a .map; without one, Entity::setModel uses TIKI_CalculateBounds.
+    #   tikb    those TIKI bounds: the union of the frame bounds of the .tik's `idle`
+    #           animation, the last one loaded winning (TIKI_InitTiki, tiki_files.cpp:1005-1011),
+    #           unscaled, with its first frame's radius (the level of detail's at rest).
+    game={}
+    if _tt and re.search(r'(?im)^\s*ischaracter\b',_strip_tik_comments(_tt)): game["ischar"]=1
+    _cn=(mclassname or "").lower()
+    if "/models/player/" in os.path.abspath(args[0]).replace("\\","/").lower(): game["sent"]="player"
+    elif _cn in ("actor","player","sentient","simpleactor"): game["sent"]=_cn
+    if setsize_src: game["ssrc"]=setsize_src
+    _idd=None; _isrc=None; _iidle=False
+    try:
+        if args[0].lower().endswith(".tik"):
+            if _hascat:
+                _ie=None
+                for _e in animcat["anims"]:
+                    if (_e.get("n") or "").lower()=="idle": _ie=_e
+                if _ie:
+                    _ip=os.path.join(folder,"_anims",(_ie.get("id") or "")+".skc")
+                    if os.path.isfile(_ip):
+                        _idd=parse_skc(_ip); _isrc=os.path.basename((_ie.get("s") or "").replace("\\","/")); _iidle=True
+            elif tikanims:
+                _ta=None
+                for _t in tikanims:
+                    if (_t.get("name") or "").lower()=="idle": _ta=_t
+                if _ta:
+                    _bn=os.path.basename((_ta.get("file") or "").replace("\\","/")).lower()
+                    _hit=next((f for f in skc_files if os.path.basename(f).lower()==_bn),None)
+                    if _hit is None and animroot and os.path.isdir(animroot):
+                        _hit=next((f for f in glob.glob(os.path.join(glob.escape(animroot),"**","*.skc"),recursive=True)
+                                   if os.path.basename(f).lower()==_bn),None)
+                    if _hit: _idd=parse_skc(_hit); _isrc=os.path.basename(_hit); _iidle=True
+        elif base_pick is not None:
+            # A bare .skd has no .tik and so no idle: the pose it opened in stands in.
+            _idd=base_pick[1]; _isrc=os.path.basename(base_pick[0])
+    except Exception as _e:
+        print(f"  (idle bounds unavailable: {_e})"); _idd=None
+    if _idd and _idd.get("fbounds"):
+        _fb=_idd["fbounds"]; _fr=_idd.get("frad") or [0.0]
+        game["tikb"]={"mins":[round(min(f[k] for f in _fb),3) for k in range(3)],
+                      "maxs":[round(max(f[3+k] for f in _fb),3) for k in range(3)],
+                      "rad":round(max(2.0,_fr[0]),3),"src":_isrc,"idle":_iidle}
+        print(f"- .tik bounds ({'idle: ' if _iidle else 'pose: '}{_isrc}): "
+              f"{game['tikb']['mins']} .. {game['tikb']['maxs']} x scale {mscale}")
     write_obj(obj_path, skd["bones"], skd["surfaces"], wR, wT, tagset)
     payload=build_payload(skd, anims_data, base_channels, referenced, convention, wT, textures=textures, emitters=emitters, dontdraw=dontdraw, setsize=setsize, scale=mscale, classname=mclassname, animskind=animskind, initfx=initfx, animfx=animfx_map,
                           tiknodraw=tiknodraw,
-                          animcat=animcat, animdir=os.path.splitext(os.path.basename(html_path))[0])
+                          animcat=animcat, animdir=os.path.splitext(os.path.basename(html_path))[0],
+                          game=game)
     write_html(html_path, stem, payload, theme=vtheme)
     print(f"- wrote: {os.path.basename(obj_path)}")
     print(f"- wrote: {html_path}" if outdir else f"- wrote: {os.path.basename(html_path)}")

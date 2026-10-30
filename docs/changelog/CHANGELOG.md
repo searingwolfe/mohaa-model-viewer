@@ -41,6 +41,10 @@ ascending order, so add new ones at the end of their section.
   pages keep in browser storage. The Map Viewer's wording is in `_PRIVACY_SWAPS`
   (mohaa_map_launcher.py), which rewraps the paragraphs it changes; two of its lines had
   run wider than the rest.
+- Privacy notice (`docs/PRIVACY.md`, `PRIVACY_TEXT`), dated 28 October 2026: the pages also
+  keep the game cvars that are set among their display choices in browser storage, in both
+  viewers' wording (`_PRIVACY_SWAPS`). SECURITY adds `.lod` files to the model files it
+  bounds.
 
 ## Viewer page revisions (VIEWER_REV)
 
@@ -64,6 +68,20 @@ ascending order, so add new ones at the end of their section.
 - rev 68: attach-to-bone models draw in WebGL. The WebGL pass listed only the host's own surfaces (`DATA.surfRanges`) instead of the live list that includes attachments (`LSR`), so attachments showed only in 2D. Its index and UV buffers now follow attachments too (32-bit indices once the combined model passes 65535 vertices, re-cut whenever the surface list changes). Attached surfaces also get a vertex range, which fixes attached autosprite surfaces (a muzzle flash): WebGL threw an error on every frame and 2D never drew them. Attachments now also hide particles behind them in the 2D renderer.
 - rev 69: translucent bases (`blendFunc blend`, e.g. barbed wire) are flagged `blend`. WebGL draws them after the opaque surfaces without depth writes, as the engine does for a blended stage (`tr_shader.c:1149-1153`), and the 2D renderer no longer darkens their see-through part into a grey box.
 - rev 70: the keyboard shortcuts window (`H`) is a keyboard map, shared with the Map Viewer: a keyboard and mouse with every key the viewer uses coloured by kind (camera, playback, display, tag list, window, pop-up lists). Hovering a key, or pressing it, lists everything it does with every modifier and in which view; Shift / Ctrl / Alt (clicked or held) show their layer; Free-look / Tag-lock / Pop-up list switch the view (the page's camera mode is shown first); a search box and the category chips narrow it down; the list underneath has one column per section, each scrolling on its own, with a line between rows; hovering a row rings its keys and clicking a key finds its rows. One table, `VIEWER_KEYS`, feeds it and the launcher's `F1` window; the window itself is `KEYS_JS` / `KEYS_CSS`, built on first open. While it is open, keys are looked up instead of acting on the model (R used to reset the camera behind it, W to fly). Esc with it open closes only the window; it used to close the viewer too (in the launcher, back to the start page).
+- rev 71: the game's debugging cvars, as in the Map Viewer: a **game cvars** list under Display, below backdrop (or `` ` ``, the game's console key), with the Map Viewer's list, console and foot. A click on a row sets it (again: back to its default); `name value` then Enter in the filter box sets a cvar and a name alone tells its value. The cvars set are named beside the button and kept for this browser.
+  - `sv_showbboxes` draws what `Entity::DrawBoundingBox` (`entity.cpp`) draws for the model, within 1000 units of the player (here the camera; `findradius` measures to the linked box's centre): 1 a yellow box turned with the model, its uprights blue (`G_DebugRotatedBBox`), 2 the magenta box the server links it with (the turned box's bounds, a unit bigger, `SV_LinkEntity`), 3 and 4 the yellow box, 7 a cyan box of the .tik's own bounds, 8 the yellow box and a small cyan one on the origin. The box is the entity's size as the game sets it: the .tik's `setsize` (or the one being edited with the pencil), else the bounds of its `idle` animation times its scale (`Entity::setModel`, `TIKI_CalculateBounds`); a player model gets the box a player gives itself (standing, pmove). A `.map`'s box is never the game's. 7 shows the idle animation's bounds (the union of its frames, the last `idle` loaded winning, `TIKI_InitTiki`), not bounds that follow the animation playing.
+  - `sv_showbboxes 9` draws the 19 hit-location spheres (`cm_trace_lbd.cpp`) as circles facing the camera, 24 segments each (`G_DebugCircle`): blue on each location's Bip01 tag at its offset along the tag's axes, purple for the second sphere off the same tag. They follow the animation and the placement angles. 10 to 27 show one location (value - 10; 28 shows nothing, so the left foot only shows with 9), and a missing tag ends the loop as in game. Only a Sentient gets them (classname Actor and the like, or a player model); anything else solid gets a plain yellow box, not turned. Negative values are the player's own and draw only on a player model.
+  - `r_shownormals 1` draws a white line 2 units long along each drawn vertex's normal, over everything (`DrawNormals`, `tr_shade.c`), turned by the vertex's first weight's bone (`SkelVertGetNormal`). The build now reads the normals stored in the `.skd` / `.skb` (`DATA.normals`, base64 bytes).
+  - `r_uselod 1` draws the model at the game's level of detail for its distance from the player: `R_CalcLod` (radius x 100 / fov over the distance; radius 92 for a `ischaracter` .tik, else the playing frame's radius times load_scale), `GetLodCutoff` with `r_lodscale` (1.1) and `r_lodcap` (1), and `RB_SkelMesh`'s render count, collapse map and dropped triangles, per part (`tr_model.cpp`). Each part's curve is its `.lod` file, or the default curve built from `lodIndex` (`GetLODFile`, `TIKI_CalcLodConsts`, `tiki_skel.cpp`). `cg_fov` (80) sets the field of view it measures with, at 4:3 (fov_x = cg_fov). A **LOD** slider under the list's button moves the model away without moving the camera, with the triangles drawn of the total beside it. The viewer starts with `r_uselod 0` and draws every triangle (the game's default is 1); with 0 the LOD code does nothing at all. The build reads each surface's collapse map and index (`lc`, `li`) and each part's LOD control (`DATA.lods`); animations carry their frames' radii (`rad`).
+  - `cg_showemitters 1`, `cg_showtempmodels 1` and `vss_showsources 2` print the game's lines (`0:emitter:N tempmodels emitted`, `TC:N`, `VSS Sources In Use: N`) in a console box over the stage, each frame the effect clock runs; `vss_showsources` 1 and 2 ring each volumetric smoke source at its radius, where the game draws `VSSSource.spr`.
+  - The list's foot says what was drawn and why not: the box and where it came from, how many hit locations, the camera out of range, a missing tag, the triangles drawn per part with the part's cutoff and curve.
+  - `HOST_T` / `HOST_SR` hold the host's triangles as drawn; `attRebuild` appends attachments to them, through `attLive`, which the level of detail also runs. An attachment's texture records are made once, not on every rebuild.
+  - The shortcut lists (`H`, and `F1` in the launcher) have `` ` ``.
+- rev 72: an AI's box. `sv_showbboxes` boxes a model of class Actor as a standing player, ( -15 -15 0 ) ( 15 15 94 ), whatever its `setsize`: `Actor::EventStart` (`actor.cpp`) calls `setSize(MINS, MAXS)` as the AI starts, after its spawn args and its .tik have set theirs (`SpawnArgs::Spawn` runs the pending events before `EV_Entity_Start`; a map posts the args at -7 and the start at -1), and `MINS` / `MAXS` are the player's standing box (`bg_pmove.cpp`, from `MINS_X`...`MAXS_Z` in `bg_public.h`). The dog gets it too. The list's foot names it, and says the setsize being edited with the pencil doesn't change an AI's or a player's box; it no longer says that an AI's box can differ in game.
+- rev 73: attach-to-bone slots. The bone is a picker like the model beside it: it opens the tags & bones list for that slot, current node highlighted and scrolled into view, and a pick moves the attachment to the new node with its model, scale, offset and angles kept (Enter with nothing typed keeps the node). A copy button after the angles puts the slot on the clipboard as a script line, `local.entity attachmodel <model> "<tag>" <scale> "entity_targetname" 1 -1 -1 -1 -1 ( x y z )`, in the argument order of `EV_AttachModel` (`entity.cpp:379-395`, `Entity::AttachModelEvent` :4294-4386) with the model path written as `CanonicalTikiName` resolves it (`g_utils.cpp:1524-1535`); its tooltip shows the line. attachmodel has no angles argument, so the angles are not in it. If the Clipboard API is refused it falls back to a copy command, and if that fails too the line is shown under the animation list to copy by hand. The `building...` note has a line of its own under the model picker, since the first line no longer wraps.
+- rev 74: stopping the camera, as in the Map Viewer. `X` stops it (the CAMERA panel's Free-look lines have `X stop camera` under `R reset camera`, and the shortcut lists, `H` and `F1` in the launcher, have it under Both cameras). It also stops by itself when the page loses the keyboard or the window (`blur`, or the tab hidden), each frame while the page doesn't have the focus, and in the launcher's pane on any click on the launcher, since a key or mouse button let go outside the page never reaches it and the camera kept flying or turning. A drag ends when its button turns out to have been let go outside the page (the next mouse move comes with that button up). Opening the shortcuts window stops it too. `stopCamera()` clears the keys held and ends the drag.
+- rev 75: the camera stays stopped. An auto-repeat of a key the camera has let go of (`e.repeat`) no longer takes the key up again; only a new press does. When the camera was stopped with the key still held (X, a click on the launcher, the page losing the keyboard), the repeats still arriving started it again, and the key's release then went to the launcher, so it flew on. A held key is kept by its lower-case letter (`heldKey`), so a key let go with Shift down (key-up `W` for a `w` pressed before Shift) is let go. `releaseCameraKeys()` lets go of the keys only, and a drag goes on; the launcher calls it when the keyboard went elsewhere (see Launcher). X shows "Camera stopped" in the accent colour beside `H hotkeys` for a moment, as the Map Viewer does (`flash`; `#hint` holds two chips). Pages draw pixel for pixel as before.
+- rev 76: a right-click that opens the browser's own menu stops the camera (a `contextmenu` the page doesn't cancel). The page cancels none, so that is any right-click on it. The menu takes the keyboard while it is open, so a key let go then never reached the page and the camera flew on; in the launcher's pane only the key watch (rev 75) let go of it, once the key came up. In the pane the menu is Edge's (Back, Refresh, Inspect...), which tkwebview2 turns on. Pages draw pixel for pixel as before.
 
 ## Launcher cache floor (VIEWER_REV_REQUIRED)
 
@@ -86,6 +104,12 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - rev 68: pages built before this don't draw attachments in WebGL.
 - rev 69: pages and attachment sidecars built before this draw barbwire_long_pulse with a black background and the pulse_map models untextured.
 - rev 70: pages built before this have the old shortcut table, and Esc there closes the viewer along with it.
+- rev 71: pages built before this have no game cvars list, and animation sidecars built before this carry no frame radii, which `r_uselod` measures a playing animation by.
+- rev 72: pages built before this box an AI by its setsize instead of the box it gives itself as it starts.
+- rev 73: pages built before this show an attachment's bone as plain text (no picker) and have no copy button.
+- rev 74: pages built before this have no `stopCamera()` for the launcher to call, and no X.
+- rev 75: pages built before this have no `releaseCameraKeys()` for the launcher to call, a key's auto-repeats start the camera again after it stopped, and X shows no message.
+- rev 76: pages built before this keep flying while a right-click's browser menu is open.
 
 ## Launcher (mohaa_launcher.py)
 
@@ -112,6 +136,13 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - The embedded pane's WebView2 keeps its browser files in `output/webview2` (the `WEBVIEW2_USER_DATA_FOLDER` environment variable, set before the pane is created). tkwebview2 names no folder, so WebView2 created `pythonw.exe.WebView2` beside Python, which fails where Python is installed read-only (`C:\Program Files`) and left the pane blank. A `pythonw.exe.WebView2` folder left beside Python by older versions can be deleted. This applies to both viewers.
 - Help > Keyboard shortcuts (`F1`) is a keyboard map (`KeyMapWindow`), the same as the viewer pages' `H` window: a keyboard and mouse with every shortcut coloured by kind, the details of a key on hover (or when you press it), Shift / Ctrl / Alt layers, the views of a table (Free-look, Tag-lock...), a search box and category chips, and the list underneath in columns that each scroll on their own, with a line between rows. Tabs switch between the 3D viewer's keys and the launcher's own (`KEYS_LAUNCHER`); it opens on the viewer's while a page is in the pane, else on the launcher's, or on the tab last picked. Keys pressed in it are looked up and never run (F5 used to reload the paks behind it); Esc or F1 closes it. With old popup windows on it uses the system's colours. It replaces the two side-by-side lists (`HOTKEYS_LAUNCHER`, `HOTKEYS_VIEWER`, `_fill_hotkeys`).
 - The keyboard-shortcut window (`F1`) keeps one size on both of its tabs, in both viewers. Switching from the 3D viewer's keys (three columns) to the launcher's (two) left the third column's settings in the grid, so the empty column kept its share of the width and the window grew to about one and a half times as wide. The settings are cleared on each switch, the columns sit between fixed gaps, and each keeps its scrollbar's room while the scrollbar is hidden. The window is as wide as the widest title or category row any tab has, so neither tab changes its size.
+- `.lod` files are extracted with the model: they were refused as unsafe entries (an Output line `(skipped unsafe pak entry: ....lod)` on every open of a folder that has one). A `.tik`'s skelmodel and each part it assembles get their own `.lod` beside the `.skd`, where `GetLODFile` reads it.
+- A `.tik` open also extracts the animation the `.tik` names `idle` (the last one, as `TIKI_InitTiki` takes it), which characters reach only through `$include`: the page sizes the model by its bounds and measures its level of detail by its radius.
+- A click anywhere on the launcher (not on the pane) stops the embedded viewer's camera (`_stop_view_camera`, calling the page's `stopCamera()`), now in the Model Viewer too: it moved from `MapApp` into `App`, which both launchers bind it in.
+- The launcher stops the embedded viewer's camera however it takes over (`_watch_camera_stop`, run by `App` and `MapApp`). A right-click on the launcher while W was held left the camera flying after W was let go, in both viewers.
+  - A click with any mouse button on a launcher widget stops it (`<ButtonPress-1>` to `-3`, `_stop_view_camera`).
+  - A key pressed or let go while the launcher has the keyboard makes the page let go of its keys (`<KeyPress>`, `<KeyRelease>`, `_release_view_keys` calling the page's `releaseCameraKeys()`); a drag or a fly-to in the page goes on. The launcher's own shortcuts still work: Tk runs the most specific binding of the `all` tag, so F1 runs F1's.
+  - On Windows the keyboard itself is read every 100 ms while a viewer is open (`GetAsyncKeyState` through `KEY_IS_DOWN`, over the camera keys `CAMERA_VKS`). When the last camera key comes up, wherever its key-up went, the page lets go of its keys (`_poll_camera_keys`). Only that change acts, so a key held in the page is never let go of early.
 
 ## Notable fixes (mohaa_view.py)
 
@@ -175,6 +206,7 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - The surfaces panel initialises after the bindings it reads; calling it earlier threw inside a try/catch and left an empty menu.
 - A failed animation build shows the `.skc` path, not just the animation name.
 - Pages are opened with `Path.as_uri()`; the old `"file://"+path` broke on Windows drive letters and on paths with `#`, `%` or non-ASCII characters.
+- Typing a value into an attachment's boxes and then clicking one of its buttons works on the first click. Committing the value rebuilt the attachment rows, which replaced the button between its mousedown and mouseup, so the click was lost (x and the model picker needed a second click); a commit now only re-poses the model (rev 73).
 
 ## Textures and shaders (mohaa_textures.py)
 
@@ -642,3 +674,194 @@ Changes to `python_installer_updater.bat` unless noted.
   - The info card's Script lines no longer give a door the angles of its `angle` key, which
     sets the way it opens, not its angles (`Door::SetDir`).
   - The shortcut lists (`H`, and `F1` in the launcher) have `O`.
+- Map Viewer page rev 22 (`MAP_VIEWER_REV` 22, `MAP_VIEWER_REV_REQUIRED` 22,
+  `INDEX_VERSION` 8): the rest of the game's debugging cvars that the page can show, in
+  groups (What the renderer draws, Lighting, Entities, AI paths, The game the entities
+  spawn for). Each row's tooltip says what it does, and a row the map can't use is greyed
+  out with the reason. A cvar can take a number box (`r_farplane`) or a colour
+  (`r_farplane_color 1 .5 0`, three words in the console).
+  - `r_lockpvs 1` keeps the leafs the renderer marked from where the camera was
+    (`R_MarkLeaves` stops), so flying out with `r_showtris 2` shows the whole of what the
+    game draws from that spot; the entities still follow the camera, as the server sends
+    them from where the player is. `r_novis 1` ignores the vis data and the doors (every
+    leaf is kept). The server's marks and the renderer's are kept apart for this.
+  - `r_showsky 1` draws the parts of the sky box the game draws from here in front of
+    everything: the sky polygons in view, projected onto the six sides of a box round the
+    eye and rounded out to quarters of a side (`ClipSkyPolygon`, `tr_sky.c`). In game the
+    walls are drawn after the sky and still cover it, unless the sky has a solid cloud
+    layer. The build sends the sky surfaces (`sk`).
+  - `r_farplane N` fogs and culls at N units instead of the map's farplane, in
+    `r_farplane_color` (.5 .5 .5), culling what `r_farplane_nocull` says (0 the BSP nodes
+    and models past it, 1 nothing, -1 the models only); `r_farplane_nofog 1` drops the fog
+    (the map's or r_farplane's) and keeps the culling.
+  - `r_lightmap 1` shows lightmapped surfaces with their lightmap in place of their
+    texture: the game draws a surface's stages only as far as its lightmap stage, and a
+    stage joined with the texture replaces the colour (`CollapseMultitexture` emulated per
+    shader, `lmr` in the shader index). `r_lightmap 2` colours the lightmaps by how bright
+    their raw bytes are, as the game makes them when the map loads (`tr_bsp.c`); the
+    brightest value is under the list. The lightmaps are now sent raw (`raw`, `shift`) and
+    brightened in the page as `R_ColorShiftLightingBytes` does, byte for byte as before.
+  - `r_light_showgrid 1` puts a small square on each light grid point within 256 units of
+    the camera, in the colour the grid gives there (`R_GetLightingGridValueFast`). The build
+    sends the light grid.
+  - `r_showstaticbboxes 1` draws a magenta box round each static model the game draws from
+    here: its .tik's bounds times its scale, turned with it. The build sends each model's
+    .tik bounds (`tb`, from its idle animation's frame bounds).
+  - `sv_showentnums 1` writes each entity's number (the one script errors give) in yellow
+    over it, within 1000 units of the player: the world 1022, then every map entity from
+    `sv_maxclients` up in the order the game spawns them. Path nodes, player starts and
+    other simple entities have none; `g_gametype`, `skill` and `developer` decide which
+    entities spawn (spawnflags 256 / 512 / 1024 / 2048 / 8192).
+  - `sv_showbboxes 1`, `2`, `3`, `4`, `7` and `8` draw `Entity::DrawBoundingBox`'s boxes
+    within 1000 units: 1 solid entities turned with them (yellow, blue uprights), 2 the
+    box the server links a solid entity with (magenta), 3 entities with a .tik, 4 every
+    entity, 7 a model's .tik bounds (cyan), 8 the box and a small cyan box on the origin.
+    9 to 27 (a person's hit spheres) are in the Model Viewer.
+  - `g_entinfo 1` to `4` tell about the entity you look at (within 1024 units and 18
+    degrees; an AI within `g_entinfo_max` and 25): its number, radnum, targetname and
+    health over it, a door's state, an AI's think state. 1 adds an AI's green leash circle
+    round its home and its mindist (red) and maxdist (blue) circles, 2 its hearing (red)
+    and sight (blue) circles, 3 the text alone, 4 the text of every AI whatever the
+    direction. The radii come from the AI's keys or the game's defaults, fixed up as
+    `Actor::FixAIParameters` does. An info card says the entity number and radnum.
+  - `sv_showcameras 1` draws the cameras (a wire stand-in: `func_camera.tik` isn't in the
+    game's files) and their spline paths in yellow; `g_showflypath 1` the paths a
+    `script_object` can fly along: a cyan box on each `info_splinepath` and a green line to
+    the next. The curves follow `CreatePath` and the B-spline's clamped or looped ends.
+  - `cg_rain_drawcoverage 1` draws a red rectangle at the bottom of each `func_rain`, cut
+    to `rain_min_dist` round the player (the map script's, else 512): where its drops
+    land. The build reads the script's value (`rain`).
+  - `ai_shownodenums 1` writes each path node's number in yellow over it, within
+    `ai_showroutes_distance`. `ai_shownode N` shows up to N path nodes the game finds for
+    where you stand: the nodes of your 256-unit cell within 94 units of your height that a
+    player-sized box can reach (traced against the world's brushes, bevels included), nearest
+    first, else the nearest, each a 31 x 31 x 36 box in its type's colour with a line
+    toward its yaw; a red circle when there is none. `ai_showallnode 1` shows every node at
+    your height. The feet are lifted out of solid ground first.
+  - `g_nodecheck 1` says whether the build the map's `.pth` was saved from failed the node
+    check (the file's `failed` flag, sent as `fail`) and lists nodes with 48 connections
+    or more.
+  - The foot of the list adds the lock, the sky blocks, the farplane and fog, the brightest
+    lightmap value, the light grid, the rain distance, the entities that spawn and their
+    numbers, and what ai_shownode found.
+  - World text (entity and node numbers, g_entinfo) is drawn camera-facing and depth
+    tested from a canvas atlas; the cvars' lines have their own depth-tested pass.
+- Map Viewer page rev 23 (`MAP_VIEWER_REV` 23, `MAP_VIEWER_REV_REQUIRED` 23): an AI's box.
+  An entity of class Actor gets a standing player's box, ( -15 -15 0 ) ( 15 15 94 ),
+  whatever its `setsize` key or its .tik's setsize: `Actor::EventStart` calls
+  `setSize(MINS, MAXS)` as it starts, after its spawn args (posted at -7, the start at
+  -1). `sv_showbboxes`, `sv_showentnums` (the number sits on the box's top) and
+  `g_entinfo` (its text, circles and leash line) all use it, and the `sv_showbboxes 1`
+  tooltip says how each entity is sized. On m4l3 that is all 98 AI, none of whose .tik
+  setsizes is that box.
+- Map Viewer page rev 24 (`MAP_VIEWER_REV` 24, `MAP_VIEWER_REV_REQUIRED` 24):
+  `r_shownormals 1` in the game cvars list (What the renderer draws). A white line 2 units
+  long along the normal of each point the game draws from where the camera is, over
+  everything, on the points r_showtris uses (`DrawNormals` runs on every batch drawn, as
+  `DrawTris`). A face takes its plane (`lightmapVecs[2]`, as `ParseFace` copies it), a
+  triangle soup its vertex normals, a patch its grid's normals at the rows and columns
+  kept (`MakeMeshNormals`, ported as `grid_normals` in mohaa_bsp.py), and a model each
+  vertex's normal turned by its first weight's bone (`SkelVertGetNormal` /
+  `pStaticNormal`); an entity's lines are 2 world units, a static prop's 2 of its own
+  units, stretched by its scale. Terrain has none (`tr_terrain.c` never fills them in).
+  The tooltip says that in game a face or patch fills its normals in only when its shader
+  uses them or a dynamic light is in the scene, and otherwise shows stale ones; the page
+  always draws each surface's own. The build sends a normal for every point of the
+  surfaces (`vn`), each face's and soup's run of points (`si` 5 and 6) and each model's
+  vertex normals (`n`): the m4l3 page grows by 1.6%. The lines are built the first time
+  the cvar is on, from where the doors are then, and a moving door turns its normals. The
+  foot counts the lines by kind; the legend has a Vertex normals row. Defaults are pixel
+  for pixel as rev 23.
+- Map Viewer page rev 25 (`MAP_VIEWER_REV` 25, `MAP_VIEWER_REV_REQUIRED` 25): an
+  `angles: pitch yaw roll` box and a **Copy ang** button under `go to: x y z` / Copy pos in
+  CAMERA. Enter turns the camera, where it stands, to the angles typed or pasted, as the
+  game takes them (`AngleVectors`: looking down is a positive pitch); Copy ang copies its
+  own as `( pitch yaw roll )` for a script. The page's roll turns the other way to the
+  game's, so both swap its sign (`camAngles`, `turnTo`); `flyTo` can now turn the roll
+  too (the angles box uses it).
+  Both boxes read numbers like `.5` and `1e3` (`vecNums`). `ai_showroutes_distance`
+  starts at 8200 (the game's default, 1000, is in its tooltip and the console's answer,
+  `CVAR_GAMEDEF`), so the routes and node numbers show from far away. Defaults are pixel
+  for pixel as rev 24.
+- Map Viewer page rev 26 (`MAP_VIEWER_REV` 26, `MAP_VIEWER_REV_REQUIRED` 26): the camera
+  stays stopped. An auto-repeat of a key the camera has let go of no longer takes the key
+  up again (Shift and Ctrl too); only a new press does. When the camera was stopped with
+  the key still held (X, a click on the launcher), its repeats started it again and its
+  release went to the launcher. `releaseCameraKeys()` lets go of the keys only (a drag,
+  Radiant-look's flight and a fly-to go on), for the launcher to call when the keyboard
+  went elsewhere (`_watch_camera_stop`, in the Launcher section). Defaults are pixel for
+  pixel as rev 25.
+- Map Viewer page rev 27 (`MAP_VIEWER_REV` 27, `MAP_VIEWER_REV_REQUIRED` 27): camera keys.
+  - Q tilts the view to the left (the head to the left shoulder: the horizon's right end
+    drops on screen) and E to the right, as in the Model Viewer; they were the wrong way
+    round. A positive `cam.roll` turns `camAxes`' right axis up, so Q adds to it. The
+    angles box (Copy ang) gives a tilt to the left as a negative roll, as the game takes
+    it (`AngleVectors`).
+  - `U` levels the view (no pitch, no tilt), in place of `End`, in both cameras, the
+    CAMERA lines and the shortcut lists. End's own job in a browser is to scroll what has
+    the focus to its end, so with the focus in the side panel the panel jumped to its
+    bottom. End is the browser's again.
+  - A right-click that opens the browser's own menu stops the camera, as in the Model
+    Viewer's rev 76: anywhere but the 3D view, whose right button flies and looks (its
+    `contextmenu` is cancelled, so it opens no menu).
+  - Defaults are pixel for pixel as rev 26.
+- Map Viewer page rev 28 (`MAP_VIEWER_REV` 28, `MAP_VIEWER_REV_REQUIRED` 28): the Show and
+  Find sections.
+  - In-game look and Editor look are a row of two wide buttons at the bottom of Show, under
+    All, like the cameras' Free-look and Radiant-look. Each is on while the Show buttons,
+    the light and the sky are still as it set them (`GAME_LOOK`, `EDIT_LOOK`). A look's
+    name never breaks across lines: where the panel is too narrow for the name and its
+    key, the key goes under it, and both buttons stay the same height.
+  - Find has a fourth tab, **Entities**: "N real entities with entnums", the entities the
+    game numbers (`gameEnts`, following the game cvars' g_gametype, skill, developer and
+    sv_maxclients), in that order. Each row is the targetname, else `entity` and its
+    number, with the number on the right when the name doesn't give it; a click selects
+    the entity and flies there, and Shift+click its square hides it. The world (1022) and
+    the entities that remove themselves as they spawn (misc_model, func_remove) aren't
+    listed.
+  - Textures: a click selects every brush and entity shown that uses the texture
+    (`texUse`), models included. Only brush faces were looked at, so a texture only models
+    use selected nothing: `armchairposh` on mohdm1, on its nine armchairs, gave "0 brushes /
+    entities". Shift+click a texture's square hides all of them, as Hide does (again: shows
+    them; Ctrl+Z undoes it), as the Textures hints say. A texture row is green while
+    everything shown that uses it is selected, red when all of it is hidden, yellow with
+    the hidden count when some is, like a class row.
+  - The lists show the selection however it is made. Enter in the search box selected its
+    results but left them uncoloured; `selectionChanged` now draws the lists again a frame
+    later (`listSoon`). A class row is green while every one of its shown entities is
+    selected.
+  - The Results and Textures hints are split into lines, and Free-look's `U level camera`
+    line sits under `Shift fast camera` (the user's own edits to rev 27).
+  - Defaults are pixel for pixel as rev 27.
+- Map Viewer page rev 29 (`MAP_VIEWER_REV` 29, `MAP_VIEWER_REV_REQUIRED` 29): keys written
+  with `$` or `#` in front, read as the game reads them.
+  - A spawn key that starts with `$` or `#` goes to the class's setter of that name when it
+    has one (`SpawnArgs::SpawnInternal`, g_spawn.cpp; `#` as a whole number), so
+    `"$targetname" "mg42guy"` names an entity just as `"targetname"` does. The retail maps
+    use `$targetname` some 3600 times in 39 maps, and the page read only `targetname`. On
+    m1l1, 101 of the 167 numbered entities showed as `entity N` in the Entities tab
+    (entity number 33 is `$mg42guy`), and so did path nodes such as .map entity 136
+    (`$enemyspawnerdestination`). The labels, links, Same targetname, Same path and the
+    info card's name and Links missed them too.
+  - Without a setter of that name a `$` or `#` key only sets a script variable (`#set` is
+    `self.set`, `$type` is `self.type`), so it stays a key of its own, shown as written.
+    Of the prefixed keys in the retail maps only `$targetname`, `#leash`, `#health`,
+    `#turnspeed` and `#breathsteam` reach a setter.
+  - Which form wins: an entity's keys are posted for one moment and the event queue runs
+    them last to first (`Listener::PostEventInternal` puts each in front of the ones
+    posted before it), so the first written of `name`, `$name` and `#name` wins. On m4l0
+    that is `$targetname "hallway2"` over the editor's `targetname "t177"`. A plain
+    `model` is due before the other keys (`EV_PRIORITY_SPAWNARG`), so a `$model` outlasts
+    it. An actor's plain keys are posted after its `$` and `#` ones (`EV_SPAWNACTOR`), so
+    there the plain key wins (m4l3's two `ai_german_elite_sentry`).
+  - The setters' names (`SETTER_KEYS`, from the game's `EV_SETTER` events) are in
+    mohaa_bsp.py and come with the page (`D.sk`). `spawnKeys` applies them to every
+    entity's keys once the .map is read, and the build reads entities the same way
+    (`MB.kv_dict`). `gameKey` (g_entinfo, the spline paths) now reads that view. It had let
+    the last of `name` and `$name` win, and took `$loop` for `loop`, which has no setter.
+  - MOHRadiant's look stays MOHRadiant's: a path node turns pink only for a `targetname`
+    written as such (`edKey`), since the editor reads `$targetname` as any other key; on
+    m1l1, 98 nodes named only that way stay green. The decompiler still reads the keys the
+    map compiler wrote, as written (`ent_get`), and its .map files are byte for byte as
+    before.
+  - Defaults are pixel for pixel as rev 28.

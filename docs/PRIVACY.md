@@ -11,7 +11,7 @@ must be checked whenever this text changes).
 
 ```
 PRIVACY NOTICE  --  MOHAA Model Viewer
-Last updated: 15 October 2026
+Last updated: 28 October 2026
 
 1. THE SHORT VERSION
    This program does not collect, transmit, sell, share or profile anything.
@@ -48,9 +48,10 @@ Last updated: 15 October 2026
 
      d) Display choices in the browser
         The viewer pages remember a few display choices (theme, backdrop colour,
-        renderer, placement angles) in the browser's local storage. The embedded
-        pane runs in private mode and forgets them when the program closes; in
-        your own browser they stay with that browser's data for local files.
+        renderer, placement angles, game cvars) in the browser's local storage.
+        The embedded pane runs in private mode and forgets them when the program
+        closes; in your own browser they stay with that browser's data for local
+        files.
 
    None of this is transmitted anywhere. If you want it gone, delete the folders
    above; the program will simply start fresh.

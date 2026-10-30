@@ -12,7 +12,7 @@ The programs are written on that assumption. Specifically:
 | Attack surface | Mitigation |
 |---|---|
 | Archive entry names (`ZipSlip`) | Every entry is confined to the temporary workspace by `_safe_target()`: components are reduced to plain names, `..`, drive tokens and NTFS alternate-data-stream syntax are rejected, Windows device names are rejected, an extension allow-list is enforced, and the final path is re-checked against the workspace root with `realpath` so symlinks and junctions cannot escape it. |
-| Malformed `.skd` / `.skb` / `.skc` headers | Every count read from a file header is bounded by what the file can physically hold, and structural advance offsets must be positive, so a hostile file cannot produce an unbounded loop or allocation. |
+| Malformed `.skd` / `.skb` / `.skc` / `.lod` files | Every count read from a file header is bounded by what the file can physically hold, and structural advance offsets must be positive, so a hostile file cannot produce an unbounded loop or allocation. A surface's level-of-detail arrays are read only when they lie inside the file, and a `.lod` only as its twelve fixed numbers, when the file holds them. |
 | Hostile `.shader` scripts | The block scanner is linear-time and matched with an explicit position, so a crafted shader cannot cause a quadratic parse hang during pak loading. |
 | Decompression bombs | Archive entries are capped at 192 MB, whether read into memory or extracted to the workspace, and skipped beyond that. |
 | `$include` expansion bombs | Cycle guard, depth cap, **and** a total-output budget, so sibling fan-out cannot exhaust memory. |

@@ -90,7 +90,7 @@ PRIVACY_SUMMARY=("This program collects nothing and sends nothing, and has no\n"
                  "telemetry. It uses the network only when you check for updates.")
 
 PRIVACY_TEXT = """PRIVACY NOTICE  --  MOHAA Model Viewer
-Last updated: 15 October 2026
+Last updated: 28 October 2026
 
 1. THE SHORT VERSION
    This program does not collect, transmit, sell, share or profile anything.
@@ -127,9 +127,10 @@ Last updated: 15 October 2026
 
      d) Display choices in the browser
         The viewer pages remember a few display choices (theme, backdrop colour,
-        renderer, placement angles) in the browser's local storage. The embedded
-        pane runs in private mode and forgets them when the program closes; in
-        your own browser they stay with that browser's data for local files.
+        renderer, placement angles, game cvars) in the browser's local storage.
+        The embedded pane runs in private mode and forgets them when the program
+        closes; in your own browser they stay with that browser's data for local
+        files.
 
    None of this is transmitted anywhere. If you want it gone, delete the folders
    above; the program will simply start fresh.
@@ -236,7 +237,7 @@ PAK_ENTRY_MAX=getattr(getattr(MTX,"Vfs",None),"MAX_ENTRY",192*1024*1024)
 # Source mtimes are the usual rebuild trigger, but a zip round-trip can scramble them,
 # so the baked rev is the backstop. Also gates the animation/attachment sidecar caches
 # (see _stamp_anim_cache).
-VIEWER_REV_REQUIRED=70
+VIEWER_REV_REQUIRED=76
 # Sentinel subdir for single-file builds (Browse / drag-drop / Recent / path bar). It
 # routes the output HTML to a "standalone" folder beside "models" instead of the
 # pak-mirroring tree; the null byte means it can't collide with a real folder name.
@@ -324,6 +325,23 @@ def _win_dark_menus(dark):
         except Exception: pass
         ux[136]()
     except Exception: pass
+
+# The keys both viewers' cameras hold, as Windows virtual-key codes: W A S D Q E C Z, Space, the
+# arrows, Shift and Ctrl, and comma / period (the Map Viewer's Radiant-look strafe). See
+# App._watch_camera_stop.
+CAMERA_VKS=tuple(ord(c) for c in "WASDQECZ")+(0x20,0x25,0x26,0x27,0x28,0x10,0x11,0xBC,0xBE)
+
+def _win_key_reader():
+    """A function telling whether a virtual key is held down right now, read from the keyboard
+    itself (GetAsyncKeyState), whichever window has the keyboard. None off Windows."""
+    if not sys.platform.startswith("win"): return None
+    try:
+        import ctypes
+        gaks=ctypes.windll.user32.GetAsyncKeyState
+        gaks.argtypes=[ctypes.c_int]; gaks.restype=ctypes.c_short
+        return lambda vk:bool(gaks(vk)&0x8000)
+    except Exception: return None
+KEY_IS_DOWN=_win_key_reader()
 
 def apply_theme(root, name):
     """(Re)apply the named palette to every ttk style. tk widgets that hold raw
@@ -1537,6 +1555,9 @@ class App(tk.Tk):
         # its hotkeys there.
         self.bind_all("<ButtonPress-1>",self._reclaim_focus,add="+")
         self.bind_all("<ButtonPress-3>",self._reclaim_focus,add="+")
+        # ...and stops the viewer's camera, which a key or button let go here would keep
+        # moving (see _watch_camera_stop).
+        self._watch_camera_stop()
         # Moving or minimizing the window closes tooltips and popups that would otherwise be
         # left at stale screen positions (see _dismiss_transients).
         self.bind("<Configure>",self._dismiss_transients,add="+")
@@ -3524,7 +3545,7 @@ class App(tk.Tk):
 
     # File types the viewer reads from the workspace. Nothing else in a pak is ever written
     # to disk, so a hostile pak can't drop an executable payload.
-    _EXTRACT_OK={".skd",".skb",".skc",".tik",".map",".txt",".shader",
+    _EXTRACT_OK={".skd",".skb",".skc",".tik",".map",".txt",".shader",".lod",
                  ".tga",".jpg",".jpeg",".png",".dds",".tif",".tiff"}
     # Names Windows treats as devices regardless of folder or extension.
     _WIN_RESERVED={"con","prn","aux","nul","clock$"} | {p+str(i) for p in ("com","lpt") for i in range(1,10)}
@@ -3731,7 +3752,7 @@ class App(tk.Tk):
                         tex_key=vk
                         folder="/".join(vk.split("/")[:-1])+"/"
                         for k in list(self._vfs.names()):
-                            if k.startswith(folder) and not k.endswith("/") and (k.endswith(".skc") or k.endswith(".tik") or k.endswith(".map")):
+                            if k.startswith(folder) and not k.endswith("/") and (k.endswith(".skc") or k.endswith(".tik") or k.endswith(".map") or k.endswith(".lod")):
                                 d=self._vfs.read(k)
                                 if d:
                                     with open(os.path.join(self._tmp,os.path.basename(k)),"wb") as f: f.write(d)
@@ -3910,12 +3931,13 @@ class App(tk.Tk):
                 skd_out=os.path.join(tik_dir,os.path.basename(skel))
                 with open(skd_out,"wb") as f: f.write(data)
                 self._log_q.put(("dim",f"skelmodel: {skel_vfs}"))
-                # 3) pull the skelmodel's sibling .skc (animation), .tik (shaders) and .map (the
-                #    world-space clip box the viewer derives setsize from) next to it
+                # 3) pull the skelmodel's sibling .skc (animation), .tik (shaders), .map (the
+                #    world-space clip box the viewer derives setsize from) and .lod (its level of
+                #    detail curve, read beside the .skd as GetLODFile does) next to it
                 skel_folder="/".join(skel_vfs.split("/")[:-1])+"/"
                 sib=0
                 for k in list(self._vfs.names()):
-                    if k.startswith(skel_folder) and not k.endswith("/") and (k.endswith(".skc") or k.endswith(".tik") or k.endswith(".map")):
+                    if k.startswith(skel_folder) and not k.endswith("/") and (k.endswith(".skc") or k.endswith(".tik") or k.endswith(".map") or k.endswith(".lod")):
                         d=self._vfs.read(k)
                         if d:
                             with open(os.path.join(tik_dir,os.path.basename(k)),"wb") as f: f.write(d); 
@@ -3968,6 +3990,22 @@ class App(tk.Tk):
                                 self._log_q.put(("dim","(animation extraction capped at 300 .skc)")); break
                         if got: self._log_q.put(("dim",f"+{got} referenced animation .skc extracted"))
                 except Exception as _e: self._log_q.put(("dim",f"(animation extraction: {_e})"))
+                # 4b) The .tik's `idle` animation, the last one loaded as TIKI_InitTiki takes it: the
+                #     viewer sizes the model by its bounds (the game cvar sv_showbboxes) and measures
+                #     its level of detail by its radius. Characters reach it through $include, so it
+                #     isn't among the animations step 4 extracted.
+                try:
+                    _ie=None
+                    for _e in (self._animcat or {}).get("anims",[]):
+                        if (_e.get("n") or "").lower()=="idle": _ie=_e
+                    if _ie and _ie.get("id"):
+                        _ad=os.path.join(tik_dir,"_anims"); os.makedirs(_ad,exist_ok=True)
+                        _tg=os.path.join(_ad,_ie["id"]+".skc")
+                        if not os.path.exists(_tg):
+                            _d=self._vfs_read_skc(_ie.get("s"))
+                            if _d is not None:
+                                with open(_tg,"wb") as f: f.write(_d)
+                except Exception: pass
                 # 5) Extract the other skelmodels this .tik assembles (head, hands, helmet, ...) next to
                 #    it so the viewer merges them into one model, as in-game.
                 part_disk=[skd_out]                          # body first
@@ -3991,6 +4029,11 @@ class App(tk.Tk):
                             dd=self._vfs.read(k)
                             if dd:
                                 with open(os.path.join(tik_dir,os.path.basename(k)),"wb") as f: f.write(dd)
+                    # ...and its own level of detail curve (<part>.lod beside <part>.skd)
+                    if pv.lower().endswith(".skd"):
+                        dl=self._vfs.read(pv[:-4]+".lod")
+                        if dl:
+                            with open(os.path.splitext(pout)[0]+".lod","wb") as f: f.write(dl)
                 if len(part_disk)>1:
                     self._log_q.put(("dim",f"assembled {len(part_disk)} parts: "+", ".join(os.path.basename(p) for p in part_disk)))
                 # 6) Resolve textures for the skelmodel's surfaces.
@@ -5528,6 +5571,59 @@ class App(tk.Tk):
         except Exception: pass
         try:
             if self.focus_displayof() is None and w.winfo_exists(): w.focus_force()
+        except Exception: pass
+
+    def _watch_camera_stop(self):
+        """Stop the embedded viewer's camera when the launcher takes over. A key or mouse button
+        let go outside the viewer pane never reaches the page, so the camera would keep moving.
+          - A click on any launcher widget (any button) stops it: _stop_view_camera.
+          - A key pressed or let go while the launcher has the keyboard lets go of the keys the
+            page holds: _release_view_keys. A drag or a fly-to in the page goes on.
+          - On Windows the keyboard itself is also read every 100 ms while a viewer is open, so
+            letting go of the last camera key lets go of the page's keys wherever that key-up
+            went: _poll_camera_keys.
+        The page also ignores auto-repeats of a key it has let go of, so a key still held when
+        the camera stopped doesn't start it again until it is pressed anew.
+        Called by App.__init__ and MapApp.__init__ (which doesn't run App's)."""
+        for seq in ("<ButtonPress-1>","<ButtonPress-2>","<ButtonPress-3>"):
+            self.bind_all(seq,self._stop_view_camera,add="+")
+        for seq in ("<KeyPress>","<KeyRelease>"):
+            self.bind_all(seq,self._release_view_keys,add="+")
+        self._camkeys_down=False
+        if KEY_IS_DOWN is not None and not getattr(self,"_camkeys_polling",False):
+            self._camkeys_polling=True
+            self.after(100,self._poll_camera_keys)
+
+    def _stop_view_camera(self,e):
+        """A click on the launcher stops the embedded viewer's camera: the key or mouse button
+        moving it is let go here, where the page never hears it, so it would keep moving
+        (the page's X does the same by hand). Both viewers' pages have stopCamera()."""
+        if self._webview is None: return
+        try:
+            w=e.widget
+            if isinstance(w,str): w=self.nametowidget(w)
+            if w is self._webview or str(w).startswith(str(self._webview)): return
+        except Exception: pass
+        self._embed_js("try{if(typeof stopCamera==='function')stopCamera();}catch(e){}")
+
+    def _release_view_keys(self,_e=None):
+        """The viewer page lets go of the keys it holds (releaseCameraKeys, in both viewers'
+        pages): the keyboard is somewhere else, so their key-ups would never reach it."""
+        if self._webview is None: return
+        self._embed_js("try{if(typeof releaseCameraKeys==='function')releaseCameraKeys();}catch(e){}")
+
+    def _poll_camera_keys(self):
+        """Every 100 ms while a viewer is open: once no camera key (CAMERA_VKS) is held any more,
+        the page lets go of its keys. Only that change acts, so a key held in the page is never
+        let go of early, and the page hears nothing while no key is down."""
+        try:
+            if self._webview is None: self._camkeys_down=False
+            else:
+                down=any(KEY_IS_DOWN(vk) for vk in CAMERA_VKS)
+                if self._camkeys_down and not down: self._release_view_keys()
+                self._camkeys_down=down
+        except Exception: pass
+        try: self.after(100,self._poll_camera_keys)
         except Exception: pass
 
     def _open_file(self,path):
