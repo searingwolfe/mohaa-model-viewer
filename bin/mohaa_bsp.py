@@ -29,6 +29,7 @@ LUMP_DRAWVERTS, LUMP_DRAWINDEXES, LUMP_LEAFBRUSHES, LUMP_LEAFSURFACES = 4, 5, 6,
 LUMP_LEAFS, LUMP_NODES, LUMP_SIDEEQUATIONS, LUMP_BRUSHSIDES = 8, 9, 10, 11
 LUMP_BRUSHES, LUMP_MODELS, LUMP_ENTITIES, LUMP_VISIBILITY = 12, 13, 14, 15
 LUMP_LIGHTGRIDPALETTE, LUMP_LIGHTGRIDOFFSETS, LUMP_LIGHTGRIDDATA = 16, 17, 18
+LUMP_SPHERELIGHTS, LUMP_SPHERELIGHTVIS = 19, 20
 LUMP_TERRAIN, LUMP_TERRAININDEXES = 22, 23
 LUMP_STATICMODELDATA, LUMP_STATICMODELDEF, LUMP_STATICMODELINDEXES = 24, 25, 26
 HEADER_LUMPS = 28
@@ -229,6 +230,33 @@ class Bsp:
                 "vis": vis,
                 "terrain": [v[0] for v in struct.iter_unpack("<h", self._trim(LUMP_TERRAININDEXES, 2))],
                 "statics": statics}
+
+    def sun_leafs(self, nleafs):
+        """Which leafs see the sun, as R_LoadSphereLightVis (renderergl1/tr_bsp.c) reads
+        the sphere-light vis lump: for each leaf in order, the lights it sees ended by -1,
+        the list starting with -2 when the sun is one of them. A bytearray with 1 for
+        those leafs, or None when no leaf lists the sun: an empty lump, one in the old
+        format (one entry per leaf, no lists) or lists without the sun. The renderer then
+        always looks for the sun (SunCheckRay, tr_sun_flare.cpp); with lists, only from a
+        leaf whose list starts with it, or one outside the map (area -1)."""
+        raw = self._trim(LUMP_SPHERELIGHTVIS, 4)
+        n = len(raw) // 4
+        if not n or n == nleafs:
+            return None
+        e = struct.unpack("<%di" % n, raw)
+        flags = bytearray(nleafs)
+        seen = False
+        p = leaf = 0
+        while p < n and leaf < nleafs:
+            if e[p] != -1:
+                if e[p] == -2:
+                    flags[leaf] = 1
+                    seen = True
+                while p < n and e[p] != -1:
+                    p += 1
+            p += 1
+            leaf += 1
+        return flags if seen else None
 
     @staticmethod
     def _terra_patch(rec):

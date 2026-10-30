@@ -140,12 +140,14 @@ run at once.
 - **All, In-game look, Editor look** (under the Show buttons; `Ctrl+A`, `G`, `Shift+G`):
   All shows every group. In-game look hides what the game never draws (caulk, clips,
   triggers, hints, origin brushes, areaportals, nodraw, rain, foliage clips) and the
-  entity markers, with the game's lighting and sky (Full Brightness and Simple Sky off).
-  Editor look is MOHRadiant's view: everything but hints, areaportals and rain, at Full
-  Brightness with Simple Sky. The two looks are a row of two wide buttons at the bottom of
-  Show, like the cameras' Free-look and Radiant-look; each is on while the Show buttons,
-  the light and the sky are still as it set them (`GAME_LOOK`, `EDIT_LOOK`). Where the
-  panel is too narrow for a name and its key on one line, the key goes under the name.
+  entity markers, with the game's lighting, sky and sun flare (Full Brightness and Simple
+  Sky off, Sun flare on). Editor look is MOHRadiant's view: everything but hints,
+  areaportals and rain, at Full Brightness with Simple Sky and no sun flare. The two looks
+  are a row of two wide buttons at the bottom of Show, like the cameras' Free-look and
+  Radiant-look. Each is on while the Show buttons, the light, the sky and the sun flare
+  are still as it set them (`GAME_LOOK`, `EDIT_LOOK`; the flare only on a map that has
+  one). Where the panel is too narrow for a name and its key on one line, the key goes
+  under the name.
 - **Trees.** A tree model carries a sprite version: a card of the whole tree
   (`deformVertexes autoSprite2`, `alphaGen oneMinusDistFade`) that the game fades in far
   away as the tree's own surfaces fade out (`alphaGen distFade`; `R_AddStaticModelSurfaces`
@@ -183,6 +185,28 @@ run at once.
   view: an occlusion query on each frame's sky says whether any of it showed, and the
   redrawing stops when none did until the view changes. They aren't drawn with Simple Sky
   or Fog on, as the game's fog covers its sky.
+- **Sun flare** (`J`, on at first): the game draws its sun only as a lens flare
+  (`RB_DrawSun` is compiled out), and the page draws it the same way (`drawSunFlare`).
+  - The flare shows while the view faces within the flare's `dot_min` of the sun and the
+    sun is seen (`sunSeen`). Its brightness is `(dot - dot_min) / (1 - dot_min)`. The screen
+    whitens by that brightness to the 4th power times `fullscale`. When the sun goes out
+    of sight, both fade over `fullfade` ms.
+  - Each flare is a square of ±`size` screen units, so it stretches with the window. It
+    sits on the sun's place on the screen (`SunScreenCalc` of the point 128 units toward
+    it), and its picture is added. The flare and the glare are drawn after the scene and
+    `r_showsky`, unfogged, under the selection, lines and labels.
+  - The sun is seen when the line from the camera 16384 units toward it first meets a sky
+    face (`sunTrace`). The line meets the world's solid brushes, solid patches and the
+    terrain, but not brush entities, models, static props or fences, and the Show buttons
+    don't change it. In a .bsp it is looked for only from a leaf whose light list starts
+    with the sun (`D.vis.sun`), from outside the map, or from anywhere when the map has no
+    vis or no leaf lists the sun.
+  - The direction comes from the worldspawn's `sunflaredirection`, else `sundirection`.
+    The flare is the `global/lensflaredefs.txt` section that `sunflarename` names, `sun`
+    when there is none. The build sends all of it as `D.sun`, or the reason there is no
+    flare, which the greyed-out button shows.
+  - The page draws only when something changes, so a fade starts when the sun was in view
+    in the last frame drawn, and the view keeps redrawing until the fade ends.
 - **Picking** renders face / entity ids into a 1-pixel target around the cursor, then
   finds the exact point on the plane or triangle under it. What the mouse is over gets an
   outline in the accent colour: a brush's edges (all of a brush entity's brushes), or
@@ -412,7 +436,8 @@ run at once.
 ## The game's lighting
 
 With Show > Full Brightness off (the default), a `.bsp` is drawn the way the game lights
-it. Everything comes from the `.bsp`; the light is never recomputed.
+it. Everything comes from the `.bsp`; the light is never recomputed, only scaled down
+while lights are turned off (Lights off, below).
 
 - **Planar faces** are the compiled polygons themselves (draw surfaces, lump 3), each
   tied to the `.map` face it came from, so the filters, Hide and selection still work on
@@ -447,6 +472,33 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
   origin (lumps 16-18, `R_GetLightingGridValue`).
 - **Water, slime and lava** use the shader's own picture (MOHRadiant's editor picture
   at Full Brightness) and are solid unless the shader blends.
+- **Lights off** (Display, `0`) turns every light entity off, and Selection's **Turn
+  off** / **Turn on** the selected ones; the map then looks as if those lights had never
+  been in it.
+  - It works on the light the game draws with: lightmaps (polygons, patches, terrain,
+    brush entities), vertex-lit polygons, the static props' baked vertex light and the
+    light grid colour of models lit by it. Coronas, flares and bright textures stay.
+  - The `.bsp` keeps only the sum of every light's light, so the page works out each
+    light's share of every lightmap texel and probe (`ltWeigh`), using the compiler's
+    formula and its shadows (engine-notes, Baked light). On a map with sky faces, it
+    works out the sun's and the sky's share too (`ltSun`).
+  - A texel then keeps its ambient floor plus the rest of its light times the share
+    still on (`FS_LTREL`), losing no more than twice what the lights turned off could
+    have given there without shadows. With every light off, rooms go dark and only what
+    the sun, the sky and `ambientlight` gave stays.
+  - Probes are the props' vertices, the vertex-lit polygons' vertices and one per
+    grid-lit model at its origin, relit the same way (`FS_LTPREL`).
+  - The first time, every light's share is worked out once, with a progress line; after
+    that a light turned off or on is one light's work, added or taken out (`ltApply`).
+  - All of it runs on the graphics card in float textures (`EXT_color_buffer_float`), a
+    few steps per frame. Each batch starts only when the card has finished the last (a
+    fence).
+  - The steps the card is working on are noted in the browser's storage. If the graphics
+    driver resets, the message names them. The next press on that map only warns; another
+    within 6 s tries again, one step at a time.
+  - Not kept: a page always opens with every light on.
+  - Greyed out on a `.map` page, which has no baked light (the tooltip says why), and on
+    a `.bsp` without lightmaps or light entities.
 - **Sky** polygons are the `.bsp`'s own, drawn with the sky box as described under The
   page.
 
@@ -487,8 +539,8 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
   right axis up for a positive roll, `AngleVectors` down), so both swap its sign
   (`camAngles`, `turnTo`).
 - `V` switches cameras, `R` returns to the player start, `B` toggles Full Brightness,
-  `K` Simple Sky, `M` Simple models, `L` opens the legend, `` ` `` the game cvars list and
-  `T` switches the theme. The
+  `K` Simple Sky, `M` Simple models, `J` Sun flare, `0` Lights off, `L` opens the legend,
+  `` ` `` the game cvars list and `T` switches the theme. The
   FOV slider runs from 60 to 150. Press `H` in the viewer for all of them (Keyboard
   shortcuts, above).
 
@@ -510,7 +562,26 @@ it. Everything comes from the `.bsp`; the light is never recomputed.
   with a `script_skyorigin`) show the plain sky box; no retail Allied Assault map uses one.
 - Trees don't change with distance: they are drawn whole, or as their sprite version
   with Simple models on (above), never faded from one to the other as in game.
+- Sun flare: the line toward the sun meets patches and the terrain by their drawn
+  triangles, not the game's collision shapes, and meets a patch from either side (the
+  game's facets stop it only from the front). The glare is always white, as `whitefade`
+  is. A `fullscreen` shader the paks don't have would draw the game's default picture
+  instead. The flares of entities and dynamic lights (`begin entity`, `begin dlight`)
+  aren't drawn.
 - A `.map` has no compiled light, so it is always drawn full bright.
+- After a graphics driver reset, opening the same page again in the launcher showed the
+  reset message again; Rebuild in viewer brought it back.
+- Lights off is worked out, not read: the compiler's own lighting code for MOHAA isn't
+  public, so each light's share comes from q3map's formula (measured to match the
+  lightmaps' bytes on m6l3d and m4l3), and the sun's and sky's strength from
+  `suncolor` and `sundiffuse` as the retail maps' lightmaps show them. Each light also
+  gets a small share by distance, without shadows, so a texel it reached only by the
+  compiler's sampling (through a gap, around an edge) still goes dark with it; how much
+  that share can take away is capped, so light the page doesn't trace (the sky under
+  eaves and in shaded corners) stays. Texels whose light was clipped at full
+  brightness (most sunlit ones) can't tell how much each light added, so near a light
+  outdoors turning it off takes away its share of the clipped value. There is no Sun
+  light switch.
 - Clouds: `tcMod turb` and the entity-driven tcMods, `animMap` frames after the first,
   and a second texture bundle aren't drawn; the noise waveform is a smooth stand-in for
   the engine's.

@@ -141,6 +141,118 @@ and line numbers next to the code that depends on them.
   (`EV_SPAWNACTOR`, -2; its `model` at `EV_PRIORITY_SPAWNACTOR`, -3) than its `$` and `#`
   ones, so on an actor the plain key wins.
 
+## The sun and its flare
+
+- The game draws no sun disc: `RB_DrawSun` (tr_backend.c) is inside `#if 0`. The sun
+  shows only as a lens flare. `R_DrawLensFlares` (tr_sun_flare.cpp) draws it after each
+  3D view's surfaces, except the HUD's (`RDF_HUD`), in a 2D pass (`qglOrtho(-1, 1, -1, 1)`
+  over the view) with `tess.no_global_fog` set.
+- The sun comes from the entity string (`R_Sphere_InitLights`, tr_sphere_shade.cpp).
+  - Key names are compared case for case (`strcmp`), and only up to the first entity
+    whose classname isn't worldspawn.
+  - `suncolor` or `sunlight` makes a sun, as does `sundirection`, whose forward vector
+    (`AngleVectorsLeft`) becomes the flare's direction unless `sunflaredirection` set it
+    first.
+  - `sunflarename` names the flare: "sun" when a sun has none, none at all for "none".
+  - The retail maps' `sunflare`, `sundiffuse`, `sundiffusecolor`, `sunangle` and
+    `sunflare_inportalsky` keys are read by neither OpenMOHAA's renderer nor its game
+    code (`fgame/worldspawn.cpp` takes `sunflarename` and `sunflaredirection` and does
+    nothing with them).
+- The flare is a section of `global/lensflaredefs.txt` (`lens_flare::Init`): `begin
+  <name>` to `end`, any case.
+  - Each `flare <size> <where> <shader> [alphascale]` must have its words on its own
+    line (`COM_ParseExt` without line breaks).
+  - With no flare the game draws nothing. The defaults are `dot_min` .8, `fullscale` .7,
+    no `fullscreen` and `fullfade` 0.
+  - "sun" is one flare of size 1.4 at 0 (`textures/sprites/sunflare_main`: the 24-bit
+    128 x 128 `flare_main.tga`, added with `GL_SRC_ALPHA GL_ONE` and alpha from the
+    client), `dot_min` .55, `fullscale` .6, `fullscreen textures/jack/whitefade` and
+    `fullfade` 600.
+- Each frame (`sun_flare_class::SunTry`, then `lens_flare::ScreenBlend`):
+  - `dot` is the view's forward · the flare direction. Nothing is drawn unless
+    `dot > dot_min`.
+  - While the sun is seen, the flare is drawn at alpha `(dot - dot_min) / (1 - dot_min)`
+    and `lastbright` becomes that alpha to the 4th power times `fullscale`.
+  - When it isn't seen, and there is a fullscreen shader and the blend is on, the flare is
+    drawn at the fading `(fullfade - t) / fullfade * lastbright`, where t is the time
+    since it was last seen. So the flare drops to the glare's brightness at once.
+  - The fullscreen shader (`whitefade`: `$whiteimage`, `GL_SRC_ALPHA GL_ONE`, rgbGen
+    identityLighting, which is 1 with `r_overBrightBits` 0) is drawn over the whole view
+    at that same fading alpha, until the fade ends.
+- A flare's quad is ±size in normalized screen units. A size of 1 is half the view's width
+  and half its height, so the picture stretches with the window. Its middle is the screen
+  position of the point 128 units toward the sun, moved by `where` × −2 × that position
+  (`where` 1 is the mirror image through the screen's middle). Texture coordinates run
+  (0, 0) at the top left to (1, 1) at the bottom right.
+- Is the sun seen (`SunCheckRay`)? A trace runs only when one of these holds:
+  - the camera's leaf (`R_PointInLeaf`) has area -1;
+  - the map has no vis;
+  - no leaf lists the sun;
+  - the leaf's light list starts with it.
+
+  Any other leaf never sees the sun. The trace is `CM_BoxTrace` from the eye to 16384
+  units toward the sun: a point, the world model (`CONTENTS_SOLID`). The sun is seen when
+  what the trace first meets has `SURF_SKY`. A point trace meets solid brushes (not
+  `CONTENTS_FENCE` ones), solid patches from the front (`cm_playerCurveClip` 1) and the
+  terrain, but not brush entities or models.
+- Which leafs see the sun: the sphere-light vis lump (`LUMP_SPHERELIGHTVIS`, 20; 21 in
+  versions 17-18) lists, for each leaf in order, the lights it sees, ended by -1
+  (`R_LoadSphereLightVis`, tr_bsp.c). A list starting with -2 means the sun.
+  - A lump with exactly one entry per leaf is the old format, with no lists.
+  - On mohdm1, 710 of the 1893 leafs list the sun. m5l2b has the old format. m6l3c's
+    lists never name it, and it has no sky faces anyway.
+
+## Baked light
+
+The map compiler bakes every light into the `.bsp` (lightmaps, vertex colours, the light
+grid, the static props' vertex light) as one sum. MOHAA's own compiler isn't public;
+OpenMOHAA's `code/tools/ommap/light.c` is id's q3map, and the retail lightmaps match its
+point-light formula. These notes are what Lights off (map-viewer.md) is built on.
+
+- Lights are the entities whose classname starts with `light` (`CreateEntityLights`).
+  - Intensity: `light`, else `_light`, else 300. Colour: `_color` (or `color`), scaled so
+    its largest channel is 1 (`ColorNormalize`).
+  - Spawnflags (MOHAA's light definition): 1 LINEAR, 2 NO_ENTITIES (lights the world
+    only), 8 ENTITY_ONLY (lights only models and the grid).
+  - A light with a `target` (found by `targetname` as written; the compiler doesn't know
+    `$targetname`) is a spot aimed at the target's origin. One with an `angles` key is a
+    spot aimed along it, 64 units on. The cone's radius per unit of distance is
+    `tan(spot_angle)` when `spot_angle` is set, else `(radius + 16) / distance`
+    (`radius` 64 by default).
+- What a light adds at a sample, in raw lightmap units (q3map, `photons` = intensity x
+  7500; samples sit 1 unit off the surface; `dist` is at least 16):
+  - point: `photons / dist^2 x cos`;
+  - LINEAR: `cos x photons / 8000 - dist x falloff`;
+  - spot: the point formula inside the cone, fading over its last 32 units, nothing
+    behind it;
+  - nothing when the add is 1 or less, or when the light is behind the surface.
+  - Measured where one light dominates, raw byte / add has a median of 0.87 on m6l3d
+    and 0.98 on m4l3, so the stored bytes are the adds themselves, not halved.
+- Shadows: q3map's trace stops in the tree's solid leafs (`TraceLine_r`) and at the
+  drawn surfaces it tests. The page stops light at every solid brush but the sky's
+  (structural and detail, every side) and at opaque drawn surfaces. Alpha-tested
+  surfaces (fences, grates) and `CONTENTS_TRANSLUCENT` ones let it through, and patches
+  cast no shadow (q3map traces them only with `-patchshadows`). The page's shares (from
+  distance cubes) agree with the same formula ray-traced exactly on 91-95% of m6l3d's
+  covered texels.
+- The sun (`SunToPoint`): the trace from the sample toward the sun has to end inside a
+  sky brush (any brush with a `SURF_SKY` side). Measured on the retail maps:
+  - its add is about `suncolor x cos` (m4l3, m4l0, m1l1), `sunlight` standing in when
+    `suncolor` is missing;
+  - the open sky adds a diffuse light, about `sundiffuse x sundiffusecolor` (default:
+    the sun's colour) on a fully open floor;
+  - a map without `sundiffuse` still has it: on m4l0 an open floor in shade gets about
+    two thirds of `suncolor`, so the page takes 1;
+  - mohdm1 has both `suncolor` (65 60 45) and `sunlight` (255 243 171). Its shaded open
+    ground (medians 46-73, not clipped) fits `suncolor`; `sunlight` would clip it.
+- The ambient floor: every texel gets at least `ambientlight`, floored to whole numbers
+  (raw units), whatever lights it.
+- Raw lightmap bytes top out at 127; the renderer shifts them up by one
+  (`r_mapOverBrightBits`). Most sunlit texels are clipped at 127, so their bytes can't
+  say how much each light added.
+- Of the 44 retail Allied Assault maps with light entities, 42 have sky faces and sun
+  keys. m6l3c and m6l3d have the keys but no sky face, so no sun reaches them.
+
 ## Browser, WebView2 and file URLs
 
 - A WebGL2 context doesn't offer `OES_standard_derivatives` to GLSL ES 1.00 shaders, so
@@ -162,3 +274,8 @@ and line numbers next to the code that depends on them.
   page's local storage lasts only while the launcher is open.
 - A map page needs WebGL2 and `DecompressionStream` (its data is gzipped); both are in
   every current browser and WebView2 runtime.
+- On Windows, WebView2 draws WebGL with ANGLE on Direct3D 11, which turns the shaders into
+  HLSL. A shader that never finishes there makes Windows reset the graphics driver: every
+  screen goes black for a few seconds. A software renderer just finishes. The page's
+  shaders keep their loops of fixed length, with nothing read inside them deciding when
+  they stop.

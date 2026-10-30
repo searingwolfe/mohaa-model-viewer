@@ -48,7 +48,7 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 29
+MAP_VIEWER_REV = 32
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
 INDEX_VERSION = 8
@@ -778,7 +778,8 @@ LEGEND = [
          {"sw": "box", "fill": [0.45, 0.62, 0.86], "name": "Sky", "key": "Ctrl+K",
           "desc": "The game draws its sky box, and the sky's cloud layers, behind everything there, "
                   "so whatever is behind a sky brush shows through it. Simple Sky (K) draws them "
-                  "solid and tiled, as MOHRadiant does."},
+                  "solid and tiled, as MOHRadiant does. The sun is seen through the sky faces: the "
+                  "game draws its flare (Sun flare, J) when the line toward the sun meets one first."},
          {"sw": "tex", "tex": "textures/common/caulksky", "name": "caulksky", "key": "Ctrl+K",
           "desc": "Sky with no sky box. The game clears it to the fog colour (worldspawn "
                   "farplane_color), or leaves the last frame's picture there on a map without fog. "
@@ -917,14 +918,16 @@ MAP_VIEWER_KEYS = {
                 ("Ctrl+I", "Rain", "show / hide the rain volumes (hidden at first)"),
                 ("Ctrl+G", "Foliage", "show / hide the foliage clips")),
             _kx("Ctrl+A", "show every group (All)", ("Ctrl+A", "All")),
-            _kx("G", "In-game look: hide what the game never draws, with the game's light and sky",
+            _kx("G", "In-game look: hide what the game never draws, with the game's light, sky and sun flare",
                 ("G", "in-game")),
-            _kx("Shift+G", "Editor look: MOHRadiant's view, at full brightness with Simple Sky",
+            _kx("Shift+G", "Editor look: MOHRadiant's view, at full brightness with Simple Sky and no sun flare",
                 ("Shift+G", "editor")),
             _kx("B", "Full Brightness on / off (off: the game's own lighting)", ("B", "bright")),
             _kx("K", "Simple Sky on / off (off: the game's sky)", ("K", "sky")),
             _kx("M", "Simple models on / off: trees drawn as the sprite the game shows far away",
                 ("M", "simple")),
+            _kx("J", "Sun flare on / off: the game's lens flare and glare when you look toward the sun",
+                ("J", "flare", "Sun flare on / off")),
             _kx_sub("Display", "disp"),
             _kx("1 … 9", "Texture · Shade · Wire · Setsizes · Arrows · Labels · Links · Fog · X-ray",
                 ("1", "Texture", "Texture on / off (off: each texture's average colour)"),
@@ -936,6 +939,9 @@ MAP_VIEWER_KEYS = {
                 ("7", "Links", "Links: a line from each entity to its targets"),
                 ("8", "Fog", "Fog: the map's distance fog"),
                 ("9", "X-ray", "X-ray: the selection's outline through walls")),
+            _kx("0", "Lights off: every light of the map off / on, from the game's baked light (lightmaps, "
+                "vertex light, props, models); single lights from Selection's Turn off / Turn on",
+                ("0", "lights off", "Lights off: every light off / on")),
             _kx("`", "the game cvars list: r_showtris, ai_showroutes ... (type a cvar and its value, then "
                 "Enter, as in the game's console)", ("`", "cvars", "open / close the game cvars list")),
         ]},
@@ -1950,6 +1956,194 @@ def sky_boxes(texs, blobs, vfs):
 
 
 # ==============================================================================
+#  The sun flare (.bsp and .map)
+# ==============================================================================
+# The game draws its sun only as a lens flare (RB_DrawSun is compiled out). The
+# worldspawn's sun keys give its direction and name the flare, a section of
+# global/lensflaredefs.txt; the page draws it (drawSunFlare in mohaa_map_page.py) and,
+# for a .bsp, learns from the vis payload which leafs see the sun.
+LENSFLARE_DEFS = "global/lensflaredefs.txt"
+SUN_FLARE_MAX_DIM = 256
+_SCANF_FLOAT = re.compile(r"\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)")
+_LF_TOKEN = re.compile(r'//[^\n]*|/\*.*?(?:\*/|$)|"([^"]*)"?|(\S+)', re.S)
+
+
+def _scan_floats(text, n):
+    """sscanf(text, "%f %f %f"): up to n numbers, each right after the one before it
+    (blanks between). One that isn't there is 0 here; the engine leaves it unset."""
+    out, pos = [], 0
+    while len(out) < n:
+        m = _SCANF_FLOAT.match(text or "", pos)
+        if not m:
+            break
+        out.append(float(m.group(1)))
+        pos = m.end()
+    return out + [0.0] * (n - len(out))
+
+
+def _forward(angles):
+    """The forward vector of "pitch yaw roll" (AngleVectorsLeft, q_math.c)."""
+    p, y = (math.radians(a) for a in _scan_floats(angles, 3)[:2])
+    return [math.cos(p) * math.cos(y), math.cos(p) * math.sin(y), -math.sin(p)]
+
+
+def world_sun(entities):
+    """The sun as R_Sphere_InitLights (renderergl1/tr_sphere_shade.cpp) reads it from the
+    entities' keys (each entity a list of (key, value), in order), the key names compared
+    as written: the keys up to the first entity whose classname isn't worldspawn count.
+    "suncolor" or "sunlight" makes a sun, as does "sundirection", whose forward vector is
+    the flare's too unless a "sunflaredirection" came first (that one always sets it);
+    "sunflarename" names the flare, "sun" when a sun has none.
+    Returns {"exists", "dir": the flare's direction or None, "name"}."""
+    exists, flaredir, dir_set, name = False, None, False, ""
+    for kv in entities:
+        for k, v in kv:
+            if k == "classname":
+                if v != "worldspawn":
+                    return {"exists": exists, "dir": flaredir, "name": name or ("sun" if exists else "")}
+            elif k in ("suncolor", "sunlight"):
+                exists = True
+            elif k == "sundirection":
+                exists = True
+                if not dir_set:
+                    flaredir = _forward(v)
+            elif k == "sunflaredirection":
+                flaredir, dir_set = _forward(v), True
+            elif k == "sunflarename":
+                name = v[:63]
+    return {"exists": exists, "dir": flaredir, "name": name or ("sun" if exists else "")}
+
+
+def lens_flare_def(text, which):
+    """One section of lensflaredefs.txt as lens_flare::Init (tr_sun_flare.cpp) reads it,
+    from "begin <which>" (any case) to "end": dot_min, fullscale, fullscreen (a shader
+    name), fullfade (whole milliseconds) and the flares, each "flare <size> <where>
+    <shader> [alphascale]" with its words on the directive's own line (COM_ParseExt
+    without line breaks: a flare missing one is left out). The defaults are dot_min .8,
+    fullscale .7, no fullscreen and fullfade 0. None when there is no such section."""
+    toks, line, last = [], 0, 0
+    for m in _LF_TOKEN.finditer(text):
+        line += text.count("\n", last, m.start())
+        last = m.start()
+        if m.group(1) is not None or m.group(2) is not None:
+            toks.append((m.group(1) if m.group(1) is not None else m.group(2), line))
+    n, i = len(toks), 0
+
+    def arg():
+        # the next word if it is on the line of the last one read, else "" (none read)
+        nonlocal i
+        if i < n and toks[i][1] == toks[i - 1][1]:
+            i += 1
+            return toks[i - 1][0]
+        return ""
+    while i < n:
+        i += 1
+        if toks[i - 1][0].lower() == "begin" and arg().lower() == which.lower():
+            break
+    else:
+        return None
+    d = {"dot_min": 0.8, "fullscale": 0.7, "fullscreen": None, "fullfade": 0, "flares": []}
+    while i < n:
+        i += 1
+        k = toks[i - 1][0].lower()
+        if k == "end":
+            break
+        if k == "flare":
+            a = [arg()]
+            while a[-1] and len(a) < 4:
+                a.append(arg())
+            if len(a) < 4 or not a[2]:
+                continue
+            d["flares"].append([_atof(a[0]), _atof(a[1]), a[2], _atof(a[3]) if a[3] else 1.0])
+        elif k in ("dot_min", "fullscale", "fullscreen", "fullfade"):
+            a = arg()
+            if a:
+                d[k] = a if k == "fullscreen" else int(_atof(a)) if k == "fullfade" else _atof(a)
+    return d
+
+
+def _png_image(data, max_dim):
+    """A picture re-encoded as PNG (a flare's smooth glow would show JPEG's blocks),
+    no bigger than max_dim."""
+    from PIL import Image
+    im = Image.open(io.BytesIO(data))
+    im.load()
+    if max(im.size) > max_dim:
+        r = max_dim / float(max(im.size))
+        im = im.resize((max(1, int(round(im.size[0] * r))), max(1, int(round(im.size[1] * r)))),
+                       Image.BILINEAR)
+    im = im.convert("RGBA" if ("A" in im.getbands() or im.mode == "P") else "RGB")
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return "image/png", buf.getvalue()
+
+
+def _flare_picture(name, vfs, shaders, blobs):
+    """How a flare's shader draws (all the game's are one additive stage): the picture
+    of its first stage (None for $whiteimage and the other built-in images: white) and
+    that stage's blendFunc, as [blob, mime, source factor, destination factor]; or None
+    when the picture isn't in the paks. A name with no shader is a picture of that
+    name, added."""
+    info = shaders.get(name.lower().replace("\\", "/"))
+    pic = info.get("stage0map") if info else name
+    src, dst = _blend_factors(info.get("blend0")) if info else (6, 1)
+    if not pic:
+        return None
+    if pic.startswith(("$", "*")):
+        return [None, None, src, dst]
+    path = vfs.find_texture(pic)
+    data = vfs.read(path) if path else None
+    if not data:
+        return None
+    try:
+        mime, raw = _png_image(data, SUN_FLARE_MAX_DIM)
+    except Exception:
+        return None
+    return [blobs.add(raw), mime, src, dst]
+
+
+def sun_payload(entities, vfs, shaders, blobs):
+    """The page's sun flare (D.sun): {"d": its direction (a unit vector), "n": the flare's
+    name, "dm": dot_min, "fs": fullscale, "ff": fullfade in milliseconds, "full": 1 when
+    the screen brightens and fades (a fullscreen shader and a fullfade), "fl": the
+    flares [[size, where, alphascale, picture], ...], "tx": their pictures
+    (_flare_picture)}; or {"none": why the game draws no flare here}, which the page
+    shows on its greyed-out Sun flare button."""
+    sun = world_sun(entities)
+    if not sun["exists"]:
+        return {"none": "This map has no sun: its worldspawn has no suncolor, sunlight or sundirection."}
+    name = sun["name"]
+    if name.lower() == "none":
+        return {"none": "This map turns the sun flare off: its worldspawn has \"sunflarename\" \"none\"."}
+    if sun["dir"] is None:
+        return {"none": "This map's sun has no sundirection (or sunflaredirection), so the game draws no flare."}
+    if vfs is None:
+        return {"none": "No paks were loaded, so the sun flare (%s) isn't known." % LENSFLARE_DEFS}
+    data = vfs.read(LENSFLARE_DEFS)
+    if not data:
+        return {"none": "The paks have no %s, so the game draws no sun flare." % LENSFLARE_DEFS}
+    d = lens_flare_def(data.decode("latin-1", "replace"), name)
+    if d is None:
+        return {"none": "%s has no \"%s\" flare (this map's sunflarename), so the game draws none."
+                % (LENSFLARE_DEFS, name)}
+    pics, index, flares = [], {}, []
+    for size, where, shader, ascale in d["flares"]:
+        key = shader.lower()
+        if key not in index:
+            pic = _flare_picture(shader, vfs, shaders, blobs)
+            index[key] = len(pics) if pic else -1
+            if pic:
+                pics.append(pic)
+        if index[key] >= 0:
+            flares.append([size, where, ascale, index[key]])
+    if not flares:
+        return {"none": "The \"%s\" flare in %s has no flare picture in the paks." % (name, LENSFLARE_DEFS)}
+    return {"d": [round(x, 6) for x in sun["dir"]], "n": name, "dm": d["dot_min"], "fs": d["fullscale"],
+            "ff": d["fullfade"], "full": 1 if d["fullscreen"] and d["fullfade"] > 0 else 0,
+            "fl": flares, "tx": pics}
+
+
+# ==============================================================================
 #  In-game lighting (.bsp only)
 # ==============================================================================
 # With Full Brightness off the page shows what the game draws: the compiled polygons
@@ -2051,9 +2245,10 @@ def lit_payload(bsp, stats, texs, blobs, shaders, vfs, ents, model_of, models, s
                 "c": blobs.add(MB.color_shift(bytes(COL), 4)), "i": blobs.add(IDX.tobytes()),
                 "s": blobs.add(SURF.tobytes()), "ns": len(SURF) // 6})
 
-    # ---- patches: lightmap coordinates and vertex light per control point ---------------
-    # in the .map's control point order (row j holds the .bsp's column j)
-    PL = array("f")
+    # ---- patches: lightmap coordinates, vertex light and normal per control point ---------
+    # in the .map's control point order (row j holds the .bsp's column j). The normals tell
+    # which side the compiler lit (the page's Lights off weighs a patch's texels by them).
+    PL, PN = array("f"), array("f")
     PCOL = bytearray()
     patches = []
     for si, (ei, bn) in sorted(stats["patch_owner"].items()):
@@ -2073,8 +2268,10 @@ def lit_payload(bsp, stats, texs, blobs, shaders, vfs, ents, model_of, models, s
                 (ls, lt), rgba = bsp.vert_light(s["firstVert"] + i * w + j)
                 PL.extend((ls, lt))
                 PCOL.extend(rgba)
+                PN.extend(bsp.vert_normal(s["firstVert"] + i * w + j))
         patches.append([ei, bn, layer, off, w * h])
-    out.update({"p": patches, "pl": blobs.add(PL.tobytes()), "pc": blobs.add(MB.color_shift(bytes(PCOL), 4))})
+    out.update({"p": patches, "pl": blobs.add(PL.tobytes()), "pc": blobs.add(MB.color_shift(bytes(PCOL), 4)),
+                "pn": blobs.add(PN.tobytes())})
 
     # ---- terrain: each patch's lightmap page, corner texel and texels per 64 units -----
     # (tr_bsp.c R_UnpackTerraPatch, tr_terrain.c R_PreTessellateTerrain)
@@ -2653,6 +2850,29 @@ def build(src, args):
         rain = rain_payload(vfs, vpath)
     except Exception:
         rain = None
+    # the sun flare: the worldspawn's keys as the renderer reads them (a .bsp's entity
+    # lump, else the .map's), and for a .bsp which leafs see the sun
+    try:
+        sun = sun_payload(MB.parse_entity_string(bsp.entity_text) if bsp is not None else [e["kv"] for e in ents],
+                          vfs, shaders, blobs)
+    except Exception as e:
+        sun = {"none": "The sun flare couldn't be read: %s" % e}
+    if "d" in sun:
+        seen = None
+        if vis is not None:
+            try:
+                seen = bsp.sun_leafs(vis["nl"])
+            except Exception:
+                seen = None
+            if seen is not None:
+                vis["sun"] = blobs.add(bytes(seen))
+        log("sun flare: \"%s\" (%d flare%s, %s), looked for %s"
+            % (sun["n"], len(sun["fl"]), "" if len(sun["fl"]) == 1 else "s",
+               "with the screen's glare" if sun["full"] else "no glare",
+               "from the %d of %d leafs that see the sun" % (sum(seen), len(seen)) if seen is not None
+               else "from everywhere (no leaf lists the sun)" if bsp is not None else "from everywhere (a .map)"))
+    else:
+        log("sun flare: none - %s" % sun["none"])
     world = ents[0]["kvd"] if ents else {}
     title = vpath
     header = {"v": 1, "name": stem, "path": vpath, "kind": kind, "built": time.strftime("%Y-%m-%d %H:%M"),
@@ -2660,7 +2880,7 @@ def build(src, args):
               "tex": texs.entries, "models": mb.models if mb else [], "modelOf": model_of,
               "defs": defs, "editorFlags": {str(k): v for k, v in ME.EDITOR_FLAGS.items()},
               "bsp": bspinfo, "lit": lit, "sky": skies, "clouds": clouds, "legend": legend,
-              "vis": vis, "paths": paths, "lg": lgrid, "rain": rain,
+              "vis": vis, "paths": paths, "lg": lgrid, "rain": rain, "sun": sun,
               "ek": {"simple": sorted(ME.SIMPLE_CLASSES), "dropped": sorted(ME.DROPPED_CLASSES)},
               # the keys a "$" or "#" in front of a key can set (MB.SETTER_KEYS)
               "sk": sorted(MB.SETTER_KEYS)}

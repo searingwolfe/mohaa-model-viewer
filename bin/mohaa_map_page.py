@@ -266,6 +266,8 @@ __KEYS_CSS__
        <button class="sm" id="bDoor" style="display:none" title="Open or close the selected door as in game (O)">Open door</button>
        <button class="sm" id="bHide" title="Hide the selection (Backspace). Shift+H shows everything again.">Hide</button>
        <button class="sm" id="bClear" title="Clear the selection (Esc)">Clear</button>
+       <button class="sm" id="bLightOff" style="display:none" title="Turn the selected lights off, as if they had never been there: the light they gave the map (its lightmaps, vertex light, props and models) goes, the rest stays. Display's Lights off turns every light off">Turn off</button>
+       <button class="sm" id="bLightOn" style="display:none" title="Turn the selected lights back on">Turn on</button>
      </div>
      <div class="row co" id="hidLine" style="display:none"><span id="hidCount"></span><button class="sm" id="bUndoHide" title="Undo the last Hide or Show all (Ctrl+Z); press again for the one before">Undo</button><button class="sm" id="bUnhide" title="Show everything you hid (Shift+H); Ctrl+Z hides it again">Show all</button></div>
    </div>
@@ -320,17 +322,18 @@ __KEYS_CSS__
    </div>
    <div class="sect">
      <h2>Show</h2>
-     <div class="tg" style="margin-bottom:7px"><button id="bFull" title="Full Brightness (B). Off: the map lit the way the game lights it (lightmaps, vertex light). On: every texture at full brightness, as MOHRadiant shows it.">Full Brightness<span class="k">B</span></button><button id="bSimpleSky" title="Simple Sky (K). On: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off: the game's sky box and its moving clouds, drawn behind everything, so whatever is behind a sky brush shows through it as in game.">Simple Sky<span class="k">K</span></button><button id="bSimpleMod" title="Simple models (M). On: each tree that has a sprite version is drawn as that sprite alone, the way the game draws trees far away; it turns about its upright axis to face the camera. Off: the whole tree. Models with no sprite version (bushes, props) don't change.">Simple models<span class="k">M</span></button></div>
+     <div class="tg" style="margin-bottom:7px"><button id="bFull" title="Full Brightness (B). Off: the map lit the way the game lights it (lightmaps, vertex light). On: every texture at full brightness, as MOHRadiant shows it.">Full Brightness<span class="k">B</span></button><button id="bSimpleSky" title="Simple Sky (K). On: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off: the game's sky box and its moving clouds, drawn behind everything, so whatever is behind a sky brush shows through it as in game.">Simple Sky<span class="k">K</span></button><button id="bSimpleMod" title="Simple models (M). On: each tree that has a sprite version is drawn as that sprite alone, the way the game draws trees far away; it turns about its upright axis to face the camera. Off: the whole tree. Models with no sprite version (bushes, props) don't change.">Simple models<span class="k">M</span></button><button id="bSunFlare" title="Sun flare (J). On: the game's lens flare, drawn as the game draws it when the view looks toward the map's sun and nothing solid is between the camera and the sky that way, with the screen's glare that fades when the sun goes out of sight. Off: no flare, as in MOHRadiant.">Sun flare<span class="k">J</span></button></div>
      <div class="tg" id="filtBtns"></div>
      <div class="row" style="margin-top:7px">
        <button class="sm" id="bShowAll" title="Show every group (Ctrl+A)">All<span class="k">Ctrl+A</span></button>
      </div>
      <!-- the two looks, as wide as the panel like the cameras' buttons; each is on while the
-          Show buttons, the light and the sky are as it sets them. A name never breaks: in a
+          Show buttons, the light, the sky and the sun flare are as it sets them (the flare
+          only on a map that has one). A name never breaks: in a
           panel too narrow for it, the key goes under the name, both buttons as tall -->
      <div class="row" style="align-items:stretch">
-       <button id="bGameView" style="flex:1" title="Hide what the game never draws (caulk, clips, triggers, hints, origin brushes, areaportals) and the entity markers, with the game's lighting and sky: Full Brightness and Simple Sky off (G)">In-game&nbsp;look<wbr><span class="k">G</span></button>
-       <button id="bEditView" style="flex:1" title="MOHRadiant's view: everything except hints, areaportals and rain, at full brightness with Simple Sky on (Shift+G)">Editor&nbsp;look<wbr><span class="k">Shift+G</span></button>
+       <button id="bGameView" style="flex:1" title="Hide what the game never draws (caulk, clips, triggers, hints, origin brushes, areaportals) and the entity markers, with the game's lighting, sky and sun flare: Full Brightness and Simple Sky off, Sun flare on (G)">In-game&nbsp;look<wbr><span class="k">G</span></button>
+       <button id="bEditView" style="flex:1" title="MOHRadiant's view: everything except hints, areaportals and rain, at full brightness with Simple Sky on and Sun flare off (Shift+G)">Editor&nbsp;look<wbr><span class="k">Shift+G</span></button>
      </div>
    </div>
    <div class="sect">
@@ -1063,6 +1066,9 @@ let simpleSky=false;
 // drawn as that sprite alone, the way the game draws it far away. Off: the whole tree, with
 // the sprite left out (the game fades it in only as the tree fades out). See surfOn.
 let simpleModels=false;
+// Sun flare on: the game's lens flare and glare when the view looks toward the map's sun
+// (drawSunFlare). On at first; the In-game look turns it on, the Editor look off.
+let sunFlare=true;
 
 function texKey(name){let k=String(name||'').toLowerCase().replace(/\\/g,'/');if(!k.startsWith('textures/'))k='textures/'+k;return k;}
 function hashCol(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}
@@ -1248,8 +1254,8 @@ const VS_MODEL=`#version 300 es
 layout(location=0) in vec3 aPos; layout(location=1) in vec2 aUV;
 layout(location=3) in vec4 aR0; layout(location=4) in vec4 aR1; layout(location=5) in vec4 aR2; layout(location=6) in float aIPick;
 layout(location=9) in float aEng; layout(location=10) in vec4 aILight;
-layout(location=11) in vec4 aA2; layout(location=12) in vec3 aA2M;
-uniform mat4 uVP; uniform int uLit; uniform highp sampler2D uStatic; uniform int uAuto2; uniform vec3 uFwd;
+layout(location=11) in vec4 aA2; layout(location=12) in vec3 aA2M; layout(location=15) in float aISlot;
+uniform mat4 uVP; uniform int uLit; uniform highp sampler2D uStatic; uniform int uAuto2; uniform vec3 uFwd; uniform int uRel;
 out vec2 vUV; out vec3 vPos; out vec4 vCol; flat out float vPick;
 void main(){vec4 p=vec4(aPos,1.0);vec3 w=vec3(dot(aR0,p),dot(aR1,p),dot(aR2,p));
   if(uAuto2==1){vec4 m=vec4(aA2.xyz,1.0);
@@ -1258,19 +1264,26 @@ void main(){vec4 p=vec4(aPos,1.0);vec3 w=vec3(dot(aR0,p),dot(aR1,p),dot(aR2,p));
     w=vec3(dot(aR0,m),dot(aR1,m),dot(aR2,m))+(l>1e-6?mn*(aA2.w*sc/l):vec3(0.0));}
   vec4 c=vec4(1.0);
   if(uLit==2&&aILight.w>=0.0){int k=int(aILight.w+aEng+0.5);c=vec4(texelFetch(uStatic,ivec2(k%4096,k/4096),0).rgb,1.0);}
-  else if(uLit>0)c=vec4(aILight.rgb,1.0);
+  else if(uLit>0){c=vec4(aILight.rgb,1.0);
+    // with a light turned off, its grid colour relit: its probe in the same texture (LT)
+    if(uRel==1&&aISlot>=0.0){int k=int(aISlot+0.5);c=vec4(texelFetch(uStatic,ivec2(k%4096,k/4096),0).rgb,1.0);}}
   vUV=aUV;vPos=w;vCol=c;vPick=aIPick;gl_Position=uVP*vec4(w,1.0);}`;
 // The game's own polygons: texture x lightmap page (aLM.z >= 0), x vertex light
 // (aLM.z = -1) or as it is (aLM.z = -2); with uLMOnly (r_lightmap) a lightmapped one shows
 // its lightmap alone, the texture's alpha still cutting it. uTm is the picture stage's tcMod scale
 // (RB_CalcScaleTexCoords); uAg its alphaGen (tr_shade.c ComputeColors): 1 constant,
 // 2 / 3 from the base s / t coordinate (RB_CalcAlphaFromTexCoords: min, max, low cap,
-// high cap in uAgP), 4 vertex alpha, 5 one minus vertex alpha.
+// high cap in uAgP), 4 vertex alpha, 5 one minus vertex alpha. aVP is a vertex-lit vertex's
+// slot among the lights' probes (-1 for the rest; see LT), read with lights turned off.
 const VS_LIT=`#version 300 es
 layout(location=0) in vec3 aPos; layout(location=1) in vec2 aUV; layout(location=7) in vec4 aCol; layout(location=8) in vec3 aLM;
+layout(location=13) in float aVP;
 uniform mat4 uVP; uniform vec2 uTm; uniform int uAg; uniform vec4 uAgP;
+uniform highp sampler2D uVR; uniform int uVROn;
 out vec2 vUV; out vec3 vPos; out vec4 vCol; out vec3 vLM; out float vA;
 void main(){vUV=aUV*uTm;vPos=aPos;vCol=aCol;vLM=aLM;
+  // with a light turned off, a vertex-lit vertex's light is its relit probe (LT)
+  if(uVROn==1&&aVP>=0.0){int k=int(aVP+0.5);vCol=vec4(texelFetch(uVR,ivec2(k%4096,k/4096),0).rgb,aCol.a);}
   float a=1.0;
   if(uAg==1)a=uAgP.x;
   else if(uAg==2||uAg==3){float f=(uAg==2)?aUV.x:aUV.y;a=max(min((uAgP.y-uAgP.x)*f+uAgP.x,uAgP.w),uAgP.z);}
@@ -1495,7 +1508,10 @@ function initGL(){
   initMarkers();initModels();initSprites();
   if(LIT)initLitGL();
   initSkyGL();
-  glcv.addEventListener('webglcontextlost',e=>{e.preventDefault();failLoad('The graphics driver reset the 3D view. Reopen the map to continue.');});
+  sunFlareGL();
+  glcv.addEventListener('webglcontextlost',e=>{e.preventDefault();
+    failLoad('The graphics driver reset the 3D view'+(LT.step?' while turning lights off ('+LT.step+')':'')+'. Reopen the map to continue'+
+      (LT.step?' (if this shows again, close the viewer and open the map again, or use Rebuild in viewer).':'.'));});
 }
 function colourTex(c){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([c[0]*255|0,c[1]*255|0,c[2]*255|0,255]));return t;}
@@ -1662,11 +1678,13 @@ function instRows(X){
   return [ax[0][0]*s,ax[1][0]*s,ax[2][0]*s,o[0], ax[0][1]*s,ax[1][1]*s,ax[2][1]*s,o[1], ax[0][2]*s,ax[1][2]*s,ax[2][2]*s,o[2]];
 }
 // Per instance: three rows of the placement matrix, the pick id, then its light for the
-// game's lighting: light grid colour and the first vertex of its baked light (or -1).
-const INST_FLOATS=17;
+// game's lighting: light grid colour and the first vertex of its baked light (or -1), and
+// its slot among the lights' probes (its grid colour relit with a light off; -1: none).
+const INST_FLOATS=18;
 function instData(ei){
   const X=ENTS[ei], rows=instRows(X), L=D.lit, g=L&&L.el?L.el[ei]:null, st=L&&L.st?L.st[ei]:null;
-  return rows.concat([NF+1+ei, g?g[0]/255:1, g?g[1]/255:1, g?g[2]/255:1, st!=null?st:-1]);
+  const slot=LT.entSlot&&LT.entSlot.has(ei)?LT.entSlot.get(ei):-1;
+  return rows.concat([NF+1+ei, g?g[0]/255:1, g?g[1]/255:1, g?g[2]/255:1, st!=null?st:-1, slot]);
 }
 function initModels(){
   (D.models||[]).forEach((M,mi)=>{
@@ -1680,7 +1698,7 @@ function initModels(){
     // each vertex's number in the engine's own order, to find its baked light
     const eng=new Float32Array(R.pos.length/3);
     for(const s of M.s)if(s.length>=7)for(let k=0;k<s[5];k++)eng[s[4]+k]=s[6]+k;
-    R.vbE=makeBuf(gl.ARRAY_BUFFER,eng);
+    R.vbE=makeBuf(gl.ARRAY_BUFFER,eng);R.eng=eng;
     const a2=R.hasLod?auto2Data(R):null;
     if(a2){R.vbA2=makeBuf(gl.ARRAY_BUFFER,a2.mid);R.vbA2M=makeBuf(gl.ARRAY_BUFFER,a2.axis);}
     R.instBuf=gl.createBuffer();R.selBuf=gl.createBuffer();
@@ -1691,6 +1709,7 @@ function initModels(){
       for(let k=0;k<3;k++){gl.enableVertexAttribArray(3+k);gl.vertexAttribPointer(3+k,4,gl.FLOAT,false,st,k*16);gl.vertexAttribDivisor(3+k,1);}
       gl.enableVertexAttribArray(6);gl.vertexAttribPointer(6,1,gl.FLOAT,false,st,48);gl.vertexAttribDivisor(6,1);
       gl.enableVertexAttribArray(10);gl.vertexAttribPointer(10,4,gl.FLOAT,false,st,52);gl.vertexAttribDivisor(10,1);
+      gl.enableVertexAttribArray(15);gl.vertexAttribPointer(15,1,gl.FLOAT,false,st,68);gl.vertexAttribDivisor(15,1);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,R.ib);gl.bindVertexArray(null);return v;};
     R.vao=mk(R.instBuf);R.vaoSel=mk(R.selBuf);
     for(const s of R.surfs)if(s.sprite){let c=[0,0,0],n=0,r=0;
@@ -1787,45 +1806,50 @@ function buildLit(){
   for(const[,,f]of pats){nv+=SC.faceVN[f];ni+=SC.faceIN[f];}
   for(const[,,f]of ters){nv+=SC.faceVN[f];ni+=SC.faceIN[f];}
   const pos=new Float32Array(nv*3), uv=new Float32Array(nv*2), lm=new Float32Array(nv*3), col=new Uint8Array(nv*4), tri=new Uint32Array(Math.max(3,ni));
+  const nrm=new Float32Array(nv*3);   // a patch's normals (the .bsp's, the side it is lit on), for LT
   const units=[];          // {i0, n, ti, f, pi, ei}
   if(L.ns){
     pos.set(bp);uv.set(D.f32(L.uv));lm.set(D.f32(L.l));col.set(D.bytes(L.c));tri.set(bi);
     const s=D.i32(L.s);
     for(let k=0;k<L.ns;k++){const o=k*6, e=s[o+3], b=s[o+4], fk=s[o+5];
       const pi=b>=0?primOf.get(key(e,b)):undefined, f=(pi!=null&&fk>=0)?faceOf(pi,fk):-1;
-      units.push({i0:s[o],n:s[o+1],ti:s[o+2],f:f,pi:pi!=null?pi:-1,ei:e});}
+      units.push({i0:s[o],n:s[o+1],ti:s[o+2],f:f,pi:pi!=null?pi:-1,ei:e,k:0});}
   }
   let v=nb, t=bi.length;
-  const addFace=(f,ti,pi,ei,fill)=>{      // copy a .map face's geometry, with fill() for its light
+  // copy a .map face's geometry, with fill() for its light; k: 1 a patch, 2 terrain (a
+  // .bsp polygon is 0)
+  const addFace=(f,ti,pi,ei,fill,k)=>{
     const v0=SC.faceV0[f], vn=SC.faceVN[f];
     pos.set(SC.pos.subarray(v0*3,(v0+vn)*3),v*3);uv.set(SC.uv.subarray(v0*2,(v0+vn)*2),v*2);
     for(let q=0;q<vn;q++)fill(q,v+q);
     const a=SC.faceI0[f],c=SC.faceIN[f];
     for(let q=0;q<c;q++)tri[t+q]=SC.tri[a+q]-v0+v;
-    units.push({i0:t,n:c,ti:ti,f:f,pi:pi,ei:ei});v+=vn;t+=c;rep[f]=1;};
-  const pl=L.pl!=null?D.f32(L.pl):null, pc=L.pc!=null?D.bytes(L.pc):null;
+    units.push({i0:t,n:c,ti:ti,f:f,pi:pi,ei:ei,k:k});v+=vn;t+=c;rep[f]=1;};
+  const pl=L.pl!=null?D.f32(L.pl):null, pc=L.pc!=null?D.bytes(L.pc):null, pn=L.pn!=null?D.f32(L.pn):null;
   for(const[r,pi,f]of pats){
     const P=SC.prims[pi], Pd=MAP.ents[P.ent].prims[P.bn].d, cnt=r[4], layer=r[2];
     if(!pl||Pd.w*Pd.h!==cnt)continue;
-    const X=new Float64Array(cnt*6);
-    for(let q=0;q<cnt;q++){X[q*6]=pl[(r[3]+q)*2];X[q*6+1]=pl[(r[3]+q)*2+1];
-      for(let k=0;k<4;k++)X[q*6+2+k]=pc[(r[3]+q)*4+k];}
-    const g=tessPatch(Pd,X,6);
+    const X=new Float64Array(cnt*9);
+    for(let q=0;q<cnt;q++){X[q*9]=pl[(r[3]+q)*2];X[q*9+1]=pl[(r[3]+q)*2+1];
+      for(let k=0;k<4;k++)X[q*9+2+k]=pc[(r[3]+q)*4+k];
+      if(pn)for(let k=0;k<3;k++)X[q*9+6+k]=pn[(r[3]+q)*3+k];}
+    const g=tessPatch(Pd,X,9);
     if(!g||g.cols*g.rows!==SC.faceVN[f])continue;
     addFace(f,SC.faceTex[f],pi,P.ent,(q,o)=>{
-      lm[o*3]=g.x[q*6];lm[o*3+1]=g.x[q*6+1];lm[o*3+2]=layer;
-      for(let k=0;k<4;k++)col[o*4+k]=Math.max(0,Math.min(255,Math.round(g.x[q*6+2+k])));});
+      lm[o*3]=g.x[q*9];lm[o*3+1]=g.x[q*9+1];lm[o*3+2]=layer;
+      for(let k=0;k<4;k++)col[o*4+k]=Math.max(0,Math.min(255,Math.round(g.x[q*9+2+k])));
+      for(let k=0;k<3;k++)nrm[o*3+k]=g.x[q*9+6+k];},1);
   }
   for(const[r,pi,f]of ters){
     const P=SC.prims[pi], org=MAP.ents[P.ent].prims[P.bn].d.org;
     addFace(f,SC.faceTex[f],pi,P.ent,(q,o)=>{
       const i=(pos[o*3]-org[0])/64, j=(pos[o*3+1]-org[1])/64;
       lm[o*3]=r[2]+i*r[4];lm[o*3+1]=r[3]+j*r[4];lm[o*3+2]=r[1];
-      col[o*4]=col[o*4+1]=col[o*4+2]=col[o*4+3]=255;});
+      col[o*4]=col[o*4+1]=col[o*4+2]=col[o*4+3]=255;},2);
   }
   const byTex=new Map();
   units.forEach((u,k)=>{if(!u.n)return;let l=byTex.get(u.ti);if(!l){l=[];byTex.set(u.ti,l);}l.push(k);});
-  return {nv:v,pos:pos.subarray(0,v*3),uv:uv.subarray(0,v*2),lm:lm.subarray(0,v*3),col:col.subarray(0,v*4),
+  return {nv:v,pos:pos.subarray(0,v*3),uv:uv.subarray(0,v*2),lm:lm.subarray(0,v*3),col:col.subarray(0,v*4),nrm:nrm.subarray(0,v*3),
           tri:tri.subarray(0,Math.max(3,t)),units:units,byTex:byTex,rep:rep,ops:[],trans:[],sky:[]};
 }
 function initLitGL(){
@@ -2128,14 +2152,17 @@ function blendFor(kind){
 // faces' ids, see pickAt). Picking always uses the .map's faces; with the game's
 // lighting on, the picture uses the game's polygons for every face it draws itself (op.rep).
 function bindLit(p){
-  const t=CVARS.r_lightmap===2?(lmHeat()||B.lmTex):B.lmTex;
+  // with a light turned off, the relit pages (LT); r_lightmap 2 always shows the baked bytes
+  const t=CVARS.r_lightmap===2?(lmHeat()||B.lmTex):(LT.active?LT.lmOut:B.lmTex);
   gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D_ARRAY,t);gl.activeTexture(gl.TEXTURE0);
   gl.uniform1i(p.u.uLM,1);
+  if(p.u.uVROn){gl.uniform1i(p.u.uVROn,LT.active?1:0);
+    if(LT.active){gl.activeTexture(gl.TEXTURE6);gl.bindTexture(gl.TEXTURE_2D,LT.pOut);gl.activeTexture(gl.TEXTURE0);gl.uniform1i(p.u.uVR,6);}}
 }
 function setModelCommon(vp,mode,lit){
   setCommon(PM,vp,mode);
-  gl.activeTexture(gl.TEXTURE3);gl.bindTexture(gl.TEXTURE_2D,B.smTex||whiteTex);gl.activeTexture(gl.TEXTURE0);
-  gl.uniform1i(PM.u.uStatic,3);gl.uniform1i(PM.u.uLit,0);
+  gl.activeTexture(gl.TEXTURE3);gl.bindTexture(gl.TEXTURE_2D,(LT.active?LT.pOut:B.smTex)||whiteTex);gl.activeTexture(gl.TEXTURE0);
+  gl.uniform1i(PM.u.uStatic,3);gl.uniform1i(PM.u.uLit,0);gl.uniform1i(PM.u.uRel,LT.active?1:0);
   gl.uniform1i(PM.u.uAuto2,0);gl.uniform3fv(PM.u.uFwd,camAxes().f);
   if(lit)gl.uniform1f(PM.u.uShade,0);
 }
@@ -2268,6 +2295,811 @@ function drawSprites(vp){
   setCommon(PW,vp,0);gl.bindVertexArray(B.vSp);gl.disable(gl.CULL_FACE);
   for(const op of ops){const k=(MAT[op[0]]||{}).kind||0;blendFor(k===0?3:k);bindMat(PW,op[0],0);gl.disable(gl.CULL_FACE);gl.drawArrays(gl.TRIANGLES,op[1],op[2]);}
 }
+// ---- the sun flare (Sun flare, J) -------------------------------------------------------
+// The game draws its sun only as a lens flare (RB_DrawSun is compiled out), after the 3D
+// view (R_DrawLensFlares, renderergl1/tr_sun_flare.cpp): flat on the screen, over
+// everything and unfogged. D.sun is this map's: the flare's direction (worldspawn
+// sunflaredirection, else sundirection), its pictures, and dot_min, fullscale and fullfade
+// from its section of global/lensflaredefs.txt ("sun" unless sunflarename names another).
+// Each frame (sun_flare_class::SunTry, then lens_flare::ScreenBlend):
+//  - nothing while the view's forward and the sun's direction have a dot product of
+//    dot_min or less (CheckRange: .55 for "sun", about 57 degrees off);
+//  - while the sun is seen (sunSeen), each flare at the brightness
+//    (dot - dot_min) / (1 - dot_min), and the screen brightened (the glare) by that to the
+//    4th power times fullscale;
+//  - once it isn't, the glare fades out over fullfade milliseconds from there, and so does
+//    the flare while the view still looks toward the sun (it drops to the glare's
+//    brightness at once). With no fullscreen shader there is no glare and no fade.
+// A flare is a square of +-size screen units (1 = half the view's width and half its
+// height, so it stretches with the window), centred on the sun's place on the screen or
+// 2 x where of the way from there through the middle; its picture is added (blendFunc
+// GL_SRC_ALPHA GL_ONE, alphaGen fromClient) at that brightness times its alphascale. The
+// glare is white, added (textures/jack/whitefade).
+const VS_FLARE=`#version 300 es
+layout(location=0) in vec2 aPos; layout(location=1) in vec2 aUV; out vec2 vUV;
+void main(){vUV=aUV;gl_Position=vec4(aPos,0.0,1.0);}`;
+const FS_FLARE=`#version 300 es
+precision mediump float; in vec2 vUV; uniform sampler2D uTex; uniform vec4 uCol; out vec4 o;
+void main(){o=texture(uTex,vUV)*uCol;}`;
+// last: when the sun was last seen (lasttime); blend: the glare is on (blend_active);
+// bright: the glare's brightness then (lastbright); lit: the sun was seen in the frame
+// drawn last; key / seen: the camera position the line was last traced from, and what it met
+const SUNF={P:null,tex:[],last:-1e9,blend:false,bright:0,lit:false,key:null,seen:false,solid:null};
+function sunHas(){return !!(D&&D.sun&&D.sun.fl);}
+function sunNone(){return (D&&D.sun&&D.sun.none)||'This page was built without the sun flare: rebuild the map.';}
+function sunNow(){return performance.now();}          // the game's clock (refdef.time, in ms)
+function setSunFlare(on){on=!!on;if(sunFlare===on)return;sunFlare=on;SUNF.blend=false;SUNF.lit=false;}
+function sunFlareGL(){
+  if(!sunHas())return;
+  SUNF.P=compile(VS_FLARE,FS_FLARE);
+  B.flare=gl.createBuffer();B.vFlare=gl.createVertexArray();gl.bindVertexArray(B.vFlare);
+  gl.bindBuffer(gl.ARRAY_BUFFER,B.flare);
+  gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,16,0);
+  gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,2,gl.FLOAT,false,16,8);
+  gl.bindVertexArray(null);
+  // each picture: $whiteimage (no blob) is white, the others load like the textures
+  SUNF.tex=D.sun.tx.map(t=>t[0]==null?whiteTex:null);
+  D.sun.tx.forEach((t,i)=>{if(t[0]!=null)blobTexture(t[0],t[1],x=>{SUNF.tex[i]=x;});});
+}
+// SunCheckRay's line: CM_BoxTrace from the eye to 16384 units toward the sun, a point
+// through the world model for CONTENTS_SOLID. It meets the solid brushes of worldspawn
+// and func_group (not brush entities, models or static props), solid patches and the
+// terrain; the sun is seen when the first thing met is a sky face (SURF_SKY). A brush is
+// met as CM_TraceThroughBrush meets it; a brush with CONTENTS_FENCE lets a point through.
+// The compiler's bevels are left out (a point never meets one first). A patch here is its
+// drawn triangles met from either side (the game's facets, from the front: the line rarely
+// starts behind one), the terrain its drawn triangles.
+function sunSolids(){
+  if(SUNF.solid)return SUNF.solid;
+  const br=[],tr=[];
+  const solid=(cont,te)=>{let c=(cont|0)&~CONTENTS_DETAIL;
+    if(!c)c=(te.cf|0)|((te.p||[]).some(x=>CLEARS_SOLID.has(x))?0:1);
+    return (c&1)&&!(c&0x2000);};
+  const sky=(flags,te)=>((flags|0)&4)||(te.f&TF_SKY)?1:0;
+  for(const p of SC.prims){
+    if(!WORLDLIKE[MAP.ents[p.ent].cls]||!isFinite(p.mins[0]))continue;
+    const pr=MAP.ents[p.ent].prims[p.bn];if(!pr||!pr.d)continue;
+    if(p.kind===0){
+      const faces=pr.d.faces;if(!faces.length||!solid(faces[0].cont,texFor(faces[0].tex)))continue;
+      const pl=[],sk=[];
+      for(const f of faces){const q=planeOf(f);if(q){pl.push(q);sk.push(sky(f.flags,texFor(f.tex)));}}
+      if(pl.length)br.push({mn:p.mins,mx:p.maxs,pl:pl,sky:sk});
+    }else if(p.kind===1){
+      const te=texFor(pr.d.tex);if(!solid(pr.d.cont,te))continue;
+      tr.push({mn:p.mins,mx:p.maxs,f0:p.f0,f1:p.f1,sky:sky(pr.d.flags,te)});
+    }else tr.push({mn:p.mins,mx:p.maxs,f0:p.f0,f1:p.f1,sky:0});
+  }
+  return SUNF.solid={br:br,tr:tr};
+}
+// Does the line from e toward the sun (d) first meet a sky face?
+function sunTrace(e,d){
+  const L=16384, t=[e[0]+d[0]*L,e[1]+d[1]*L,e[2]+d[2]*L], EPS=0.125;   // SURFACE_CLIP_EPSILON
+  const S=sunSolids();
+  let best=1,sky=0;
+  // is any of the line before what it has met so far inside the box (grown by a unit)?
+  const reach=(mn,mx)=>{let a=0,b=best;
+    for(let k=0;k<3;k++){
+      if(Math.abs(d[k])<1e-9){if(e[k]<mn[k]-1||e[k]>mx[k]+1)return false;continue;}
+      let t0=(mn[k]-1-e[k])/(d[k]*L),t1=(mx[k]+1-e[k])/(d[k]*L);if(t0>t1){const x=t0;t0=t1;t1=x;}
+      if(t0>a)a=t0;if(t1<b)b=t1;if(a>b)return false;}
+    return true;};
+  for(const Bq of S.br){
+    if(!reach(Bq.mn,Bq.mx))continue;
+    let enter=-1,leave=1,lead=-1,startout=false,getout=false,miss=false;
+    for(let k=0;k<Bq.pl.length;k++){const q=Bq.pl[k];
+      const d1=e[0]*q[0]+e[1]*q[1]+e[2]*q[2]-q[3], d2=t[0]*q[0]+t[1]*q[1]+t[2]*q[2]-q[3];
+      if(d1<=0&&d2<=0)continue;
+      if(d2>0)getout=true;
+      if(d1>0){startout=true;if(d2>=EPS||d2>=d1){miss=true;break;}}
+      if(d1>d2){const f=Math.max(0,(d1-EPS)/(d1-d2));if(f>enter){enter=f;lead=k;}}
+      else{const f=Math.min(1,(d1+EPS)/(d1-d2));if(f<leave)leave=f;}
+    }
+    if(miss)continue;
+    if(!startout){if(!getout)return false;continue;}   // the eye inside it: the line goes on
+    if(enter<=leave&&enter>-1&&enter<best){best=Math.max(0,enter);sky=Bq.sky[lead];}
+  }
+  const P=SC.pos,T=SC.tri,Dx=d[0]*L,Dy=d[1]*L,Dz=d[2]*L;
+  for(const R of S.tr){
+    if(!reach(R.mn,R.mx))continue;
+    for(let f=R.f0;f<R.f1;f++)for(let i=SC.faceI0[f],ie=i+SC.faceIN[f];i+2<ie;i+=3){
+      const a=T[i]*3,b=T[i+1]*3,c=T[i+2]*3;
+      const ux=P[b]-P[a],uy=P[b+1]-P[a+1],uz=P[b+2]-P[a+2],vx=P[c]-P[a],vy=P[c+1]-P[a+1],vz=P[c+2]-P[a+2];
+      const px=Dy*vz-Dz*vy,py=Dz*vx-Dx*vz,pz=Dx*vy-Dy*vx,det=ux*px+uy*py+uz*pz;
+      if(Math.abs(det)<1e-9)continue;
+      const sx=e[0]-P[a],sy=e[1]-P[a+1],sz=e[2]-P[a+2],u=(sx*px+sy*py+sz*pz)/det;
+      if(u<0||u>1)continue;
+      const qx=sy*uz-sz*uy,qy=sz*ux-sx*uz,qz=sx*uy-sy*ux,v=(Dx*qx+Dy*qy+Dz*qz)/det;
+      if(v<0||u+v>1)continue;
+      const f2=(vx*qx+vy*qy+vz*qz)/det;
+      if(f2>0&&f2<best){best=f2;sky=R.sky;}
+    }
+  }
+  return best<1&&!!sky;
+}
+// SunCheckRay traces only from a leaf that may see the sun: one outside the map or inside
+// a wall (area -1), any leaf of a map without vis or whose leafs don't list the sun, else
+// a leaf whose list of lights starts with the sun (R_LoadSphereLightVis: GV.sun). Any
+// other leaf never sees it. A .map has none of that: the line alone decides.
+function sunLeafOK(e){
+  const G=GV;if(!G||!G.pvs||!G.sun)return true;
+  const L=gvPointLeaf(G,e);
+  return G.lf[L*14+1]===-1||!!G.sun[L];
+}
+// The line always runs the same way, so the answer changes only as the camera moves.
+function sunSeen(){
+  const e=cam.pos,key=e[0]+' '+e[1]+' '+e[2];
+  if(SUNF.key!==key){SUNF.key=key;SUNF.seen=sunLeafOK(e)&&sunTrace(e,D.sun.d);}
+  return SUNF.seen;
+}
+function sunBlendFactor(k){
+  return [gl.ZERO,gl.ONE,gl.SRC_COLOR,gl.ONE_MINUS_SRC_COLOR,gl.DST_COLOR,gl.ONE_MINUS_DST_COLOR,gl.SRC_ALPHA,
+    gl.ONE_MINUS_SRC_ALPHA,gl.DST_ALPHA,gl.ONE_MINUS_DST_ALPHA,gl.SRC_ALPHA_SATURATE][k|0]||gl.ONE;}
+function drawSunFlare(vp){
+  const S=D.sun;
+  if(!sunFlare||!SUNF.P){SUNF.blend=false;SUNF.lit=false;return;}
+  const now=sunNow(),a=camAxes(),d=S.d;
+  const dot=a.f[0]*d[0]+a.f[1]*d[1]+a.f[2]*d[2], seen=dot>S.dm&&sunSeen();
+  // The game draws every frame and the page only when something changes, so the frame
+  // drawn before this one may be long ago: if the sun was in view in it, it stayed in
+  // view until now (the game kept lasttime current all along), and a fade starts now.
+  if(!seen&&SUNF.lit)SUNF.last=now;
+  SUNF.lit=seen;
+  let alpha=0;
+  if(seen){alpha=(dot-S.dm)/(1-S.dm);SUNF.last=now;SUNF.blend=true;SUNF.bright=alpha*alpha*alpha*alpha*S.fs;}
+  else if(dot>S.dm&&S.full&&SUNF.blend){const f=(S.ff-(now-SUNF.last))/S.ff*SUNF.bright;if(f>0.0001)alpha=f;}
+  let glare=0;
+  if(S.full&&SUNF.blend){const td=now-SUNF.last;
+    if(td>S.ff)SUNF.blend=false;
+    else{glare=(S.ff-td)/S.ff*SUNF.bright;if(glare<=0.0001){glare=0;SUNF.blend=false;}}}
+  const V=[],runs=[];
+  const quad=(x0,y0,x1,y1)=>V.push(x0,y0,0,0, x1,y0,1,0, x0,y1,0,1, x1,y0,1,0, x1,y1,1,1, x0,y1,0,1);
+  if(alpha>0){
+    // SunScreenCalc: where the point 128 units out toward the sun is on the screen
+    const v=[cam.pos[0]+128*d[0],cam.pos[1]+128*d[1],cam.pos[2]+128*d[2]];
+    const w=vp[3]*v[0]+vp[7]*v[1]+vp[11]*v[2]+vp[15];
+    const sx=(vp[0]*v[0]+vp[4]*v[1]+vp[8]*v[2]+vp[12])/w, sy=(vp[1]*v[0]+vp[5]*v[1]+vp[9]*v[2]+vp[13])/w;
+    for(const fl of S.fl){const tex=SUNF.tex[fl[3]];if(!tex)continue;
+      const px=sx-2*sx*fl[1], py=sy-2*sy*fl[1], s=fl[0];
+      quad(px-s,py+s,px+s,py-s);runs.push([tex,alpha*fl[2],S.tx[fl[3]]]);}
+  }
+  if(glare>0){quad(-1,1,1,-1);runs.push([whiteTex,glare,null]);}
+  // a fade keeps the view redrawing until it ends
+  if(S.full&&SUNF.blend&&!seen)requestDraw();
+  if(!runs.length)return;
+  gl.bindBuffer(gl.ARRAY_BUFFER,B.flare);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(V),gl.STREAM_DRAW);
+  gl.useProgram(SUNF.P);gl.bindVertexArray(B.vFlare);
+  gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.disable(gl.CULL_FACE);gl.enable(gl.BLEND);
+  gl.activeTexture(gl.TEXTURE0);gl.uniform1i(SUNF.P.u.uTex,0);
+  runs.forEach((r,i)=>{const tx=r[2];
+    gl.blendFunc(tx?sunBlendFactor(tx[2]):gl.SRC_ALPHA,tx?sunBlendFactor(tx[3]):gl.ONE);
+    gl.bindTexture(gl.TEXTURE_2D,r[0]);gl.uniform4f(SUNF.P.u.uCol,1,1,1,Math.min(1,r[1]));
+    gl.drawArrays(gl.TRIANGLES,i*6,6);});
+  gl.bindVertexArray(null);gl.disable(gl.BLEND);gl.depthMask(true);gl.enable(gl.DEPTH_TEST);
+}
+// ---- turning the map's lights off (Display: Lights off; Selection: Turn off / Turn on) ----
+// The game's light is baked: the lightmaps, the vertex light, the static props' light and
+// the light grid hold the sum of every light the map compiler traced, and nothing in the
+// game takes one out again. The page works out each light's share of that sum and keeps
+// only the light above the map's ambient that the lights still on account for:
+//   new = min(V, A) + max(V - A, 0) * (Won + Wsun) / (Won + Woff + Wsun)
+// per colour channel, V the baked value and A the worldspawn's ambientlight (the compiler
+// floors every texel at it: m6l3d's unlit texels are 5 5 5, m4l3's 7 10 15 for
+// "7.75 10.3 15"). The weights W are each light's contribution as q3map computes it
+// (LightContributionToSample, tools/ommap/light.c): intensity x 7500 / distance^2 x the
+// angle to the surface, a spot light's cone, a linear light's straight falloff, nothing
+// from behind the surface or under 1. It is seen through a shadow map of the drawn, opaque
+// surfaces, as q3map traces against drawn surfaces (InitSurfacesForTesting: no
+// translucent ones, no patches) and not brushes. Each light also gets a small weight
+// without shadows within its reach: light the compiler spread further than the trace
+// says goes with its lamp. On a map with sky, the sun weighs in too, through shadow maps
+// toward the sun (suncolor x the angle) and toward the sky (sundiffuse).
+// Only the shares are used: MOHAA's compiler compresses the brightest light near a lamp,
+// in a way that isn't known, and a share doesn't depend on it. A lamp alone in a room
+// takes the room down to its ambient light; with every light off, a map without sky is
+// at its ambient light everywhere (min(V, A)).
+// Nothing of this runs until a light is turned off. The first time, every light's
+// weight is worked out (a few frames' work each, with progress in the bottom line), then
+// each change only adds or takes out the lights it changes. Lightmap texels are worked
+// out in the lightmap pages' own layout (LIT's polygons drawn at their lightmap
+// coordinates); the texels just outside the polygons, which the lightmap's filtering
+// reaches, take the factor of the texels beside them. Vertex light (triangle soups, a
+// static prop's vertices) and each model's light-grid colour are points ("probes") done
+// the same way: the props' vertices first, in the order of their baked light, so the
+// result is read just as the baked light is (uStatic).
+const LT={ok:null,why:'',lights:[],byEnt:new Map(),off:null,applied:null,nOff:0,active:false,
+  prepped:false,totReady:false,busy:false,queue:[],want:null,entSlot:null,sun:[],
+  fence:null,batch:4,step:'',crash:null,crashArm:0,settleT:0,
+  // lam: the share each light also gets without shadows, within its reach; kap: how many
+  // times that unshadowed light a light turned off may take away (FS_LTREL)
+  lam:0.02,kap:2};
+const LT_CUBE=512, LT_DIR=2048, LT_PW=4096;
+// q3map's ValueForKey: the key as written, its last value (ParseEpair puts each new pair first)
+function ltKey(e,k){let v=null;for(const p of e.kv)if(p[0]===k)v=p[1];return v;}
+function ltNum(s,d){const v=parseFloat(s);return isFinite(v)?v:d;}
+function ltVec(s){const m=String(s==null?'':s).trim().split(/\s+/).map(parseFloat);return(m.length>=3&&isFinite(m[0])&&isFinite(m[1])&&isFinite(m[2]))?m.slice(0,3):null;}
+function ltForward(a){const p=a[0]*Math.PI/180,y=a[1]*Math.PI/180;return[Math.cos(p)*Math.cos(y),Math.cos(p)*Math.sin(y),-Math.sin(p)];}
+// The lights as the compiler reads them (CreateEntityLights; MOHAA's spot lights and
+// spot_angle as its sphere-light lump shows them): every entity whose class starts
+// with "light". Spawnflags: 1 LINEAR, 2 NO_ENTITIES (the world only), 8 ENTITY_ONLY.
+function ltLights(){
+  const out=[];
+  MAP.ents.forEach((e,ei)=>{
+    if(!String(e.cls).startsWith('light'))return;
+    const o=ltVec(ltKey(e,'origin'));if(!o)return;
+    const sf=ltNum(ltKey(e,'spawnflags'),0)|0;
+    let I=ltNum(ltKey(e,'light'),0);if(!I)I=ltNum(ltKey(e,'_light'),0);if(!I)I=300;
+    let c=ltVec(ltKey(e,'_color')||ltKey(e,'color'))||[1,1,1];
+    const m=Math.max(c[0],c[1],c[2]);c=m>0?c.map(x=>x/m):[0,0,0];          // ColorNormalize
+    // a spot light: aimed at its target's origin, else along its "angles" (64 units on);
+    // its cone's radius per unit of distance is (radius + 16) / that distance, or the
+    // tangent of spot_angle
+    let dir=null,dist=0;
+    const tg=ltKey(e,'target');
+    if(tg){const t=MAP.ents.find(x=>ltKey(x,'targetname')===tg),to=t?ltVec(ltKey(t,'origin')):null;
+      if(to){const d=[to[0]-o[0],to[1]-o[1],to[2]-o[2]],l=Math.hypot(d[0],d[1],d[2]);dist=l;dir=l>0?d.map(x=>x/l):[0,0,-1];}}
+    if(!dir&&ltKey(e,'angles')!=null){dir=ltForward(ltVec(ltKey(e,'angles'))||[0,0,0]);dist=64;}
+    let rbd=0;
+    if(dir){const sa=ltKey(e,'spot_angle');
+      rbd=sa!=null?Math.tan(ltNum(sa,45)*Math.PI/180):((ltNum(ltKey(e,'radius'),0)||64)+16)/(dist||64);}
+    const ph=I*7500, lin=!!(sf&1)&&!dir, fall=ltNum(ltKey(e,'falloff'),1)||1;
+    // how far it reaches: where its light falls to 1
+    const R=lin?Math.max(16,ph/8000/fall):Math.max(16,Math.sqrt(Math.max(0,ph)));
+    out.push({ei:ei,o:o,ph:ph,c:c,R:R,lin:lin,fall:fall,dir:dir,rbd:rbd,world:!(sf&8),ents:!(sf&2)});
+  });
+  return out;
+}
+// Can lights be turned off here? A .map has no baked light; a .bsp needs lightmaps and the
+// float render targets the weights are summed in.
+function ltCheck(){
+  if(LT.ok!==null)return LT.ok;
+  LT.ok=false;
+  if(D.kind!=='bsp'){LT.why='A .map has no baked light to turn off: the map compiler bakes the light into the .bsp (its lightmaps, vertex light and light grid). Open the .bsp to turn lights off.';return false;}
+  if(!LIT){LT.why='This .bsp has no lightmaps, so there is no baked light to turn off.';return false;}
+  LT.lights=ltLights();
+  if(!LT.lights.length){LT.why='This map has no light entities: its light is all ambient and sun.';return false;}
+  if(!gl.getExtension('EXT_color_buffer_float')){LT.why='This graphics driver can\'t draw into floating-point textures (EXT_color_buffer_float), which turning lights off needs.';return false;}
+  LT.lights.forEach((l,i)=>{if(!LT.byEnt.has(l.ei))LT.byEnt.set(l.ei,i);});
+  LT.off=new Uint8Array(LT.lights.length);LT.applied=new Uint8Array(LT.lights.length);
+  LT.crash=ltCrumbRead();
+  LT.ok=true;return true;
+}
+function ltIsLight(ei){return LT.ok&&LT.byEnt.has(ei);}
+function ltLightOff(ei){const i=LT.byEnt.get(ei);return i!=null&&!!LT.off[i];}
+
+// ---- the shaders ------------------------------------------------------------------------
+// Distance maps: a cube around a light (six faces side by side in one texture, each drawn
+// and read through the same matrix, so no face can come out turned) holding the distance
+// to the nearest drawn surface; or one map toward the sun or the sky holding how far
+// toward it the nearest surface is.
+const VS_LTD=`#version 300 es
+layout(location=0) in vec3 aPos; uniform mat4 uVP; out vec3 vP;
+void main(){vP=aPos;gl_Position=uVP*vec4(aPos,1.0);}`;
+const FS_LTD=`#version 300 es
+precision highp float; in vec3 vP; uniform vec4 uL; out vec4 o;
+void main(){o=vec4(uL.w>0.5?dot(vP,uL.xyz):length(vP-uL.xyz),0.0,0.0,1.0);}`;
+// The weight shaders: a lightmap texel (drawn at its lightmap coordinates in the pages'
+// atlas) or a probe (a point at its slot), and what one light or one sun / sky direction
+// adds there. aN.w: 1 a one-sided surface, 0 two-sided (a patch: either side), -1 a model
+// (no surface: lit from every side).
+const VS_LTLM=`#version 300 es
+layout(location=0) in vec3 aPos; layout(location=8) in vec3 aLM; layout(location=13) in vec4 aN;
+uniform vec3 uAt; out vec3 vP; out vec4 vN;
+void main(){float pg=floor(aLM.z+0.5);vec2 c=vec2(mod(pg,uAt.x),floor(pg/uAt.x));
+  vP=aPos;vN=aN;gl_Position=vec4(((c+aLM.xy)*uAt.yz)*2.0-1.0,0.0,1.0);}`;
+const VS_LTPR=`#version 300 es
+layout(location=0) in vec3 aPos; layout(location=13) in vec4 aN; layout(location=14) in float aSlot;
+uniform vec2 uPA; out vec3 vP; out vec4 vN;
+void main(){float s=aSlot;vec2 t=vec2(mod(s,uPA.x)+0.5,floor(s/uPA.x)+0.5)/uPA;
+  vP=aPos;vN=aN;gl_PointSize=1.0;gl_Position=vec4(t*2.0-1.0,0.0,1.0);}`;
+const FS_LTW=`#version 300 es
+precision highp float;
+in vec3 vP; in vec4 vN;
+uniform int uKind;          // 0 a light, 1 a sun / sky direction
+uniform vec4 uL;            // light: origin, intensity x 7500; direction: toward it, unused
+uniform vec4 uC;            // colour (light: normalized; direction: its weight), light's reach
+uniform vec4 uS;            // spot direction, radius per unit of distance (0: not a spot)
+uniform vec4 uF;            // linear light (1 / 0), its falloff, the share without shadows
+uniform highp sampler2D uSh; uniform mat4 uFV[6]; uniform float uSz;
+out vec4 o;
+// The point is first moved off its surface by a cube texel and a half at its distance
+// (n: the surface's normal, none for a model), so its own surface can't hide it, and the
+// test allows two texels more: enough for a surface the light grazes, not enough to see
+// through a wall. The maps are read texel by texel (uSz: a face's or the sun map's size).
+float seenCube(vec3 p,vec3 n){
+  float tx=2.0*length(p-uL.xyz)/uSz;
+  p+=n*(1.5*tx);
+  vec3 d=p-uL.xyz,a=abs(d);int f=(a.x>=a.y&&a.x>=a.z)?(d.x>0.0?0:1):((a.y>=a.z)?(d.y>0.0?2:3):(d.z>0.0?4:5));
+  vec4 c=uFV[f]*vec4(p,1.0);vec2 uv=clamp(c.xy/max(c.w,1e-6)*0.5+0.5,vec2(0.0),vec2(1.0));
+  ivec2 px=ivec2(min(uv*uSz,vec2(uSz-1.0)))+ivec2(f%3,f/3)*int(uSz);
+  float s=texelFetch(uSh,px,0).r;
+  return length(d)<=s+1.0+2.0*tx?1.0:0.0;}
+float seenDir(vec3 p){
+  vec4 c=uFV[0]*vec4(p,1.0);vec2 uv=c.xy*0.5+0.5;
+  if(uv.x<0.0||uv.y<0.0||uv.x>1.0||uv.y>1.0)return 1.0;
+  ivec2 px=ivec2(min(uv*uSz,vec2(uSz-1.0)));
+  return dot(p,uL.xyz)>=texelFetch(uSh,px,0).r-2.0?1.0:0.0;}
+void main(){
+  vec3 n=vN.xyz, p=vP+(vN.w>-0.5?n:vec3(0.0));       // q3map samples 1 unit off the surface
+  float w=0.0;
+  if(uKind==1){
+    float ang=vN.w>0.5?max(0.0,dot(n,uL.xyz)):(vN.w>-0.5?abs(dot(n,uL.xyz)):1.0);
+    if(ang>0.0)w=ang*seenDir(p);
+  }else{
+    vec3 d=uL.xyz-p;float dl=length(d);
+    if(dl<=uC.w){
+      float dist=max(dl,16.0), ang=1.0;
+      bool ok=true;
+      if(vN.w>0.5){if(dot(uL.xyz-vP,n)<0.0)ok=false;ang=dot(n,d)/max(dl,1e-6);}
+      else if(vN.w>-0.5)ang=abs(dot(n,d))/max(dl,1e-6);
+      float add=0.0;
+      if(ok){
+        if(uS.w>0.0){float dbn=dot(p-uL.xyz,uS.xyz);
+          if(dbn>=0.0){float rad=uS.w*dbn,sr=length(p-(uL.xyz+uS.xyz*dbn));
+            if(sr<rad)add=uL.w/(dist*dist)*ang*(sr<=rad-32.0?1.0:(rad-sr)/32.0);}}
+        else if(uF.x>0.5)add=ang*uL.w*(1.0/8000.0)-dist*uF.y;
+        else add=uL.w/(dist*dist)*ang;
+      }
+      w=(add>1.0?add*seenCube(p,vN.w>0.5?n:(vN.w>-0.5?n*sign(dot(n,d)):vec3(0.0))):0.0)+uF.z*uL.w/(dist*dist);
+    }
+  }
+  // a sixteenth, so the half floats summing them hold a texel next to many strong lights
+  o=vec4(uC.rgb*w*0.0625,1.0);}`;
+// Coverage: which atlas texels some lightmapped polygon covers
+const FS_LTCOV=`#version 300 es
+precision mediump float; out vec4 o; void main(){o=vec4(1.0);}`;
+// The relit lightmap page / probes: the light above the ambient floor scaled by the share
+// that stays on, taking out no more than the lights turned off could have given there.
+// Each light adds its share without shadows (uF.z, its photons / distance squared) wherever
+// it reaches, so OFF / that share bounds what they gave; uCap is twice that, in the
+// page's units. A texel only a little of their light reaches keeps the rest of its light
+// (sky light, light the compiler bent around a corner).
+const VS_LTQ=`#version 300 es
+layout(location=0) in vec2 aQ; void main(){gl_Position=vec4(aQ,0.0,1.0);}`;
+const FS_LTREL=`#version 300 es
+precision highp float;
+uniform highp sampler2DArray uBake; uniform highp sampler2D uTot; uniform highp sampler2D uOff;
+uniform highp sampler2D uSun; uniform highp sampler2D uCov;
+uniform int uLayer; uniform int uCols; uniform vec3 uA; uniform int uDark; uniform float uCap;
+out vec4 o;
+// the texels around one, the ring beside it first, then the one two texels out
+const ivec2 NB[24]=ivec2[24](ivec2(-1,-1),ivec2(0,-1),ivec2(1,-1),ivec2(-1,0),ivec2(1,0),ivec2(-1,1),ivec2(0,1),ivec2(1,1),
+  ivec2(-2,-2),ivec2(-1,-2),ivec2(0,-2),ivec2(1,-2),ivec2(2,-2),ivec2(-2,-1),ivec2(2,-1),ivec2(-2,0),
+  ivec2(2,0),ivec2(-2,1),ivec2(2,1),ivec2(-2,2),ivec2(-1,2),ivec2(0,2),ivec2(1,2),ivec2(2,2));
+vec3 fac(ivec2 a){vec3 t=texelFetch(uTot,a,0).rgb,f=texelFetch(uOff,a,0).rgb,s=texelFetch(uSun,a,0).rgb,d=t+s;
+  vec3 on=max(t-f,vec3(0.0))+s;
+  return clamp(vec3(d.r>1e-4?on.r/d.r:1.0,d.g>1e-4?on.g/d.g:1.0,d.b>1e-4?on.b/d.b:1.0),0.0,1.0);}
+void main(){
+  ivec2 t=ivec2(gl_FragCoord.xy), b=ivec2((uLayer%uCols)*128,(uLayer/uCols)*128);
+  vec3 F=vec3(1.0),f=vec3(0.0);
+  if(uDark==1)F=vec3(0.0);
+  else if(texelFetch(uCov,b+t,0).r>0.5){F=fac(b+t);f=texelFetch(uOff,b+t,0).rgb;}
+  else{
+    // a texel no polygon covers (the filtering reaches it) takes the factor of the covered
+    // texels of the nearest ring that has any; loops of fixed length, nothing skipped
+    vec3 s1=vec3(0.0),g1=vec3(0.0),s2=vec3(0.0),g2=vec3(0.0);float n1=0.0,n2=0.0;
+    for(int i=0;i<8;i++){ivec2 q=t+NB[i],c=clamp(q,ivec2(0),ivec2(127));
+      float w=(q==c?1.0:0.0)*step(0.5,texelFetch(uCov,b+c,0).r);
+      s1+=fac(b+c)*w;g1+=texelFetch(uOff,b+c,0).rgb*w;n1+=w;}
+    for(int i=8;i<24;i++){ivec2 q=t+NB[i],c=clamp(q,ivec2(0),ivec2(127));
+      float w=(q==c?1.0:0.0)*step(0.5,texelFetch(uCov,b+c,0).r);
+      s2+=fac(b+c)*w;g2+=texelFetch(uOff,b+c,0).rgb*w;n2+=w;}
+    if(n1>0.0){F=s1/n1;f=g1/n1;}else if(n2>0.0){F=s2/n2;f=g2/n2;}}
+  vec3 V=texelFetch(uBake,ivec3(t,uLayer),0).rgb,X=max(V-uA,vec3(0.0));
+  vec3 Y=uDark==1?vec3(0.0):max(X*F,X-uCap*max(f,vec3(0.0)));
+  o=vec4(min(V,uA)+Y,1.0);}`;
+const FS_LTPREL=`#version 300 es
+precision highp float;
+uniform highp sampler2D uBake; uniform highp sampler2D uTot; uniform highp sampler2D uOff; uniform highp sampler2D uSun;
+uniform vec3 uA; uniform int uDark; uniform float uCap;
+out vec4 o;
+void main(){ivec2 a=ivec2(gl_FragCoord.xy);
+  vec3 t=texelFetch(uTot,a,0).rgb,f=texelFetch(uOff,a,0).rgb,s=texelFetch(uSun,a,0).rgb,d=t+s,on=max(t-f,vec3(0.0))+s;
+  vec3 F=clamp(vec3(d.r>1e-4?on.r/d.r:1.0,d.g>1e-4?on.g/d.g:1.0,d.b>1e-4?on.b/d.b:1.0),0.0,1.0);
+  vec3 V=texelFetch(uBake,a,0).rgb,X=max(V-uA,vec3(0.0));
+  vec3 Y=uDark==1?vec3(0.0):max(X*F,X-uCap*max(f,vec3(0.0)));
+  o=vec4(min(V,uA)+Y,1.0);}`;
+
+// ---- matrices ----------------------------------------------------------------------------
+function ltLook(e,f,u){   // view matrix from e looking along f, u roughly up (viewProj's layout)
+  const r=vnorm(vcross(f,u)),uu=vcross(r,f);
+  return [r[0],uu[0],-f[0],0, r[1],uu[1],-f[1],0, r[2],uu[2],-f[2],0, -vdot(r,e),-vdot(uu,e),vdot(f,e),1];}
+function ltPersp(n,fz){return [1,0,0,0, 0,1,0,0, 0,0,-(fz+n)/(fz-n),-1, 0,0,-2*fz*n/(fz-n),0];}
+function ltOrtho(h,n,fz){return [1/h,0,0,0, 0,1/h,0,0, 0,0,-2/(fz-n),0, 0,0,-(fz+n)/(fz-n),1];}
+const LT_FACES=[[[1,0,0],[0,0,1]],[[-1,0,0],[0,0,1]],[[0,1,0],[0,0,1]],[[0,-1,0],[0,0,1]],[[0,0,1],[0,1,0]],[[0,0,-1],[0,1,0]]];
+
+// ---- getting ready: the polygons' normals, the probes, the textures ----------------------
+function ltTex(w,h,ifmt,fmt,type,filter){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texImage2D(gl.TEXTURE_2D,0,ifmt,w,h,0,fmt,type,null);
+  for(const[p,v]of[[gl.TEXTURE_MIN_FILTER,filter],[gl.TEXTURE_MAG_FILTER,filter],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE]])gl.texParameteri(gl.TEXTURE_2D,p,v);
+  return t;}
+function ltFB(tex,depth){const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,tex,0);
+  if(depth)gl.framebufferRenderbuffer(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.RENDERBUFFER,depth);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);return f;}
+function ltPrep(){
+  if(LT.prepped)return;
+  const nv=LIT.nv, P=LIT.pos, T=LIT.tri, LM=LIT.lm;
+  // normals: a .bsp polygon's from its winding (its triangles run clockwise seen from the
+  // front, so (c-a)x(b-a) is its normal), terrain's facing up, a patch's the .bsp's own
+  // (from its control points; without them, from one of the two windings the page draws
+  // it with, used from either side)
+  const N=new Float32Array(nv*4), side=new Float32Array(nv);
+  LT.units=[];
+  LIT.units.forEach(u=>{
+    if(!u.n)return;
+    const k=u.k|0, te=TEX[u.ti]||{};
+    let mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity],lmOn=false,vtx=false;
+    for(let q=0;q<u.n;q+=3){
+      if(k===1&&((q/3)%4)>=2)continue;
+      const a=T[u.i0+q]*3,b=T[u.i0+q+1]*3,c=T[u.i0+q+2]*3;
+      const e1=[P[c]-P[a],P[c+1]-P[a+1],P[c+2]-P[a+2]],e2=[P[b]-P[a],P[b+1]-P[a+1],P[b+2]-P[a+2]];
+      let nn=vcross(e1,e2);if(k===2&&nn[2]<0)nn=[-nn[0],-nn[1],-nn[2]];
+      for(const v of [a/3,b/3,c/3]){
+        const pn=LIT.nrm&&k===1?[LIT.nrm[v*3],LIT.nrm[v*3+1],LIT.nrm[v*3+2]]:null, has=pn&&(pn[0]||pn[1]||pn[2]);
+        if(has){N[v*4]=pn[0];N[v*4+1]=pn[1];N[v*4+2]=pn[2];side[v]=1;}
+        else{N[v*4]+=nn[0];N[v*4+1]+=nn[1];N[v*4+2]+=nn[2];side[v]=k===1?0:1;}}
+    }
+    for(let q=0;q<u.n;q++){const v=T[u.i0+q];
+      for(let j=0;j<3;j++){const x=P[v*3+j];if(x<mn[j])mn[j]=x;if(x>mx[j])mx[j]=x;}
+      if(LM[v*3+2]>-0.5)lmOn=true;else if(LM[v*3+2]>-1.5)vtx=true;}
+    // occluders: drawn, opaque surfaces; light passes see-through ones (CONTENTS_TRANSLUCENT),
+    // alpha-tested ones (grates, fences: through their holes) and patches (q3map traces
+    // patches only with -patchshadows)
+    const occ=!(te.f&(TF_SKY|TF_ALPHATEST))&&!((te.cf|0)&CONTENTS_TRANSLUCENT)&&k!==1;
+    LT.units.push({i0:u.i0,n:u.n,k:k,mn:mn,mx:mx,lm:lmOn&&!(te.f&TF_SKY),vtx:vtx,occ:occ});
+  });
+  for(let v=0;v<nv;v++){const l=Math.hypot(N[v*4],N[v*4+1],N[v*4+2])||1;N[v*4]/=l;N[v*4+1]/=l;N[v*4+2]/=l;N[v*4+3]=side[v];}
+  LT.lnrm=N;
+  // and the solid brushes, every side (caulk too): q3map's trace stops in the tree's solid
+  // leafs before it looks at surfaces (TraceLine_r). Not the sky's: the sun's trace that
+  // ends in a sky brush is the sun seen (SunToPoint), and no light is beyond them.
+  LT.sb=[];
+  for(const p of SC.prims){
+    if(p.kind!==0||!WORLDLIKE[MAP.ents[p.ent].cls]||!isFinite(p.mins[0]))continue;
+    const pr=MAP.ents[p.ent].prims[p.bn];if(!pr||!pr.d||!pr.d.faces.length)continue;
+    const f0=pr.d.faces[0],te=texFor(f0.tex);
+    if(LT.structOnly&&(MAP.ents[p.ent].cls==='detail'||pr.d.faces.some(f=>(f.cont|0)&CONTENTS_DETAIL)))continue;
+    let c=(f0.cont|0)&~CONTENTS_DETAIL;if(!c)c=(te.cf|0)|((te.p||[]).some(x=>CLEARS_SOLID.has(x))?0:1);
+    if(!(c&1))continue;
+    if(pr.d.faces.some(f=>((f.flags|0)&4)||(texFor(f.tex).f&TF_SKY)))continue;
+    const tri=[];for(let f=p.f0;f<p.f1;f++)for(let q=SC.faceI0[f];q<SC.faceI0[f]+SC.faceIN[f];q++)tri.push(SC.tri[q]);
+    if(tri.length)LT.sb.push({mn:p.mins,mx:p.maxs,t:new Uint32Array(tri)});
+  }
+  // the map's size, for the sun and sky maps
+  const mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+  for(let v=0;v<nv;v++)for(let j=0;j<3;j++){const x=P[v*3+j];if(x<mn[j])mn[j]=x;if(x>mx[j])mx[j]=x;}
+  LT.ctr=[(mn[0]+mx[0])/2,(mn[1]+mx[1])/2,(mn[2]+mx[2])/2];LT.rad=Math.max(64,Math.hypot(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2])/2+64);
+  // ---- probes: the props' vertices (in their baked light's order), vertex-lit polygons'
+  // vertices, then one per model lit by the light grid
+  const L=D.lit, pp=[],pn=[],pb=[],world=[];
+  const smn=L.sm!=null?(L.smn|0):0;
+  for(let i=0;i<smn;i++){pp.push(0,0,0);pn.push(0,0,1,-2);}         // filled below (-2: unused)
+  const smb=smn?D.bytes(L.sm):null;
+  for(let i=0;i<smn;i++)pb.push(smb[i*3],smb[i*3+1],smb[i*3+2],255);
+  if(smn&&L.st)for(const R of MODELS){
+    if(!R.eng)continue;
+    // the model's vertex normals, from its triangles
+    const nn=new Float32Array(R.pos.length);
+    for(let q=0;q+2<R.idx.length;q+=3){const a=R.idx[q]*3,b=R.idx[q+1]*3,c=R.idx[q+2]*3;
+      const e1=[R.pos[b]-R.pos[a],R.pos[b+1]-R.pos[a+1],R.pos[b+2]-R.pos[a+2]],e2=[R.pos[c]-R.pos[a],R.pos[c+1]-R.pos[a+1],R.pos[c+2]-R.pos[a+2]];
+      const f=vcross(e1,e2);for(const v of [a,b,c]){nn[v]+=f[0];nn[v+1]+=f[1];nn[v+2]+=f[2];}}
+    for(const ei of R.inst){const base=L.st[ei];if(base==null)continue;
+      const rows=instRows(ENTS[ei]);
+      for(let k=0;k<R.eng.length;k++){const slot=base+R.eng[k];if(slot<0||slot>=smn||pn[slot*4+3]!==-2)continue;
+        const x=R.pos[k*3],y=R.pos[k*3+1],z=R.pos[k*3+2];
+        pp[slot*3]=rows[0]*x+rows[1]*y+rows[2]*z+rows[3];pp[slot*3+1]=rows[4]*x+rows[5]*y+rows[6]*z+rows[7];pp[slot*3+2]=rows[8]*x+rows[9]*y+rows[10]*z+rows[11];
+        const a=nn[k*3],b=nn[k*3+1],c=nn[k*3+2];
+        let w=[rows[0]*a+rows[1]*b+rows[2]*c,rows[4]*a+rows[5]*b+rows[6]*c,rows[8]*a+rows[9]*b+rows[10]*c];
+        w=vnorm(w)||[0,0,1];pn[slot*4]=w[0];pn[slot*4+1]=w[1];pn[slot*4+2]=w[2];pn[slot*4+3]=1;}}}
+  for(let i=0;i<smn;i++)world.push(pn[i*4+3]!==-2);
+  // vertex-lit polygons' vertices
+  const vslot=new Float32Array(nv).fill(-1);
+  for(const u of LT.units){if(!u.vtx)continue;
+    for(let q=0;q<u.n;q++){const v=T[u.i0+q];if(vslot[v]>=0||LM[v*3+2]>-0.5||LM[v*3+2]<-1.5)continue;
+      vslot[v]=pp.length/3;pp.push(P[v*3],P[v*3+1],P[v*3+2]);pn.push(N[v*4],N[v*4+1],N[v*4+2],N[v*4+3]);
+      pb.push(LIT.col[v*4],LIT.col[v*4+1],LIT.col[v*4+2],255);world.push(true);}}
+  LT.vslot=vslot;
+  // models lit by the light grid: their origin, lit from every side
+  LT.entSlot=new Map();
+  if(L.el)for(const R of MODELS)for(const ei of R.inst){const g=L.el[ei],X=ENTS[ei];if(!g||!X||!X.origin||LT.entSlot.has(ei))continue;
+    LT.entSlot.set(ei,pp.length/3);pp.push(X.origin[0],X.origin[1],X.origin[2]);pn.push(0,0,0,-1);pb.push(g[0],g[1],g[2],255);world.push(false);}
+  LT.np=pp.length/3;LT.ph=Math.max(1,Math.ceil(LT.np/LT_PW));
+  LT.ppos=new Float32Array(pp);LT.pworld=world;
+  // a grid of the probes by 512-unit cells, to find the ones a light reaches
+  LT.pgrid=new Map();
+  for(let i=0;i<LT.np;i++){if(pn[i*4+3]===-2)continue;const k=ltCell(pp[i*3],pp[i*3+1],pp[i*3+2]);let a=LT.pgrid.get(k);if(!a){a=[];LT.pgrid.set(k,a);}a.push(i);}
+  // ---- GL: programs, buffers, textures
+  LT.Pd=compile(VS_LTD,FS_LTD);LT.Plm=compile(VS_LTLM,FS_LTW);LT.Ppr=compile(VS_LTPR,FS_LTW);
+  LT.Pcov=compile(VS_LTLM,FS_LTCOV);LT.Prel=compile(VS_LTQ,FS_LTREL);LT.Pprel=compile(VS_LTQ,FS_LTPREL);
+  LT.bN=makeBuf(gl.ARRAY_BUFFER,N);LT.ib=gl.createBuffer();LT.sib=gl.createBuffer();
+  LT.vSB=gl.createVertexArray();gl.bindVertexArray(LT.vSB);attr(0,B.pos,3);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,LT.sib);gl.bindVertexArray(null);
+  LT.vLM=gl.createVertexArray();gl.bindVertexArray(LT.vLM);attr(0,B.lPos,3);attr(8,B.lLM,3);attr(13,LT.bN,4);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,LT.ib);gl.bindVertexArray(null);
+  const slots=new Float32Array(LT.np);for(let i=0;i<LT.np;i++)slots[i]=i;
+  LT.bPP=makeBuf(gl.ARRAY_BUFFER,LT.ppos);LT.bPN=makeBuf(gl.ARRAY_BUFFER,new Float32Array(pn));LT.bPS=makeBuf(gl.ARRAY_BUFFER,slots);LT.pib=gl.createBuffer();
+  LT.vPR=gl.createVertexArray();gl.bindVertexArray(LT.vPR);attr(0,LT.bPP,3);attr(13,LT.bPN,4);attr(14,LT.bPS,1);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,LT.pib);gl.bindVertexArray(null);
+  // the vertex-lit polygons read their relit light at their slot (VS_LIT's aVP)
+  LT.bVS=makeBuf(gl.ARRAY_BUFFER,vslot);gl.bindVertexArray(B.vLit);attr(13,LT.bVS,1);gl.bindVertexArray(null);
+  // the lightmap pages' atlas, 8 pages across
+  LT.cols=Math.min(8,B.lmN);LT.aw=LT.cols*128;LT.ah=Math.ceil(B.lmN/LT.cols)*128;
+  const f16=(w,h)=>ltTex(w,h,gl.RGBA16F,gl.RGBA,gl.HALF_FLOAT,gl.NEAREST);
+  LT.tTot=f16(LT.aw,LT.ah);LT.tOff=f16(LT.aw,LT.ah);LT.tSun=f16(LT.aw,LT.ah);LT.tCov=ltTex(LT.aw,LT.ah,gl.RGBA8,gl.RGBA,gl.UNSIGNED_BYTE,gl.NEAREST);
+  LT.fTot=ltFB(LT.tTot);LT.fOff=ltFB(LT.tOff);LT.fSun=ltFB(LT.tSun);LT.fCov=ltFB(LT.tCov);
+  LT.pTot=f16(LT_PW,LT.ph);LT.pOff=f16(LT_PW,LT.ph);LT.pSun=f16(LT_PW,LT.ph);
+  LT.fpTot=ltFB(LT.pTot);LT.fpOff=ltFB(LT.pOff);LT.fpSun=ltFB(LT.pSun);
+  const bake=new Uint8Array(LT_PW*LT.ph*4);bake.set(pb);
+  LT.pBake=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,LT.pBake);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,LT_PW,LT.ph,0,gl.RGBA,gl.UNSIGNED_BYTE,bake);
+  for(const p of [gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER])gl.texParameteri(gl.TEXTURE_2D,p,gl.NEAREST);
+  LT.pOut=ltTex(LT_PW,LT.ph,gl.RGBA8,gl.RGBA,gl.UNSIGNED_BYTE,gl.NEAREST);LT.fpOut=ltFB(LT.pOut);
+  // the relit lightmap pages, as B.lmTex holds them
+  LT.lmOut=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D_ARRAY,LT.lmOut);gl.texStorage3D(gl.TEXTURE_2D_ARRAY,1,gl.RGBA8,128,128,B.lmN);
+  for(const[p,v]of[[gl.TEXTURE_MIN_FILTER,gl.LINEAR],[gl.TEXTURE_MAG_FILTER,gl.LINEAR],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE]])gl.texParameteri(gl.TEXTURE_2D_ARRAY,p,v);
+  LT.fLM=gl.createFramebuffer();
+  // distance maps: the cube's six faces in one texture, a sun / sky map
+  LT.tCube=ltTex(LT_CUBE*3,LT_CUBE*2,gl.R32F,gl.RED,gl.FLOAT,gl.NEAREST);
+  LT.rCube=gl.createRenderbuffer();gl.bindRenderbuffer(gl.RENDERBUFFER,LT.rCube);gl.renderbufferStorage(gl.RENDERBUFFER,gl.DEPTH_COMPONENT24,LT_CUBE*3,LT_CUBE*2);
+  LT.fCube=ltFB(LT.tCube,LT.rCube);
+  LT.tDir=ltTex(LT_DIR,LT_DIR,gl.R32F,gl.RED,gl.FLOAT,gl.NEAREST);
+  LT.rDir=gl.createRenderbuffer();gl.bindRenderbuffer(gl.RENDERBUFFER,LT.rDir);gl.renderbufferStorage(gl.RENDERBUFFER,gl.DEPTH_COMPONENT24,LT_DIR,LT_DIR);
+  LT.fDir=ltFB(LT.tDir,LT.rDir);
+  LT.bQ=makeBuf(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]));
+  LT.vQ=gl.createVertexArray();gl.bindVertexArray(LT.vQ);attr(0,LT.bQ,2);gl.bindVertexArray(null);
+  for(const f of [LT.fTot,LT.fOff,LT.fSun,LT.fCov,LT.fpTot,LT.fpOff,LT.fpSun])ltClear(f);
+  // the world's ambient light (ambientlight, whole numbers as the compiler floors it),
+  // brightened as the baked light is
+  const wk=MAP.ents[0]?MAP.ents[0]:{kv:[]}, am=ltVec(ltKey(wk,'ambientlight'))||[0,0,0], sh=1<<(L.shift|0);
+  LT.amb=am.map(x=>Math.min(255,Math.max(0,Math.floor(x))*sh)/255);
+  LT.prepped=true;
+}
+function ltCell(x,y,z){return Math.floor(x/512)+','+Math.floor(y/512)+','+Math.floor(z/512);}
+function ltClear(f){gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);}
+// the triangles of the units a sphere reaches (lightmapped ones or occluders), as indices
+function ltIdx(o,R,want){
+  const parts=[];let n=0;
+  for(const u of LT.units){if(!u[want])continue;
+    if(o[0]+R<u.mn[0]||o[0]-R>u.mx[0]||o[1]+R<u.mn[1]||o[1]-R>u.mx[1]||o[2]+R<u.mn[2]||o[2]-R>u.mx[2])continue;
+    parts.push(u);n+=u.n;}
+  const out=new Uint32Array(n);let k=0;
+  for(const u of parts){
+    if(u.k===1){for(let q=0;q<u.n;q+=12){out.set(LIT.tri.subarray(u.i0+q,u.i0+Math.min(u.n,q+6)),k);k+=Math.min(6,u.n-q);}}
+    else{out.set(LIT.tri.subarray(u.i0,u.i0+u.n),k);k+=u.n;}}
+  return out.subarray(0,k);}
+function ltProbeIdx(o,R,world){
+  const out=[],c0=[Math.floor((o[0]-R)/512),Math.floor((o[1]-R)/512),Math.floor((o[2]-R)/512)],c1=[Math.floor((o[0]+R)/512),Math.floor((o[1]+R)/512),Math.floor((o[2]+R)/512)];
+  for(let x=c0[0];x<=c1[0];x++)for(let y=c0[1];y<=c1[1];y++)for(let z=c0[2];z<=c1[2];z++){
+    const a=LT.pgrid.get(x+','+y+','+z);if(!a)continue;
+    for(const i of a){if(LT.pworld[i]!==world)continue;const P=LT.ppos;
+      if((P[i*3]-o[0])**2+(P[i*3+1]-o[1])**2+(P[i*3+2]-o[2])**2<=R*R)out.push(i);}}
+  return new Uint32Array(out);}
+// one light's distance cube, of the drawn surfaces it reaches
+function ltCube(l){
+  const idx=ltIdx(l.o,l.R,'occ'), sb=ltSolidIdx(l.o,l.R);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,LT.fCube);gl.viewport(0,0,LT_CUBE*3,LT_CUBE*2);gl.depthMask(true);
+  gl.clearBufferfv(gl.COLOR,0,new Float32Array([1e9,0,0,0]));gl.clearDepth(1);gl.clear(gl.DEPTH_BUFFER_BIT);
+  LT.fv=[];
+  const Pm=ltPersp(1,l.R+32);
+  for(let f=0;f<6;f++)LT.fv.push(new Float32Array(mul4(Pm,ltLook(l.o,LT_FACES[f][0],LT_FACES[f][1]))));
+  gl.useProgram(LT.Pd);gl.uniform4f(LT.Pd.u.uL,l.o[0],l.o[1],l.o[2],0);
+  gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LESS);gl.depthMask(true);gl.disable(gl.CULL_FACE);gl.disable(gl.BLEND);
+  ltDrawOcc(idx,sb,f=>{gl.viewport((f%3)*LT_CUBE,Math.floor(f/3)*LT_CUBE,LT_CUBE,LT_CUBE);gl.uniformMatrix4fv(LT.Pd.u.uVP,false,LT.fv[f]);},6);
+}
+// the structural brushes' triangles a sphere reaches
+function ltSolidIdx(o,R){
+  let n=0;const parts=[];
+  for(const b of LT.sb){if(o[0]+R<b.mn[0]||o[0]-R>b.mx[0]||o[1]+R<b.mn[1]||o[1]-R>b.mx[1]||o[2]+R<b.mn[2]||o[2]-R>b.mx[2])continue;parts.push(b.t);n+=b.t.length;}
+  const out=new Uint32Array(n);let k=0;for(const t of parts){out.set(t,k);k+=t.length;}return out;}
+// draw the occluders (the drawn surfaces, then the structural brushes) once per view
+function ltDrawOcc(idx,sb,view,nv){
+  if(idx.length){gl.bindVertexArray(LT.vLM);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,LT.ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,idx,gl.STREAM_DRAW);
+    for(let f=0;f<nv;f++){view(f);gl.drawElements(gl.TRIANGLES,idx.length,gl.UNSIGNED_INT,0);}}
+  if(sb.length){gl.bindVertexArray(LT.vSB);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,LT.sib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,sb,gl.STREAM_DRAW);
+    for(let f=0;f<nv;f++){view(f);gl.drawElements(gl.TRIANGLES,sb.length,gl.UNSIGNED_INT,0);}}
+  gl.bindVertexArray(null);
+}
+// add (sign 1) or take out (-1) one light's weights: lightmap texels into fLm, probes into fPr
+function ltWeigh(l,fLm,fPr,sign){
+  ltCube(l);
+  const set=P=>{gl.useProgram(P);gl.uniform1i(P.u.uKind,0);gl.uniform4f(P.u.uL,l.o[0],l.o[1],l.o[2],l.ph);
+    gl.uniform4f(P.u.uC,l.c[0],l.c[1],l.c[2],l.R);
+    gl.uniform4f(P.u.uS,l.dir?l.dir[0]:0,l.dir?l.dir[1]:0,l.dir?l.dir[2]:0,l.dir?l.rbd:0);
+    gl.uniform4f(P.u.uF,l.lin?1:0,l.fall,LT.lam,0);
+    gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,LT.tCube);gl.uniform1i(P.u.uSh,0);gl.uniform1f(P.u.uSz,LT_CUBE);
+    gl.uniformMatrix4fv(P.u['uFV[0]'],false,new Float32Array([].concat(...LT.fv.map(m=>Array.from(m)))));};
+  gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.disable(gl.CULL_FACE);gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);
+  gl.blendEquation(sign<0?gl.FUNC_REVERSE_SUBTRACT:gl.FUNC_ADD);
+  if(l.world){const idx=ltIdx(l.o,l.R,'lm');
+    if(idx.length){gl.bindFramebuffer(gl.FRAMEBUFFER,fLm);gl.viewport(0,0,LT.aw,LT.ah);set(LT.Plm);
+      gl.uniform3f(LT.Plm.u.uAt,LT.cols,128/LT.aw,128/LT.ah);
+      gl.bindVertexArray(LT.vLM);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,LT.ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,idx,gl.STREAM_DRAW);
+      gl.drawElements(gl.TRIANGLES,idx.length,gl.UNSIGNED_INT,0);}}
+  for(const world of [true,false]){if(world?!l.world:!l.ents)continue;
+    const pi=ltProbeIdx(l.o,l.R,world);if(!pi.length)continue;
+    gl.bindFramebuffer(gl.FRAMEBUFFER,fPr);gl.viewport(0,0,LT_PW,LT.ph);set(LT.Ppr);gl.uniform2f(LT.Ppr.u.uPA,LT_PW,LT.ph);
+    gl.bindVertexArray(LT.vPR);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,LT.pib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,pi,gl.STREAM_DRAW);
+    gl.drawElements(gl.POINTS,pi.length,gl.UNSIGNED_INT,0);}
+  gl.blendEquation(gl.FUNC_ADD);gl.disable(gl.BLEND);gl.depthMask(true);gl.bindVertexArray(null);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+}
+// The sun's weights, on a map with sky and a sun: straight sunlight (suncolor, the angle
+// to the sun, a shadow map toward it) and the sky's (sundiffuse x sundiffusecolor, the
+// sky seen from 16 directions, each through its own shadow map)
+function ltSunDirs(){
+  const wk=MAP.ents[0]||{kv:[]}, sd=ltVec(ltKey(wk,'sundirection'));
+  const sc=ltVec(ltKey(wk,'suncolor'))||ltVec(ltKey(wk,'sunlight'));
+  const hasSky=LIT.sky&&LIT.sky.length;
+  if(!hasSky||(!sd&&!sc))return [];
+  const col=sc||[0,0,0], out=[];
+  if(sd)out.push([ltForward(sd),col]);
+  const diff=ltNum(ltKey(wk,'sundiffuse'),1), dc=ltVec(ltKey(wk,'sundiffusecolor'))||col, dirs=[];
+  for(const[el,n]of[[90,1],[60,5],[30,10]])for(let k=0;k<n;k++){const e=el*Math.PI/180,a=(k/n)*2*Math.PI+(el===60?0.3:0);dirs.push([Math.cos(e)*Math.cos(a),Math.cos(e)*Math.sin(a),Math.sin(e)]);}
+  const wsum=dirs.reduce((s,d)=>s+d[2],0);
+  for(const d of dirs)out.push([d,dc.map(x=>x*diff/wsum)]);
+  return out;
+}
+function ltSun(dir,col){
+  // the drawn surfaces seen from far toward dir, keeping how far toward it the nearest is
+  const e=[LT.ctr[0]+dir[0]*LT.rad,LT.ctr[1]+dir[1]*LT.rad,LT.ctr[2]+dir[2]*LT.rad];
+  const f=[-dir[0],-dir[1],-dir[2]], up=Math.abs(f[2])>0.9?[1,0,0]:[0,0,1];
+  const VP=new Float32Array(mul4(ltOrtho(LT.rad,0,LT.rad*2),ltLook(e,f,up)));
+  if(!LT.occAll){LT.occAll=ltIdx(LT.ctr,1e9,'occ');LT.sbAll=ltSolidIdx(LT.ctr,1e9);}
+  gl.bindFramebuffer(gl.FRAMEBUFFER,LT.fDir);gl.viewport(0,0,LT_DIR,LT_DIR);gl.depthMask(true);
+  gl.clearBufferfv(gl.COLOR,0,new Float32Array([-1e9,0,0,0]));gl.clearDepth(1);gl.clear(gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(LT.Pd);gl.uniform4f(LT.Pd.u.uL,dir[0],dir[1],dir[2],1);gl.uniformMatrix4fv(LT.Pd.u.uVP,false,VP);
+  gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LESS);gl.depthMask(true);gl.disable(gl.CULL_FACE);gl.disable(gl.BLEND);
+  ltDrawOcc(LT.occAll,LT.sbAll,()=>{},1);
+  const set=P=>{gl.useProgram(P);gl.uniform1i(P.u.uKind,1);gl.uniform4f(P.u.uL,dir[0],dir[1],dir[2],0);gl.uniform4f(P.u.uC,col[0],col[1],col[2],0);
+    gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,LT.tDir);gl.uniform1i(P.u.uSh,0);gl.uniform1f(P.u.uSz,LT_DIR);
+    gl.uniformMatrix4fv(P.u['uFV[0]'],false,VP);};
+  gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);gl.blendEquation(gl.FUNC_ADD);
+  const li=ltIdx(LT.ctr,1e9,'lm');
+  if(li.length){gl.bindFramebuffer(gl.FRAMEBUFFER,LT.fSun);gl.viewport(0,0,LT.aw,LT.ah);set(LT.Plm);gl.uniform3f(LT.Plm.u.uAt,LT.cols,128/LT.aw,128/LT.ah);
+    gl.bindVertexArray(LT.vLM);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,LT.ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,li,gl.STREAM_DRAW);
+    gl.drawElements(gl.TRIANGLES,li.length,gl.UNSIGNED_INT,0);}
+  if(LT.np){const all=new Uint32Array(LT.np);for(let i=0;i<LT.np;i++)all[i]=i;
+    gl.bindFramebuffer(gl.FRAMEBUFFER,LT.fpSun);gl.viewport(0,0,LT_PW,LT.ph);set(LT.Ppr);gl.uniform2f(LT.Ppr.u.uPA,LT_PW,LT.ph);
+    gl.bindVertexArray(LT.vPR);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,LT.pib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,all,gl.STREAM_DRAW);
+    gl.drawElements(gl.POINTS,LT.np,gl.UNSIGNED_INT,0);}
+  gl.disable(gl.BLEND);gl.depthMask(true);gl.bindVertexArray(null);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+}
+function ltCoverage(){
+  const idx=ltIdx(LT.ctr,1e9,'lm');
+  gl.bindFramebuffer(gl.FRAMEBUFFER,LT.fCov);gl.viewport(0,0,LT.aw,LT.ah);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(LT.Pcov);gl.uniform3f(LT.Pcov.u.uAt,LT.cols,128/LT.aw,128/LT.ah);
+  gl.disable(gl.DEPTH_TEST);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);
+  gl.bindVertexArray(LT.vLM);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,LT.ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,idx,gl.STREAM_DRAW);
+  if(idx.length)gl.drawElements(gl.TRIANGLES,idx.length,gl.UNSIGNED_INT,0);
+  gl.bindVertexArray(null);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+}
+// copy the lights' total into the off texture (every light off) or clear it (all on)
+function ltCopy(src,dst,w,h){gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,dst);
+  gl.blitFramebuffer(0,0,w,h,0,0,w,h,gl.COLOR_BUFFER_BIT,gl.NEAREST);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);}
+// The relit lightmap pages, then the relit probes (the props' light, vertex light, the
+// models' grid colours: each read at its slot while relit)
+function ltCap(){return LT.kap*16*(1<<(D.lit.shift|0))/(255*LT.lam);}  // OFF to the pages' brightened units
+function ltDark(){return (LT.nOff===LT.lights.length&&!LT.sun.length)?1:0;}
+function ltRelightPages(){
+  gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);
+  gl.useProgram(LT.Prel);gl.bindVertexArray(LT.vQ);
+  const tx=[[gl.TEXTURE_2D_ARRAY,B.lmTex,'uBake'],[gl.TEXTURE_2D,LT.tTot,'uTot'],[gl.TEXTURE_2D,LT.tOff,'uOff'],[gl.TEXTURE_2D,LT.tSun,'uSun'],[gl.TEXTURE_2D,LT.tCov,'uCov']];
+  tx.forEach((t,k)=>{gl.activeTexture(gl.TEXTURE0+k);gl.bindTexture(t[0],t[1]);gl.uniform1i(LT.Prel.u[t[2]],k);});
+  gl.uniform1i(LT.Prel.u.uCols,LT.cols);gl.uniform3f(LT.Prel.u.uA,LT.amb[0],LT.amb[1],LT.amb[2]);gl.uniform1i(LT.Prel.u.uDark,ltDark());gl.uniform1f(LT.Prel.u.uCap,ltCap());
+  gl.bindFramebuffer(gl.FRAMEBUFFER,LT.fLM);gl.viewport(0,0,128,128);
+  for(let k=0;k<B.lmN;k++){gl.framebufferTextureLayer(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,LT.lmOut,0,k);
+    gl.uniform1i(LT.Prel.u.uLayer,k);gl.drawArrays(gl.TRIANGLES,0,3);}
+  ltUnbind(5);
+}
+function ltRelightProbes(){
+  if(!LT.np)return;
+  gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);
+  gl.useProgram(LT.Pprel);gl.bindVertexArray(LT.vQ);
+  const pt=[[LT.pBake,'uBake'],[LT.pTot,'uTot'],[LT.pOff,'uOff'],[LT.pSun,'uSun']];
+  pt.forEach((t,k)=>{gl.activeTexture(gl.TEXTURE0+k);gl.bindTexture(gl.TEXTURE_2D,t[0]);gl.uniform1i(LT.Pprel.u[t[1]],k);});
+  gl.uniform3f(LT.Pprel.u.uA,LT.amb[0],LT.amb[1],LT.amb[2]);gl.uniform1i(LT.Pprel.u.uDark,ltDark());gl.uniform1f(LT.Pprel.u.uCap,ltCap());
+  gl.bindFramebuffer(gl.FRAMEBUFFER,LT.fpOut);gl.viewport(0,0,LT_PW,LT.ph);gl.drawArrays(gl.TRIANGLES,0,3);
+  ltUnbind(4);
+}
+function ltUnbind(n){
+  for(let k=0;k<n;k++){gl.activeTexture(gl.TEXTURE0+k);gl.bindTexture(gl.TEXTURE_2D,null);gl.bindTexture(gl.TEXTURE_2D_ARRAY,null);}
+  gl.activeTexture(gl.TEXTURE0);gl.bindVertexArray(null);gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.depthMask(true);
+}
+
+// ---- the work, a little each frame -------------------------------------------------------
+// A few steps at a time, the next ones only once the graphics card has finished the last
+// (a fence), so no frame hands it a long run of work. The steps under way are noted in the
+// browser's storage, and the note dropped once the result has been drawn: if the graphics
+// driver resets meanwhile, the note says where, and the next press on this map only warns.
+const LT_CRUMB='mohaa-map-lights-step';
+function ltCrumb(step){try{if(step==null)localStorage.removeItem(LT_CRUMB);
+  else localStorage.setItem(LT_CRUMB,JSON.stringify({page:document.title,step:step,t:Date.now()}));}catch(e){}}
+function ltCrumbRead(){try{const v=JSON.parse(localStorage.getItem(LT_CRUMB)||'null');return v&&v.page===document.title&&v.step?v:null;}catch(e){return null;}}
+function ltStep(label,fn){fn.label=label;return fn;}
+function ltProgress(msg){const h=$('hintHover');clearTimeout(_flashT);h.textContent=msg;h.style.color='var(--accent)';}
+function ltRun(){
+  if(gl.isContextLost()){LT.queue=[];LT.busy=false;return;}
+  if(LT.fence){
+    if(gl.getSyncParameter(LT.fence,gl.SYNC_STATUS)!==gl.SIGNALED){requestAnimationFrame(ltRun);return;}
+    gl.deleteSync(LT.fence);LT.fence=null;}
+  if(!LT.queue.length){
+    LT.busy=false;
+    if(LT.want){ltApply();return;}  // a change asked for while this one was worked out
+    // drop the note once the new light has been drawn for a moment
+    clearTimeout(LT.settleT);LT.settleT=setTimeout(()=>{if(!gl.isContextLost()&&!LT.busy){ltCrumb(null);LT.step='';}},1200);
+    return;}
+  // the note names every step of the batch: the card runs them together
+  const t0=performance.now(),names=[];let k=0;
+  try{
+    while(LT.queue.length&&k<LT.batch&&(k===0||performance.now()-t0<12)){
+      const f=LT.queue.shift();if(f.label){names.push(f.label);LT.step=names.join(' + ');ltCrumb(LT.step);}f();k++;}
+  }catch(e){console.error(e);LT.queue=[];LT.busy=false;flash('Turning lights off failed: '+(e&&e.message||e));return;}
+  LT.fence=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0);gl.flush();
+  requestAnimationFrame(ltRun);
+}
+// Bring the baked light in line with LT.off: work out the totals the first time, then add
+// or take out the lights whose state changed (or start from all / none).
+function ltApply(){
+  if(!ltCheck())return;
+  if(LT.busy){LT.want=true;return;}
+  LT.want=false;LT.busy=true;clearTimeout(LT.settleT);
+  const q=LT.queue;
+  if(!LT.prepped){ltCrumb('getting ready (shaders, textures)');ltPrep();}
+  if(!B.lmN){LT.busy=false;flash('The lightmaps are still loading - try again in a moment');return;}
+  const n=LT.lights.length;
+  if(!LT.totReady){
+    q.push(ltStep('clearing the sums, the lightmaps\' coverage',()=>{ltClear(LT.fTot);ltClear(LT.fpTot);ltClear(LT.fSun);ltClear(LT.fpSun);ltClear(LT.fOff);ltClear(LT.fpOff);LT.applied.fill(0);ltCoverage();}));
+    LT.lights.forEach((l,i)=>q.push(ltStep('light '+(i+1)+' of '+n+' (entity '+l.ei+')',()=>{ltProgress('Working out the map\'s lights: '+(i+1)+' of '+n);ltWeigh(l,LT.fTot,LT.fpTot,1);})));
+    LT.sun=ltSunDirs();
+    LT.sun.forEach((s,k)=>q.push(ltStep('sunlight '+(k+1)+' of '+LT.sun.length,()=>{ltProgress('Working out the sunlight: '+(k+1)+' of '+LT.sun.length);ltSun(s[0],s[1]);})));
+    q.push(()=>{LT.totReady=true;});
+  }
+  q.push(()=>{
+    const off=LT.off, ap=LT.applied;let nOff=0,diff=0;
+    for(let i=0;i<n;i++){nOff+=off[i];if(off[i]!==ap[i])diff++;}
+    const steps=[];
+    if(nOff===n&&diff){steps.push(ltStep('every light off: copying the sums',()=>{ltCopy(LT.fTot,LT.fOff,LT.aw,LT.ah);ltCopy(LT.fpTot,LT.fpOff,LT_PW,LT.ph);ap.fill(1);}));}
+    else if(nOff===0&&diff){steps.push(ltStep('every light on: clearing the sums',()=>{ltClear(LT.fOff);ltClear(LT.fpOff);ap.fill(0);}));}
+    else{let k=0;for(let i=0;i<n;i++)if(off[i]!==ap[i]){const sign=off[i]?1:-1,j=++k;
+      steps.push(ltStep('turning light '+(i+1)+' (entity '+LT.lights[i].ei+') '+(sign>0?'off':'on'),()=>{if(diff>3)ltProgress('Turning lights '+(sign>0?'off':'on')+': '+j+' of '+diff);ltWeigh(LT.lights[i],LT.fOff,LT.fpOff,sign);ap[i]=off[i];}));}}
+    steps.push(ltStep('relighting the lightmap pages',()=>{LT.nOff=nOff;ltRelightPages();}));
+    steps.push(ltStep('relighting the props, vertex light and models',()=>{ltRelightProbes();}));
+    steps.push(ltStep('drawing the map with the new light',()=>{LT.active=nOff>0;rebuildModels();ltDone();}));
+    q.unshift(...steps);
+  });
+  requestAnimationFrame(ltRun);
+}
+function ltDone(){
+  const n=LT.lights.length;
+  syncButtons();updateSelPanel();requestDraw();
+  flash(LT.nOff===0?'Every light is on: the map as the game lights it':LT.nOff===n?'Every light is off'+(LT.sun.length?' (the sun and the sky still light the map)':''):LT.nOff+' of '+n+' lights off');
+  if(fullBright)setTimeout(()=>flash('Full Brightness is on: turn it off (B) to see the game\'s light'),1700);
+}
+// After a graphics driver reset on this map, the first press only says so; another within
+// six seconds goes ahead, a step at a time.
+function ltMayRun(){
+  if(!LT.crash)return true;
+  const now=performance.now();
+  if(LT.crashArm&&now-LT.crashArm<6000){LT.crash=null;LT.crashArm=0;LT.batch=1;syncButtons();return true;}
+  LT.crashArm=now;
+  flash('The last time lights were turned off on this map, the graphics driver reset ('+LT.crash.step+'). Press again within 6 seconds to try anyway.');
+  return false;
+}
+// Display: Lights off. With any light still on, every light goes off; else all come back on.
+function toggleLightsOff(){
+  if(!ltCheck()){flash(LT.why);return;}
+  if(!ltMayRun())return;
+  const all=LT.off.every(x=>x);LT.off.fill(all?0:1);ltApply();
+}
+// Selection: Turn off / Turn on the selected lights
+function setSelLights(on){
+  if(!ltCheck()){flash(LT.why);return;}
+  let k=0;const want=[];for(const ei of selectedEnts()){const i=LT.byEnt.get(ei);if(i==null)continue;
+    // every light entity at that index (a light written twice shares it)
+    LT.lights.forEach((l,j)=>{if(l.ei===ei&&LT.off[j]!==(on?0:1))want.push(j);});}
+  if(!want.length){flash(on?'The selected lights are already on':'The selected lights are already off');return;}
+  if(!ltMayRun())return;
+  for(const j of want){LT.off[j]=on?0:1;k++;}
+  ltApply();
+}
 function draw(){
   if(!gl||!SC)return;
   FRAMES++;skyQueryPoll();
@@ -2280,6 +3112,7 @@ function draw(){
   updateInside(false);
   drawScene(VP,0);
   drawShowSky(VP);
+  drawSunFlare(VP);
   drawSelection(VP);
   drawLines(VP);
   drawShowTris(VP);
@@ -2511,7 +3344,8 @@ function gvInit(){
   const G={np:D.f32(V.np),nc:D.i32(V.nc),nb:D.i32(V.nb),lf:D.i32(V.lf),ls:D.i32(V.ls),lt:D.i32(V.lt),lm:D.i32(V.lm),
     pvs:V.pvs!=null?D.bytes(V.pvs):null,ncl:V.ncl|0,cb:V.cb|0,si:D.i32(V.si),sf:D.f32(V.sf),v:D.f32(V.v),l:D.u32(V.l),
     ge:D.f32(V.ge),nn:V.nn|0,nl:V.nl|0,ns:V.ns|0,sk:V.sk!=null?D.u32(V.sk):new Uint32Array(0),
-    vn:V.vn!=null?D.nrm(V.vn):null};             // r_shownormals: each point's normal
+    vn:V.vn!=null?D.nrm(V.vn):null,              // r_shownormals: each point's normal
+    sun:V.sun!=null?D.bytes(V.sun):null};        // the leafs that see the sun (sunLeafOK)
   let na=0;for(let l=0;l<G.nl;l++){const a=G.lf[l*14+1];if(a+1>na)na=a+1;}
   G.na=na;
   gvFar(G);
@@ -4836,6 +5670,7 @@ window.addEventListener('keydown',e=>{
     case 'b':toggleFullBright();break;
     case 'k':toggleSimpleSky();break;
     case 'm':toggleSimpleModels();break;
+    case 'j':toggleSunFlare();break;
     case 'f':focusSelection();break;
     case '$':selectSameTargetname(selFocusEnt());break;     // Shift+4: $targetname
     case 'o':doorUse();break;
@@ -4902,7 +5737,8 @@ const DISPLAY=[
  {k:'labels',l:'Labels',key:'6',t:'Class and $targetname over nearby entities'},
  {k:'links',l:'Links',key:'7',t:'A line from each entity to the entities its "target" key points at'},
  {k:'fog',l:'Fog',key:'8',t:'The map\'s distance fog (worldspawn farplane / farplane_color), like in game'},
- {k:'xray',l:'X-ray',key:'9',t:'Show the selection\'s outline, box, target links and facing arrow faintly through walls (everything else stays hidden behind them)'}];
+ {k:'xray',l:'X-ray',key:'9',t:'Show the selection\'s outline, box, target links and facing arrow faintly through walls (everything else stays hidden behind them)'},
+ {k:'lights',l:'Lights off',key:'0',t:'Every light entity of the map off, as if it had never been there: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the sun, the sky and the ambient light give it. Again: every light back on. Single lights turn off and on from Selection (Turn off / Turn on). The first time takes a moment, while the page works out how much of the baked light each light gave'}];
 const FILTERS=[
  {m:C_WORLD,l:'World',key:'Alt+1',t:'Structural world brushes'},
  {m:C_ENTITIES,l:'Entities',key:'Alt+2',t:'Every entity: brush entities, models, lights, nodes, markers'},
@@ -4934,6 +5770,8 @@ function buildPanel(){
   const db=$('dispBtns');
   for(const d of DISPLAY){const b=document.createElement('button');b.id='d_'+d.k;b.innerHTML=esc(d.l)+'<span class="k">'+d.key+'</span>';
     b.title=d.t+' ('+d.key+')';b.onclick=()=>toggleDisplay(d.k);db.appendChild(b);}
+  // Lights off needs a .bsp's baked light (ltCheck says why not)
+  if(!ltCheck()){$('d_lights').disabled=true;$('d_lights').title=LT.why;}
   const fb=$('filtBtns');
   for(const f of FILTERS){const b=document.createElement('button');b.innerHTML=esc(f.l)+(f.key?'<span class="k">'+f.key+'</span>':'');
     b.title=f.t+(f.key?' ('+f.key+')':'')+' - click to show / hide';f.el=b;b.onclick=()=>toggleFilter(f.m);fb.appendChild(b);}
@@ -4943,6 +5781,8 @@ function buildPanel(){
       :'A .map has no lighting yet: the game\'s light is baked when the map is compiled. Open the compiled .bsp to see it.';}
   $('bSimpleSky').onclick=toggleSimpleSky;
   $('bSimpleMod').onclick=toggleSimpleModels;
+  $('bSunFlare').onclick=toggleSunFlare;
+  if(!sunHas()){$('bSunFlare').disabled=true;$('bSunFlare').title=sunNone();}
   $('bShowAll').onclick=showAllGroups;$('bGameView').onclick=gameLook;$('bEditView').onclick=editorLook;
   $('cvarBtn').onclick=ev=>{ev.stopPropagation();toggleCvarMenu();};
   syncButtons();
@@ -4963,6 +5803,7 @@ function buildPanel(){
   $('bPath').onclick=()=>{const ei=+$('bPath').dataset.ei;if(ei>0)selectPath({ent:ei,face:-1,prim:-1,point:null},false);};
   $('bTname').onclick=()=>selectSameTargetname(selFocusEnt());
   $('bDoor').onclick=doorUse;
+  $('bLightOff').onclick=()=>setSelLights(false);$('bLightOn').onclick=()=>setSelLights(true);
   $('infoClose').onclick=hideInfo;$('infoCopy').onclick=()=>copyText($('infoBody').innerText);
   $('tabFind').onclick=()=>setTab('find');$('tabCls').onclick=()=>setTab('cls');$('tabTex').onclick=()=>setTab('tex');
   $('tabEnt').onclick=()=>setTab('ent');
@@ -4975,10 +5816,17 @@ function buildPanel(){
 function showAllGroups(){hiddenMask=0;filtersChanged();}
 const GAME_LOOK=C_CAULK|C_CLIP|C_TRIGGER|C_HINT|C_ORIGIN|C_PORTAL|C_NODRAW|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_VIS|C_RAIN|C_FOLIAGE,
   EDIT_LOOK=C_HINT|C_PORTAL|C_RAIN;
-function gameLook(){hiddenMask=GAME_LOOK;simpleSky=false;fullBright=false;filtersChanged();requestDraw();}
-function editorLook(){hiddenMask=EDIT_LOOK;simpleSky=true;fullBright=true;filtersChanged();requestDraw();}
+function gameLook(){hiddenMask=GAME_LOOK;simpleSky=false;fullBright=false;setSunFlare(true);filtersChanged();requestDraw();}
+function editorLook(){hiddenMask=EDIT_LOOK;simpleSky=true;fullBright=true;setSunFlare(false);filtersChanged();requestDraw();}
+// a look's sun flare setting counts only on a map that has a flare
+function flareAs(on){return !sunHas()||sunFlare===on;}
 function syncButtons(){
-  for(const d of DISPLAY){const b=$('d_'+d.k);if(b)b.classList.toggle('on',!!view[d.k]);}
+  for(const d of DISPLAY){const b=$('d_'+d.k);if(b&&d.k!=='lights')b.classList.toggle('on',!!view[d.k]);}
+  // Lights off: on while every light is off, dashed while only some are
+  {const b=$('d_lights');if(b){const n=LT.off?LT.off.reduce((a,x)=>a+x,0):0,all=LT.off&&n===LT.off.length&&n>0;
+    b.classList.toggle('on',!!all);b.classList.toggle('part',n>0&&!all);
+    if(LT.ok)b.title=DISPLAY.find(d=>d.k==='lights').t+' (0)'+(n>0&&!all?'\nNow: '+n+' of '+LT.off.length+' lights off':'')+
+      (LT.crash?'\nThe last time lights were turned off on this map, the graphics driver reset ('+LT.crash.step+'): the first press only warns.':'');}}
   // A button is on while what it covers is shown. Entities covers several kinds that have
   // buttons of their own (AI nodes, Lights, Models, Paths, Point ents): with only some of
   // them hidden it stays on, dashed, and its tooltip says which are hidden.
@@ -4989,13 +5837,14 @@ function syncButtons(){
   $('bFull').classList.toggle('on',fullBright||!LIT);
   $('bSimpleSky').classList.toggle('on',simpleSky);
   $('bSimpleMod').classList.toggle('on',simpleModels);
+  $('bSunFlare').classList.toggle('on',sunFlare&&sunHas());
   // a look is on while everything it sets is still as it set it
-  $('bGameView').classList.toggle('on',hiddenMask===GAME_LOOK&&!simpleSky&&!fullBright);
-  $('bEditView').classList.toggle('on',hiddenMask===EDIT_LOOK&&simpleSky&&fullBright);
+  $('bGameView').classList.toggle('on',hiddenMask===GAME_LOOK&&!simpleSky&&!fullBright&&flareAs(true));
+  $('bEditView').classList.toggle('on',hiddenMask===EDIT_LOOK&&simpleSky&&fullBright&&flareAs(false));
   $('bFree').classList.toggle('on',camMode==='free');$('bRad').classList.toggle('on',camMode==='rad');
   $('camHelpFree').style.display=camMode==='free'?'':'none';$('camHelpRad').style.display=camMode==='rad'?'':'none';
 }
-function toggleDisplay(k){view[k]=!view[k];syncButtons();saveOpts();
+function toggleDisplay(k){if(k==='lights'){toggleLightsOff();return;}view[k]=!view[k];syncButtons();saveOpts();
   if(k==='wire'&&view.wire)rebuildWire();
   if(k==='fog'&&view.fog&&!FOG.far)flash('This map has no farplane fog');
   lineDirty=true;requestDraw();}
@@ -5012,15 +5861,20 @@ function toggleFullBright(){
   if(!LIT){flash(D.kind==='bsp'?'This .bsp has no lightmaps':'A .map has no compiled lighting - open the .bsp');return;}
   fullBright=!fullBright;syncButtons();saveOpts();requestDraw();
   flash(fullBright?'Full Brightness on (as MOHRadiant)':'The game\'s own lighting');}
+function toggleSunFlare(){
+  if(!sunHas()){flash(sunNone());return;}
+  setSunFlare(!sunFlare);syncButtons();saveOpts();requestDraw();
+  flash(sunFlare?'Sun flare on: the game\'s flare when you look toward the sun':'Sun flare off');}
 function filtersChanged(){syncButtons();saveOpts();rebuildWorld();updateSelPanel();}
 function setCamMode(m){camMode=m;keys.clear();radFly=null;syncButtons();saveOpts();requestDraw();}
 function setClipDist(v){clipDist=Math.max(128,Math.min(32768,v));$('clipD').value=clipDist;$('clipV').textContent=clipDist;saveOpts();requestDraw();}
 function toggleClip(){clipOn=!clipOn;$('bClip').classList.toggle('on',clipOn);saveOpts();requestDraw();}
 function saveOpts(){const cv={};for(const k of cvarsSet())if(!CVAR_NOSAVE.has(k))cv[k]=CVARS[k];
-  LS.set('mohaaMapViewerOpts',JSON.stringify({ov:2,view:view,hidden:hiddenMask,mode:camMode,speed:moveSpeed,fov:fovX,clip:clipOn,clipD:clipDist,fb:fullBright,ss:simpleSky,sm:simpleModels,cv:cv}));}
+  LS.set('mohaaMapViewerOpts',JSON.stringify({ov:2,view:view,hidden:hiddenMask,mode:camMode,speed:moveSpeed,fov:fovX,clip:clipOn,clipD:clipDist,fb:fullBright,ss:simpleSky,sm:simpleModels,sf:sunFlare,cv:cv}));}
 function loadOpts(){try{const o=JSON.parse(LS.get('mohaaMapViewerOpts')||'null');if(!o)return;
   for(const k in view)if(k in (o.view||{}))view[k]=!!o.view[k];
   fullBright=!!o.fb;simpleSky=!!o.ss;simpleModels=!!o.sm;
+  if('sf' in o)sunFlare=!!o.sf;                  // options saved before the Sun flare button: on
   if(typeof o.hidden==='number')hiddenMask=o.hidden;if(o.mode==='rad'||o.mode==='free')camMode=o.mode;
   // options saved before Rain had a button of its own: it starts hidden, as on a first visit
   if(!(o.ov>=2))hiddenMask|=C_RAIN;
@@ -5048,6 +5902,14 @@ function updateSelPanel(){
   if(tl.length>1)$('bTname').title='Select every entity named $'+tn+': '+tl.length+' of them ($, that is Shift+4)';
   // Open door / Close door: when a door is selected
   doorBtnRender();
+  // Turn off / Turn on: when lights are selected (greyed out where there is no baked light)
+  {const lights=ents.filter(ei=>String(MAP.ents[ei].cls).startsWith('light'));
+    $('bLightOff').style.display=$('bLightOn').style.display=lights.length?'':'none';
+    if(lights.length){const ok=ltCheck(), offN=ok?lights.filter(ei=>ltLightOff(ei)).length:0;
+      $('bLightOff').disabled=!ok||offN===lights.length;$('bLightOn').disabled=!ok||offN===0;
+      if(!ok)$('bLightOff').title=$('bLightOn').title=LT.why;
+      else{$('bLightOff').title='Turn the selected light'+(lights.length>1?'s':'')+' off, as if '+(lights.length>1?'they':'it')+' had never been there: the light '+(lights.length>1?'they':'it')+' gave the map (its lightmaps, vertex light, props and models) goes, the rest stays. Display\'s Lights off turns every light off'+(offN?'\nNow: '+offN+' of '+lights.length+' off':'');
+        $('bLightOn').title='Turn the selected light'+(lights.length>1?'s':'')+' back on';}}}
   let s='';
   if(n===1&&ents.length===1){const ei=ents[0],e=MAP.ents[ei],X=ENTS[ei];
     s=e.kvl.classname+(e.kvl.targetname?'  $'+e.kvl.targetname:'')+'\nentity '+ei;

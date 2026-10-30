@@ -865,3 +865,129 @@ Changes to `python_installer_updater.bat` unless noted.
     map compiler wrote, as written (`ent_get`), and its .map files are byte for byte as
     before.
   - Defaults are pixel for pixel as rev 28.
+- Map Viewer page rev 30 (`MAP_VIEWER_REV` 30, `MAP_VIEWER_REV_REQUIRED` 30): the sun flare.
+  - Show has a fourth switch, **Sun flare** (J), on at first. In-game look turns it on and
+    Editor look turns it off; each look counts it as one of the things it set, on a map
+    that has a flare. It is kept with the other display choices (`sf`; options saved
+    before it start with it on).
+  - The page draws the game's lens flare the way `renderergl1/tr_sun_flare.cpp` does
+    (`drawSunFlare`). It shows only while the view faces within the flare's `dot_min` of
+    the sun. The sun counts as seen when a line from the camera toward it first meets a sky
+    face (`SunCheckRay`). The flare's brightness follows the angle to the sun, and the
+    screen whitens by that brightness to the 4th power times `fullscale`.
+  - Once the sun goes out of sight, the glare fades over `fullfade` ms (600 for "sun"),
+    and so does the flare while the view still faces the sun. Each flare is a square of
+    ±`size` screen units, stretched with the window, on the sun's place on the screen. The
+    glare, the flare and `RB_DrawSun` being compiled out are in engine-notes.
+  - The page only draws when something changes, so a fade starts when the sun was in
+    view in the last frame drawn, however long ago that was. While a fade runs the view
+    keeps redrawing.
+  - The line toward the sun (`sunTrace`) meets the world's solid brushes as
+    `CM_TraceThroughBrush` does, a sky face being one with `SURF_SKY` or a sky shader. It
+    also meets solid patches and the terrain, by their drawn triangles. Brush entities,
+    models, static props and fences let it through, as the game's trace does, and the
+    Show buttons don't change it. It is traced again only when the camera moves.
+  - In a .bsp, `Bsp.sun_leafs` reads which leafs list the sun from the sphere-light vis
+    lump (`LUMP_SPHERELIGHTVIS`, 20) and the page gets them as `D.vis.sun`. As in game,
+    the page looks for the sun only from those leafs, from a leaf outside the map, or from
+    anywhere when the map has no vis or no leaf lists the sun.
+  - The build reads the worldspawn's sun keys from the entity lump as the renderer does
+    (`world_sun`), then the flare's section of `global/lensflaredefs.txt`
+    (`lens_flare_def`). The flare's picture is the first stage of its shader, kept as PNG
+    so its glow has no JPEG blocks (`_flare_picture`). All of it goes to the page as
+    `D.sun`.
+  - On a map without a flare the button is greyed out and its tooltip says why (J says the
+    same). The reason is one of: no sun, `"sunflarename" "none"`, no direction, no such
+    flare, or no paks.
+  - 17 retail Allied Assault maps have a flare: m2l2a-c, m2l3, m3l2, m3l3, m4l0, m5l2a,
+    m5l2b, m5l3, m6l3b-d, mohdm1, mohdm3, mohdm6 and obj_team2. Most others name
+    `sunflarename none`. m6l3c and m6l3d have no sky face to see it through.
+  - The build log has a `sun flare:` line.
+  - The legend's Sky entry says the sun is seen through the sky faces.
+  - With Sun flare off the page is pixel for pixel as rev 29. With it on, only views
+    facing a map's sun change.
+- Map Viewer page rev 31 (`MAP_VIEWER_REV` 31, `MAP_VIEWER_REV_REQUIRED` 31): turning the
+  map's lights off.
+  - Display has **Lights off** (`0`), off at first: every light entity off, as if it had
+    never been in the map. Pressed again, every light comes back on. While only some
+    are off, the button has a dashed border and its tooltip counts them.
+  - Selection has **Turn off** and **Turn on** after Clear, shown when the selection holds
+    a light entity (a class starting with `light`, as the compiler takes them). Turn off is
+    greyed out when they are all off, Turn on when none is.
+  - What changes is the light the game draws with: the lightmaps (polygons, patches,
+    terrain, brush entities), vertex-lit polygons, the static props' baked vertex light
+    and the light grid colour of models lit by it. Coronas, flares and bright textures
+    stay as they are.
+  - Nothing is kept: every page opens with all lights on.
+  - The compiler doesn't store which light gave which part of a texel's light, so the
+    page works it out on the graphics card (`ltWeigh`), from what the compiler did with
+    each light (engine-notes, Baked light):
+    - each light's share at each lightmap texel and probe, with q3map's formula, behind
+      a distance cube of the drawn opaque surfaces and the solid brushes, plus a small
+      share without shadows within its reach;
+    - on a map with sky faces, the sun's and the sky's (`ltSun`, from a distance map
+      toward each of 17 directions).
+  - The texel's new value keeps the ambient floor and scales the rest by the share
+    still on: `min(V, A) + max(V - A, 0) x (lights on + sun) / (all lights + sun)`. With
+    every light off on a map without sky, only the floor is left.
+  - No more is taken out than the lights turned off could have given there: at most
+    twice their light without shadows (`LT.kap`), read from their share without shadows
+    in the OFF sum. Without that cap, shaded open ground and eaves far from any light
+    (lit by the sky in ways the page doesn't trace) went black with the lights off: on
+    mohdm1, light 108 off darkened 857 texels 512-1224 units away by more than 16 levels
+    (49 with the cap), and all lights off left hard black patches in its sunny
+    courtyards. Rooms still go black (mohdm1's rooms 4-5 out of 255 on average).
+  - The weights are summed in half floats at a sixteenth of their size, so a texel next
+    to several strong lights can't overflow (m1l2b's largest sum is 14384 before
+    scaling). The share is kept within 0-1.
+  - Probes are the props' vertices, the vertex-lit polygons' vertices and one per
+    grid-lit model at its origin. The relit lightmaps (`LT.lmOut`) and probes (`LT.pOut`)
+    replace the baked ones while a light is off. The models read theirs at their slot
+    (`aISlot` in the model shader), the vertex-lit polygons at theirs (`aVP`).
+  - The first time takes a while; a progress line counts the lights. In a software
+    renderer (SwiftShader) mohdm1's 156 lights and its sun took about 22 s, and m4l3's
+    313 lights about 60 s; a graphics card is many times faster. After that each light
+    turned off or on is one light's work.
+  - Greyed out, with the reason in the tooltip (`0` says the same):
+    - on a `.map` page, which has no baked light (the map compiler bakes it into the
+      `.bsp`);
+    - on a `.bsp` without lightmaps;
+    - on a map without light entities;
+    - where the graphics driver can't draw into float textures (`EXT_color_buffer_float`).
+  - The build also sends each patch's control-point normals (`pn` in the lighting
+    payload), so a patch is lit from its front, as the compiler lights it.
+  - Checked on m6l3d (no sky: the rooms go black), mohdm1 (the courtyards stay sunlit,
+    the houses go dark) and m4l3 (the moonlight stays).
+  - With no light turned off the page is pixel for pixel as rev 30 (mohdm1 with the sun
+    flare, m4l3, m6l3d, m4l0.map). Turning every light back on gives the same picture
+    again. The decompiled .map files are byte for byte as before.
+- Map Viewer page rev 32 (`MAP_VIEWER_REV` 32, `MAP_VIEWER_REV_REQUIRED` 32): Lights off on
+  a graphics card.
+  - On an RTX 3080 Ti in the launcher (WebView2, ANGLE on Direct3D 11), the first Lights
+    off or Turn off on mohdm3 reset the graphics driver. The screen went black for several
+    seconds, and the page then reported the reset.
+  - It doesn't happen here: SwiftShader and Mesa's llvmpipe (ANGLE's OpenGL backend) both
+    finish mohdm3's 94 lights and its sun in about 0.4 s. A reset on that card means a
+    shader that never finishes rather than too much work.
+  - The relight pass had the only loop in any of the page's shaders: the dilation's ring
+    loop, whose condition was read inside it (`r<=2&&n==0.0`), with `continue`. It was also
+    the only draw without vertex attributes (`gl_VertexID`).
+  - What changed in the shaders and passes:
+    - The dilation reads its 24 neighbours with loops of fixed length: a table of
+      offsets, the ring beside the texel summed apart from the one two texels out, and a
+      0/1 weight instead of `continue`.
+    - The full-screen passes take their triangle from a buffer (`LT.vQ`).
+    - The shadow maps are read with `texelFetch`, so the sun pass sets `uSz`.
+    - Depth writes are on before the depth clears.
+  - The work goes a few steps at a time (`LT.batch`, 4). The next batch starts only after
+    a fence says the graphics card has finished the last, and each batch ends with a
+    `flush` (`ltRun`). The relight is two steps, pages then probes.
+  - Step notes: the names of the steps the card is working on go into the browser's
+    storage (`mohaa-map-lights-step`, with the page's title), all of a batch's, since the
+    card runs them together. The note is dropped 1.2 s after the result is drawn.
+    - The driver-reset message names those steps.
+    - On the next load of the same map, the Lights off tooltip says so and the first
+      press only warns. A second press within 6 s runs it one step at a time.
+  - The relit pages and probes are byte for byte as rev 31 on mohdm1, all lights off and
+    light 108 off, in SwiftShader and llvmpipe. With no light turned off the page is pixel
+    for pixel as rev 30.

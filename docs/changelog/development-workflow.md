@@ -88,6 +88,46 @@ beyond Python 3, Node.js and a headless browser.
      and `#set` stays a key of its own; m4l0's path nodes with both `targetname` and
      `$targetname` take the first written, m4l3's sentries (actors) the plain one; the
      path node colours don't change (a node named only by `$targetname` stays green).
+   - Sun flare on mohdm1 and m4l0:
+     - From an open spot (mohdm1's axis start at ( 896 -584 64 )), facing the sun
+       (`D.sun.d`), the flare sits on the sun and moves with the view. The screen
+       whitens more the closer the view faces the sun.
+     - With the flare off the page is pixel for pixel as before.
+     - m1l1's button is greyed out with `sunflarename none` in its tooltip, and J says
+       the same.
+     - A `.map` page (m4l0.map) sees the sun from the same spots as the `.bsp`.
+     - A test can drive the fade with its own clock: set `sunNow` and replace
+       `requestDraw` with a counter. While the sun is seen, the flare's alpha is
+       `(dot - .55) / .45` and the glare's is that to the 4th power times .6. After it,
+       even following a long idle, both fall from the glare's alpha over 600 ms. The
+       redraw requests stop when the fade ends.
+   - Lights off on m6l3d, mohdm1 and m4l3:
+     - `0` turns every light off: m6l3d's rooms go black (no sky), mohdm1's houses go
+       dark while its courtyards stay sunlit, m4l3 keeps its moonlight. Models darken
+       with the rooms (the props by their probes, grid-lit models at their slot).
+     - `0` again, or Turn on for each light turned off, gives the page as it opened,
+       pixel for pixel; with no light ever turned off the page is pixel for pixel as
+       rev 30.
+     - Selection shows Turn off / Turn on for a light; each is greyed out when there is
+       nothing to do, and Lights off gets a dashed border while some lights are off.
+     - On a `.map` page (m4l0.map) both are greyed out with the reason as their tooltip,
+       and `0` flashes it.
+     - The console stays empty (no `readPixels` stall) and `gl.getError()` is 0. A test
+       waits for `!LT.busy && !LT.queue.length`.
+     - The sun's share comes from 17 directions; `LT.sun.length` is 0 only on a map
+       without sky faces or sun keys. A sky brush must not shadow the sun (the solid
+       brush list leaves them out).
+     - After a change to the lights' shaders, read back `LT.lmOut` and `LT.pOut` (all lights
+       off, and one light off) in SwiftShader and in llvmpipe (`--use-angle=gl-egl`) and
+       compare them with the previous version's, byte for byte.
+     - Step notes: `WEBGL_lose_context` while lights are being turned off gives the reset
+       message with the names of the steps in flight and keeps the note. After a reload the first press only
+       warns, a second within 6 s runs one step at a time (`LT.batch` 1), and the note is
+       gone once it has finished.
+     - The cap: with mohdm1's light 108 (200, at ( 1256 232 488 )) off, only a few dozen
+       texels more than 512 units away darken by more than 16 levels, and all lights off
+       leaves its sunny courtyards without hard black patches in the buildings' shade.
+       Read the relit pages back from `LT.lmOut` and compare with `B.lmTex`.
    - Open door on a double door from both sides (both leaves swing away from the camera),
      an `alwaysaway 0` door (the same way from both sides), a sliding `func_door` and a
      TOGGLE door; it closes itself after `wait`; with `r_showtris 1` the room behind a
