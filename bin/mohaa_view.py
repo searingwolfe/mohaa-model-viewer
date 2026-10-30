@@ -1436,20 +1436,32 @@ def _parse_frame_cmds(sect):
         i=j+1
     return out
 
-def parse_tik_animations(text):
+def parse_tik_animations(text, every=False):
     """Parse the .tik animations{} section into
     [{"name": alias, "file": skc, "flags": [...], "client": [cmd], "server": [cmd]}, ...].
 
     Each entry is `alias filename [flags...]` (TIKI_ParseAnimations, tiki/tiki_parse.cpp:397;
     flags per TIKI_ParseAnimationFlags :230-268), optionally followed by a
     `{ client{...} server{...} }` block (TIKI_ParseAnimationCommands :192-226). $mapspec
-    sub-sections are skipped; comments are stripped first."""
+    sub-sections are skipped; comments are stripped first. Only the first animations{}
+    section unless every: TIKI_ParseFile parses each one it meets, and an $include'd .tik
+    (new_generic_human.tik, the dialogue .tiks) brings its own; the map builder reads them
+    all to find a character's idle."""
     if not text: return []
     t=_strip_tik_comments(text)
-    ma=re.search(r'\banimations\b\s*\{', t)
-    if not ma: return []
-    body,_=_brace_block(t, ma.end()-1)
-    out=[]; i=0; n=len(body)
+    out=[]; pos=0
+    while True:
+        ma=re.compile(r'\banimations\b\s*\{').search(t, pos)
+        if not ma: break
+        body,end=_brace_block(t, ma.end()-1)
+        _parse_anim_body(body, out)
+        if not every: break
+        pos=end+1
+    return out
+
+def _parse_anim_body(body, out):
+    """The entries of one animations{} section, appended to out."""
+    i=0; n=len(body)
     while i<n:
         while i<n and body[i] in " \t\r\n": i+=1
         if i>=n: break
@@ -1480,7 +1492,6 @@ def parse_tik_animations(text):
             out.append(entry)
         else:
             i=j+1
-    return out
 
 def _surf_nodraw_ops(cmds):
     """Every `surface <name> <+/-nodraw ...>` command in a parsed frame-command list, as

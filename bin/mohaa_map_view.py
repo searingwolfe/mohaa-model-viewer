@@ -48,7 +48,7 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 32
+MAP_VIEWER_REV = 35
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
 INDEX_VERSION = 8
@@ -942,6 +942,9 @@ MAP_VIEWER_KEYS = {
             _kx("0", "Lights off: every light of the map off / on, from the game's baked light (lightmaps, "
                 "vertex light, props, models); single lights from Selection's Turn off / Turn on",
                 ("0", "lights off", "Lights off: every light off / on")),
+            _kx("-", "Sun light on / off: the sun's and the sky's light in the game's baked light (off: the "
+                "map lit by its lights and the ambient light alone)",
+                ("-", "sun light", "Sun light: the sun's and the sky's light on / off")),
             _kx("`", "the game cvars list: r_showtris, ai_showroutes ... (type a cvar and its value, then "
                 "Enter, as in the game's console)", ("`", "cvars", "open / close the game cvars list")),
         ]},
@@ -1619,7 +1622,7 @@ class ModelBuilder:
         r_showstaticbboxes use), or None with no "idle" animation (the game then uses
         -4..4)."""
         try:
-            anims = MV.parse_tik_animations(txt)
+            anims = MV.parse_tik_animations(txt, every=True)
         except Exception:
             anims = []
         if not anims:

@@ -124,6 +124,12 @@ beyond Python 3, Node.js and a headless browser.
        message with the names of the steps in flight and keeps the note. After a reload the first press only
        warns, a second within 6 s runs one step at a time (`LT.batch` 1), and the note is
        gone once it has finished.
+     - Sun light (`-`): off on mohdm1 takes the open ground down to the ambient light while
+       the rooms keep their lamps; on m4l3 the moonlight goes and the lamps' pools stay.
+       With Lights off too, only the floor is left. The sun back on with Lights off on
+       gives the Lights off picture; everything back on gives the page as it opened. The
+       button is greyed out on m6l3d (no sky faces) and on a `.map` page, and the Sky
+       filter doesn't change whether a map has a sun (`ltHasSky`).
      - The cap: with mohdm1's light 108 (200, at ( 1256 232 488 )) off, only a few dozen
        texels more than 512 units away darken by more than 16 levels, and all lights off
        leaves its sunny courtyards without hard black patches in the buildings' shade.

@@ -111,7 +111,11 @@ run at once.
   MOHRadiant's look goes by them as written too (`edKey`); so does the decompiler, which
   reads what the map compiler wrote.
 - **Drawing.** WebGL2. One index buffer holds every face, grouped per material and
-  rebuilt when the filters change. Models are instanced; point entities without a model
+  rebuilt when the filters change. Models are instanced, each posed at frame 0 of its
+  `idle` animation (else its first), found in any of the `.tik`'s animations sections,
+  the ones its `$include`s bring too (a character's idle is in new_generic_human.tik);
+  heads and hands are drawn as the game draws them (MOHRadiant draws only the body).
+  Point entities without a model
   are boxes coloured as MOHRadiant colours them (below). With Full Brightness on (and
   always for a `.map`), Radiant-style shading darkens faces by their facing (0.9 x^2 +
   0.8 y^2 + 1.0 z^2 on the normal); with it off, a `.bsp` is drawn with the game's
@@ -338,8 +342,8 @@ run at once.
   `KeyMapWindow` in mohaa_launcher.py.
 - **Game cvars** (Display > "game cvars", below backdrop, or `` ` ``): the game's
   debugging cvars that a map can show, doing in the page what they do in game, in groups
-  (What the renderer draws, Lighting, Entities, AI paths, The game the entities spawn
-  for). A click on a row sets it (again: back to the game's default); the filter box is
+  (Render distance: farplane fog and culling, What the renderer draws, Lighting,
+  Entities, AI paths, The game the entities spawn for). A click on a row sets it (again: back to the game's default); the filter box is
   also the console (`r_showtris 2` then Enter, `r_farplane_color 1 .5 0` for a colour; a
   name alone tells its value and default). A row the map can't use is greyed out with the
   reason. The list's foot shows the camera's cluster and area, what is drawn from there
@@ -499,6 +503,19 @@ while lights are turned off (Lights off, below).
   - Not kept: a page always opens with every light on.
   - Greyed out on a `.map` page, which has no baked light (the tooltip says why), and on
     a `.bsp` without lightmaps or light entities.
+- **Sun light** (Display, `-`, on at first) takes the sun's and the sky's light out of the
+  same baked light when turned off, so open ground falls to what the lights and
+  `ambientlight` give it; rooms the sun doesn't reach stay as they are.
+  - The share left at a texel is the lights' still on, over all lights and the sun.
+  - What none of the traced light explains (sky light under eaves, in deep trenches) goes
+    with the sun. A texel keeps no more than twice what the lights still on could give
+    there without shadows.
+  - With every light off as well, only the ambient floor is left.
+  - It works with Lights off and Turn off / Turn on in any order. The first time costs
+    what the first Lights off does; after that it is only the relight.
+  - The sun flare (`J`) is separate. Not kept: a page always opens with the sun on.
+  - Greyed out where Lights off is, and on a map without sky faces or a sun colour in its
+    worldspawn (m6l3c, m6l3d).
 - **Sky** polygons are the `.bsp`'s own, drawn with the sky box as described under The
   page.
 
@@ -537,11 +554,12 @@ while lights are turned off (Lights off, below).
   copies its own the same way, `( pitch yaw roll )`, pitch and roll in -180..180 and yaw
   in 0..360. The page's own roll turns the other way to the game's (`camAxes` tilts the
   right axis up for a positive roll, `AngleVectors` down), so both swap its sign
-  (`camAngles`, `turnTo`).
+  (`camAngles`, `turnTo`). The camera line at the bottom of the view shows `roll` after
+  pitch only while the camera is tilted.
 - `V` switches cameras, `R` returns to the player start, `B` toggles Full Brightness,
-  `K` Simple Sky, `M` Simple models, `J` Sun flare, `0` Lights off, `L` opens the legend,
-  `` ` `` the game cvars list and `T` switches the theme. The
-  FOV slider runs from 60 to 150. Press `H` in the viewer for all of them (Keyboard
+  `K` Simple Sky, `M` Simple models, `J` Sun flare, `0` Lights off, `-` Sun light, `L`
+  opens the legend, `` ` `` the game cvars list and `T` switches the theme. The FOV
+  slider runs from 60 to 150. Press `H` in the viewer for all of them (Keyboard
   shortcuts, above).
 
 ## Versions
@@ -580,8 +598,8 @@ while lights are turned off (Lights off, below).
   that share can take away is capped, so light the page doesn't trace (the sky under
   eaves and in shaded corners) stays. Texels whose light was clipped at full
   brightness (most sunlit ones) can't tell how much each light added, so near a light
-  outdoors turning it off takes away its share of the clipped value. There is no Sun
-  light switch.
+  outdoors turning it off takes away its share of the clipped value. The same goes for
+  Sun light: near a lamp outdoors, the lamp keeps only its share of a clipped texel.
 - Clouds: `tcMod turb` and the entity-driven tcMods, `animMap` frames after the first,
   and a second texture bundle aren't drawn; the noise waveform is a smooth stand-in for
   the engine's.

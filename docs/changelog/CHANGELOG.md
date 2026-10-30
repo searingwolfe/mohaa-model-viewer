@@ -144,6 +144,16 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
   - A key pressed or let go while the launcher has the keyboard makes the page let go of its keys (`<KeyPress>`, `<KeyRelease>`, `_release_view_keys` calling the page's `releaseCameraKeys()`); a drag or a fly-to in the page goes on. The launcher's own shortcuts still work: Tk runs the most specific binding of the `all` tag, so F1 runs F1's.
   - On Windows the keyboard itself is read every 100 ms while a viewer is open (`GetAsyncKeyState` through `KEY_IS_DOWN`, over the camera keys `CAMERA_VKS`). When the last camera key comes up, wherever its key-up went, the page lets go of its keys (`_poll_camera_keys`). Only that change acts, so a key held in the page is never let go of early.
 
+- The Model Viewer and the Map Viewer share their loaded paks through one list,
+  `mohaa_paks.json` beside their settings (`PAKS_SHARED`, `read_shared_paks`,
+  `write_shared_paks`).
+  - Each program writes the list whenever it adds, removes or clears paks
+    (`_paks_changed`).
+  - Each starts with that list (its own `pk3s` when there is none yet) if "Remember
+    loaded paks" is on.
+  - When its window gets the focus, it takes up a list the other changed meanwhile
+    (`_paks_watch`, `_paks_follow`), with a line in its output.
+
 ## Notable fixes (mohaa_view.py)
 
 ### Skeleton and animation
@@ -991,3 +1001,51 @@ Changes to `python_installer_updater.bat` unless noted.
   - The relit pages and probes are byte for byte as rev 31 on mohdm1, all lights off and
     light 108 off, in SwiftShader and llvmpipe. With no light turned off the page is pixel
     for pixel as rev 30.
+- Map Viewer page rev 33 (`MAP_VIEWER_REV` 33, `MAP_VIEWER_REV_REQUIRED` 33): Sun light.
+  - Display has **Sun light** (`-`), on at first, after Lights off. Off takes the sun's and
+    the sky's light (the `ltSun` share: `suncolor` toward `sundirection`, and
+    `sundiffuse` x `sundiffusecolor` from 16 sky directions) out of the baked light.
+  - In the relight (`uSunOn` 0), the share left is the lights still on over all lights and
+    the sun, and a texel nothing traced explains is taken out (it was the sky's).
+  - The light left is no more than twice what the lights still on could give there
+    without shadows: `uCap` x (TOT - OFF), the bound Lights off uses the other way round.
+    Without it, shaded open ground near a light's reach would keep its sky light.
+  - With every light off too, only the ambient floor is left (`ltDark`).
+  - It works with Lights off and Turn off / Turn on in any order. The first time costs
+    what the first Lights off does; after that it is one relight. Nothing is kept: a page
+    opens with the sun on.
+  - Greyed out, with the reason as the tooltip (`-` says the same):
+    - where Lights off is (a `.map` page, no lightmaps, no light entities, no float
+      targets);
+    - on a map without sky faces or a sun colour (m6l3c, m6l3d).
+  - The keys table has a `-` row.
+  - Fix: whether the map has sky came from `LIT.sky`. That list holds only the sky polygons
+    shown, so it was empty when the panel was built. With the Sky filter (`Ctrl+K`) hiding
+    the sky before the first Lights off, the sun's share was left out. The page now looks
+    at the `.bsp`'s polygons themselves (`ltHasSky`).
+  - Checked on mohdm1 (open ground goes dark, the rooms keep their lamps) and m4l3 (the
+    moonlight goes and the lamps' pools stay).
+  - Lights off alone is byte for byte as rev 32. With the sun and every light back on, the
+    page is as it opened; with nothing turned off, pixel for pixel as rev 30.
+- Map Viewer page rev 34 (`MAP_VIEWER_REV` 34, `MAP_VIEWER_REV_REQUIRED` 34):
+  - The game cvars list starts with its own group, "Render distance: farplane fog and
+    culling" (`r_farplane`, `r_farplane_color`, `r_farplane_nocull`, `r_farplane_nofog`),
+    above What the renderer draws.
+  - The camera line at the bottom of the view adds `roll` after pitch while the camera
+    is tilted (Q / E, or angles typed with a roll), the game's way round as Copy ang
+    gives it.
+- Map Viewer page rev 35 (`MAP_VIEWER_REV` 35, `MAP_VIEWER_REV_REQUIRED` 35): actors stand
+  in their idle pose.
+  - A placed model is posed at frame 0 of its `idle` animation. `parse_tik_animations`
+    read only the first animations{} section of the `.tik` with its `$include`s spliced
+    in, but every section counts (TIKI_ParseFile), and a character's idle is in
+    new_generic_human.tik's.
+  - Where an include came first with an animations section of its own (the dialogue
+    .tiks, as in german_waffenss_shutze.tik), no idle was found. The model then had no
+    animation and was drawn in its bind pose: lying flat and half under the floor. That
+    happened to m4l1's Waffen-SS actors.
+  - Where new_generic_human.tik came first, its first section (the balcony scene) gave
+    the first animation in place of idle (m4l1's gestapo officers stood in
+    death_balcony_intro's first frame).
+  - The map builder now reads every section (`every=True`); the Model Viewer's own uses
+    of the parser are unchanged.

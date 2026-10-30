@@ -2509,6 +2509,7 @@ function drawSunFlare(vp){
 const LT={ok:null,why:'',lights:[],byEnt:new Map(),off:null,applied:null,nOff:0,active:false,
   prepped:false,totReady:false,busy:false,queue:[],want:null,entSlot:null,sun:[],
   fence:null,batch:4,step:'',crash:null,crashArm:0,settleT:0,
+  sunOff:false,sunHas:false,sunWhy:'',what:'',
   // lam: the share each light also gets without shadows, within its reach; kap: how many
   // times that unshadowed light a light turned off may take away (FS_LTREL)
   lam:0.02,kap:2};
@@ -2561,6 +2562,10 @@ function ltCheck(){
   LT.lights.forEach((l,i)=>{if(!LT.byEnt.has(l.ei))LT.byEnt.set(l.ei,i);});
   LT.off=new Uint8Array(LT.lights.length);LT.applied=new Uint8Array(LT.lights.length);
   LT.crash=ltCrumbRead();
+  // Sun light: a sun or sky light that reaches the map (sky faces, a sun colour)
+  LT.sunHas=ltSunDirs().some(x=>x[1][0]+x[1][1]+x[1][2]>0);
+  LT.sunWhy=LT.sunHas?'':!ltHasSky()?'This map has no sky faces, so no sunlight reaches it.'
+    :'This map has no sun: its worldspawn has no suncolor (or sunlight).';
   LT.ok=true;return true;
 }
 function ltIsLight(ei){return LT.ok&&LT.byEnt.has(ei);}
@@ -2652,51 +2657,63 @@ precision mediump float; out vec4 o; void main(){o=vec4(1.0);}`;
 // Each light adds its share without shadows (uF.z, its photons / distance squared) wherever
 // it reaches, so OFF / that share bounds what they gave; uCap is twice that, in the
 // page's units. A texel only a little of their light reaches keeps the rest of its light
-// (sky light, light the compiler bent around a corner).
+// (sky light, light the compiler bent around a corner). With the sun off (uSunOn 0) its
+// share goes too, and the light left is no more than the lights still on could give
+// (TOT - OFF, bounded the same way): what nothing traced explains was the sky's.
 const VS_LTQ=`#version 300 es
 layout(location=0) in vec2 aQ; void main(){gl_Position=vec4(aQ,0.0,1.0);}`;
 const FS_LTREL=`#version 300 es
 precision highp float;
 uniform highp sampler2DArray uBake; uniform highp sampler2D uTot; uniform highp sampler2D uOff;
 uniform highp sampler2D uSun; uniform highp sampler2D uCov;
-uniform int uLayer; uniform int uCols; uniform vec3 uA; uniform int uDark; uniform float uCap;
+uniform int uLayer; uniform int uCols; uniform vec3 uA; uniform int uDark; uniform float uCap; uniform int uSunOn;
 out vec4 o;
 // the texels around one, the ring beside it first, then the one two texels out
 const ivec2 NB[24]=ivec2[24](ivec2(-1,-1),ivec2(0,-1),ivec2(1,-1),ivec2(-1,0),ivec2(1,0),ivec2(-1,1),ivec2(0,1),ivec2(1,1),
   ivec2(-2,-2),ivec2(-1,-2),ivec2(0,-2),ivec2(1,-2),ivec2(2,-2),ivec2(-2,-1),ivec2(2,-1),ivec2(-2,0),
   ivec2(2,0),ivec2(-2,1),ivec2(2,1),ivec2(-2,2),ivec2(-1,2),ivec2(0,2),ivec2(1,2),ivec2(2,2));
 vec3 fac(ivec2 a){vec3 t=texelFetch(uTot,a,0).rgb,f=texelFetch(uOff,a,0).rgb,s=texelFetch(uSun,a,0).rgb,d=t+s;
-  vec3 on=max(t-f,vec3(0.0))+s;
-  return clamp(vec3(d.r>1e-4?on.r/d.r:1.0,d.g>1e-4?on.g/d.g:1.0,d.b>1e-4?on.b/d.b:1.0),0.0,1.0);}
+  float u=float(uSunOn);                      // nothing traced: kept with the sun, gone without
+  vec3 on=max(t-f,vec3(0.0))+s*u;
+  return clamp(vec3(d.r>1e-4?on.r/d.r:u,d.g>1e-4?on.g/d.g:u,d.b>1e-4?on.b/d.b:u),0.0,1.0);}
+// what is left of X: no more taken out than the lights off could give (sun on), no more
+// left than the lights still on could give (sun off)
+vec3 left(vec3 X,vec3 F,vec3 t,vec3 f){
+  if(uDark==1)return vec3(0.0);
+  if(uSunOn==1)return max(X*F,X-uCap*max(f,vec3(0.0)));
+  return min(X*F,uCap*max(t-f,vec3(0.0)));}
 void main(){
   ivec2 t=ivec2(gl_FragCoord.xy), b=ivec2((uLayer%uCols)*128,(uLayer/uCols)*128);
-  vec3 F=vec3(1.0),f=vec3(0.0);
-  if(uDark==1)F=vec3(0.0);
-  else if(texelFetch(uCov,b+t,0).r>0.5){F=fac(b+t);f=texelFetch(uOff,b+t,0).rgb;}
+  vec3 F=vec3(1.0),f=vec3(0.0),tt=vec3(0.0);
+  if(texelFetch(uCov,b+t,0).r>0.5){F=fac(b+t);f=texelFetch(uOff,b+t,0).rgb;tt=texelFetch(uTot,b+t,0).rgb;}
   else{
     // a texel no polygon covers (the filtering reaches it) takes the factor of the covered
     // texels of the nearest ring that has any; loops of fixed length, nothing skipped
-    vec3 s1=vec3(0.0),g1=vec3(0.0),s2=vec3(0.0),g2=vec3(0.0);float n1=0.0,n2=0.0;
+    vec3 s1=vec3(0.0),g1=vec3(0.0),h1=vec3(0.0),s2=vec3(0.0),g2=vec3(0.0),h2=vec3(0.0);float n1=0.0,n2=0.0;
     for(int i=0;i<8;i++){ivec2 q=t+NB[i],c=clamp(q,ivec2(0),ivec2(127));
       float w=(q==c?1.0:0.0)*step(0.5,texelFetch(uCov,b+c,0).r);
-      s1+=fac(b+c)*w;g1+=texelFetch(uOff,b+c,0).rgb*w;n1+=w;}
+      s1+=fac(b+c)*w;g1+=texelFetch(uOff,b+c,0).rgb*w;h1+=texelFetch(uTot,b+c,0).rgb*w;n1+=w;}
     for(int i=8;i<24;i++){ivec2 q=t+NB[i],c=clamp(q,ivec2(0),ivec2(127));
       float w=(q==c?1.0:0.0)*step(0.5,texelFetch(uCov,b+c,0).r);
-      s2+=fac(b+c)*w;g2+=texelFetch(uOff,b+c,0).rgb*w;n2+=w;}
-    if(n1>0.0){F=s1/n1;f=g1/n1;}else if(n2>0.0){F=s2/n2;f=g2/n2;}}
+      s2+=fac(b+c)*w;g2+=texelFetch(uOff,b+c,0).rgb*w;h2+=texelFetch(uTot,b+c,0).rgb*w;n2+=w;}
+    if(n1>0.0){F=s1/n1;f=g1/n1;tt=h1/n1;}else if(n2>0.0){F=s2/n2;f=g2/n2;tt=h2/n2;}
+    else tt=vec3(1e4);                        // out of reach of every polygon: as it is
+  }
   vec3 V=texelFetch(uBake,ivec3(t,uLayer),0).rgb,X=max(V-uA,vec3(0.0));
-  vec3 Y=uDark==1?vec3(0.0):max(X*F,X-uCap*max(f,vec3(0.0)));
-  o=vec4(min(V,uA)+Y,1.0);}`;
+  o=vec4(min(V,uA)+left(X,F,tt,f),1.0);}`;
 const FS_LTPREL=`#version 300 es
 precision highp float;
 uniform highp sampler2D uBake; uniform highp sampler2D uTot; uniform highp sampler2D uOff; uniform highp sampler2D uSun;
-uniform vec3 uA; uniform int uDark; uniform float uCap;
+uniform vec3 uA; uniform int uDark; uniform float uCap; uniform int uSunOn;
 out vec4 o;
 void main(){ivec2 a=ivec2(gl_FragCoord.xy);
-  vec3 t=texelFetch(uTot,a,0).rgb,f=texelFetch(uOff,a,0).rgb,s=texelFetch(uSun,a,0).rgb,d=t+s,on=max(t-f,vec3(0.0))+s;
-  vec3 F=clamp(vec3(d.r>1e-4?on.r/d.r:1.0,d.g>1e-4?on.g/d.g:1.0,d.b>1e-4?on.b/d.b:1.0),0.0,1.0);
-  vec3 V=texelFetch(uBake,a,0).rgb,X=max(V-uA,vec3(0.0));
-  vec3 Y=uDark==1?vec3(0.0):max(X*F,X-uCap*max(f,vec3(0.0)));
+  vec3 t=texelFetch(uTot,a,0).rgb,f=texelFetch(uOff,a,0).rgb,s=texelFetch(uSun,a,0).rgb,d=t+s;
+  float u=float(uSunOn);vec3 on=max(t-f,vec3(0.0))+s*u;
+  vec3 F=clamp(vec3(d.r>1e-4?on.r/d.r:u,d.g>1e-4?on.g/d.g:u,d.b>1e-4?on.b/d.b:u),0.0,1.0);
+  vec3 V=texelFetch(uBake,a,0).rgb,X=max(V-uA,vec3(0.0)),Y;
+  if(uDark==1)Y=vec3(0.0);
+  else if(uSunOn==1)Y=max(X*F,X-uCap*max(f,vec3(0.0)));
+  else Y=min(X*F,uCap*max(t-f,vec3(0.0)));
   o=vec4(min(V,uA)+Y,1.0);}`;
 
 // ---- matrices ----------------------------------------------------------------------------
@@ -2923,11 +2940,12 @@ function ltWeigh(l,fLm,fPr,sign){
 // The sun's weights, on a map with sky and a sun: straight sunlight (suncolor, the angle
 // to the sun, a shadow map toward it) and the sky's (sundiffuse x sundiffusecolor, the
 // sky seen from 16 directions, each through its own shadow map)
+// whether the .bsp has sky polygons at all (LIT.sky holds only the ones shown)
+function ltHasSky(){return !!LIT&&LIT.units.some(u=>u.n&&((TEX[u.ti]||{}).f&TF_SKY));}
 function ltSunDirs(){
   const wk=MAP.ents[0]||{kv:[]}, sd=ltVec(ltKey(wk,'sundirection'));
   const sc=ltVec(ltKey(wk,'suncolor'))||ltVec(ltKey(wk,'sunlight'));
-  const hasSky=LIT.sky&&LIT.sky.length;
-  if(!hasSky||(!sd&&!sc))return [];
+  if(!ltHasSky()||(!sd&&!sc))return [];
   const col=sc||[0,0,0], out=[];
   if(sd)out.push([ltForward(sd),col]);
   const diff=ltNum(ltKey(wk,'sundiffuse'),1), dc=ltVec(ltKey(wk,'sundiffusecolor'))||col, dirs=[];
@@ -2977,13 +2995,15 @@ function ltCopy(src,dst,w,h){gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);gl.bind
 // The relit lightmap pages, then the relit probes (the props' light, vertex light, the
 // models' grid colours: each read at its slot while relit)
 function ltCap(){return LT.kap*16*(1<<(D.lit.shift|0))/(255*LT.lam);}  // OFF to the pages' brightened units
-function ltDark(){return (LT.nOff===LT.lights.length&&!LT.sun.length)?1:0;}
+// every light off and no sun (none, or turned off): only the ambient floor is left
+function ltDark(){return (LT.nOff===LT.lights.length&&(!LT.sun.length||LT.sunOff))?1:0;}
 function ltRelightPages(){
   gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);
   gl.useProgram(LT.Prel);gl.bindVertexArray(LT.vQ);
   const tx=[[gl.TEXTURE_2D_ARRAY,B.lmTex,'uBake'],[gl.TEXTURE_2D,LT.tTot,'uTot'],[gl.TEXTURE_2D,LT.tOff,'uOff'],[gl.TEXTURE_2D,LT.tSun,'uSun'],[gl.TEXTURE_2D,LT.tCov,'uCov']];
   tx.forEach((t,k)=>{gl.activeTexture(gl.TEXTURE0+k);gl.bindTexture(t[0],t[1]);gl.uniform1i(LT.Prel.u[t[2]],k);});
   gl.uniform1i(LT.Prel.u.uCols,LT.cols);gl.uniform3f(LT.Prel.u.uA,LT.amb[0],LT.amb[1],LT.amb[2]);gl.uniform1i(LT.Prel.u.uDark,ltDark());gl.uniform1f(LT.Prel.u.uCap,ltCap());
+  gl.uniform1i(LT.Prel.u.uSunOn,LT.sunOff?0:1);
   gl.bindFramebuffer(gl.FRAMEBUFFER,LT.fLM);gl.viewport(0,0,128,128);
   for(let k=0;k<B.lmN;k++){gl.framebufferTextureLayer(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,LT.lmOut,0,k);
     gl.uniform1i(LT.Prel.u.uLayer,k);gl.drawArrays(gl.TRIANGLES,0,3);}
@@ -2996,6 +3016,7 @@ function ltRelightProbes(){
   const pt=[[LT.pBake,'uBake'],[LT.pTot,'uTot'],[LT.pOff,'uOff'],[LT.pSun,'uSun']];
   pt.forEach((t,k)=>{gl.activeTexture(gl.TEXTURE0+k);gl.bindTexture(gl.TEXTURE_2D,t[0]);gl.uniform1i(LT.Pprel.u[t[1]],k);});
   gl.uniform3f(LT.Pprel.u.uA,LT.amb[0],LT.amb[1],LT.amb[2]);gl.uniform1i(LT.Pprel.u.uDark,ltDark());gl.uniform1f(LT.Pprel.u.uCap,ltCap());
+  gl.uniform1i(LT.Pprel.u.uSunOn,LT.sunOff?0:1);
   gl.bindFramebuffer(gl.FRAMEBUFFER,LT.fpOut);gl.viewport(0,0,LT_PW,LT.ph);gl.drawArrays(gl.TRIANGLES,0,3);
   ltUnbind(4);
 }
@@ -3062,7 +3083,7 @@ function ltApply(){
       steps.push(ltStep('turning light '+(i+1)+' (entity '+LT.lights[i].ei+') '+(sign>0?'off':'on'),()=>{if(diff>3)ltProgress('Turning lights '+(sign>0?'off':'on')+': '+j+' of '+diff);ltWeigh(LT.lights[i],LT.fOff,LT.fpOff,sign);ap[i]=off[i];}));}}
     steps.push(ltStep('relighting the lightmap pages',()=>{LT.nOff=nOff;ltRelightPages();}));
     steps.push(ltStep('relighting the props, vertex light and models',()=>{ltRelightProbes();}));
-    steps.push(ltStep('drawing the map with the new light',()=>{LT.active=nOff>0;rebuildModels();ltDone();}));
+    steps.push(ltStep('drawing the map with the new light',()=>{LT.active=nOff>0||LT.sunOff;rebuildModels();ltDone();}));
     q.unshift(...steps);
   });
   requestAnimationFrame(ltRun);
@@ -3070,7 +3091,10 @@ function ltApply(){
 function ltDone(){
   const n=LT.lights.length;
   syncButtons();updateSelPanel();requestDraw();
-  flash(LT.nOff===0?'Every light is on: the map as the game lights it':LT.nOff===n?'Every light is off'+(LT.sun.length?' (the sun and the sky still light the map)':''):LT.nOff+' of '+n+' lights off');
+  if(LT.what==='sun')flash(LT.sunOff?'Sun light off: '+(LT.nOff===n?'only the ambient light is left':'the map lit by its lights alone')
+    :'Sun light on: the sun and the sky light the map again');
+  else flash(LT.nOff===0?'Every light is on'+(LT.sunOff?' (the sun is still off)':': the map as the game lights it')
+    :LT.nOff===n?'Every light is off'+(LT.sunHas&&!LT.sunOff?' (the sun and the sky still light the map)':''):LT.nOff+' of '+n+' lights off');
   if(fullBright)setTimeout(()=>flash('Full Brightness is on: turn it off (B) to see the game\'s light'),1700);
 }
 // After a graphics driver reset on this map, the first press only says so; another within
@@ -3087,7 +3111,14 @@ function ltMayRun(){
 function toggleLightsOff(){
   if(!ltCheck()){flash(LT.why);return;}
   if(!ltMayRun())return;
-  const all=LT.off.every(x=>x);LT.off.fill(all?0:1);ltApply();
+  const all=LT.off.every(x=>x);LT.off.fill(all?0:1);LT.what='lights';ltApply();
+}
+// Display: Sun light. Off takes the sun's and the sky's light out of the baked light.
+function toggleSunLight(){
+  if(!ltCheck()){flash(LT.why);return;}
+  if(!LT.sunHas){flash(LT.sunWhy);return;}
+  if(!ltMayRun())return;
+  LT.sunOff=!LT.sunOff;LT.what='sun';ltApply();
 }
 // Selection: Turn off / Turn on the selected lights
 function setSelLights(on){
@@ -3098,7 +3129,7 @@ function setSelLights(on){
   if(!want.length){flash(on?'The selected lights are already on':'The selected lights are already off');return;}
   if(!ltMayRun())return;
   for(const j of want){LT.off[j]=on?0:1;k++;}
-  ltApply();
+  LT.what='lights';ltApply();
 }
 function draw(){
   if(!gl||!SC)return;
@@ -4919,6 +4950,15 @@ const CVAR_RANGE={r_showtris:[0,3],r_lightmap:[0,2],sv_showbboxes:[-28,128],g_en
 // the cvars the viewer starts at another value than the game does: the game's (the console says so)
 const CVAR_GAMEDEF={ai_showroutes_distance:1000};
 const CVAR_ROWS=[
+ {h:'Render distance: farplane fog and culling'},
+ {n:'r_farplane',num:[0,65536],step:64,f:1,d:'units, for the map\'s',
+  t:'Fog and cull at this distance in place of the map\'s farplane (0: the map\'s own), in the colour r_farplane_color, culling what r_farplane_nocull says. The game always draws a farplane\'s fog, so this turns the fog on here'},
+ {n:'r_farplane_color',str:1,need:'farset',d:'r g b, 0 to 1',
+  t:'The fog colour of r_farplane, red green blue from 0 to 1 (the game\'s default .5 .5 .5)'},
+ {n:'r_farplane_nocull',num:[-1,1],need:'farset',d:'1 none, -1 sky',
+  t:'What r_farplane culls: 0 (the default) the BSP nodes and the models past it, 1 nothing, -1 the models only (as for a portal sky). r_showtris shows it'},
+ {n:'r_farplane_nofog',v:1,need:'fog',d:'no fog',
+  t:'Don\'t draw the farplane\'s fog, the map\'s or r_farplane\'s (what is past the farplane is still culled: r_showtris shows it)'},
  {h:'What the renderer draws'},
  {n:'r_showtris',v:1,need:'vis',d:'outline what the game draws',
   t:'Outline every triangle the game draws from where the camera is, hidden behind walls: what is in the camera\'s PVS and in an area joined to its own, without the faces turned away from it'},
@@ -4938,14 +4978,6 @@ const CVAR_ROWS=[
   t:'Draw the parts of the sky box the game draws from here in front of everything: the sky polygons in view are projected onto the six sides of a box round the eye and rounded out to quarters of a side (tr_sky.c). In game the walls are drawn after the sky and still cover it, unless the sky has a solid cloud layer'},
  {n:'r_showstaticbboxes',v:1,need:'vis',d:'static models\' boxes',
   t:'A magenta box round each static model the game draws from here (the leafs it keeps and the farplane decide): its .tik\'s bounds times its scale, turned with it'},
- {n:'r_farplane',num:[0,65536],step:64,f:1,d:'units, for the map\'s',
-  t:'Fog and cull at this distance in place of the map\'s farplane (0: the map\'s own), in the colour r_farplane_color, culling what r_farplane_nocull says. The game always draws a farplane\'s fog, so this turns the fog on here'},
- {n:'r_farplane_color',str:1,need:'farset',d:'r g b, 0 to 1',
-  t:'The fog colour of r_farplane, red green blue from 0 to 1 (the game\'s default .5 .5 .5)'},
- {n:'r_farplane_nocull',num:[-1,1],need:'farset',d:'1 none, -1 sky',
-  t:'What r_farplane culls: 0 (the default) the BSP nodes and the models past it, 1 nothing, -1 the models only (as for a portal sky). r_showtris shows it'},
- {n:'r_farplane_nofog',v:1,need:'fog',d:'no fog',
-  t:'Don\'t draw the farplane\'s fog, the map\'s or r_farplane\'s (what is past the farplane is still culled: r_showtris shows it)'},
  {h:'Lighting'},
  {n:'r_lightmap',v:1,need:'lit',d:'lightmaps only',
   t:'Lightmapped surfaces show their lightmap in place of their texture (the texture\'s alpha still cuts or blends it): the game draws a surface\'s stages only as far as its lightmap stage, and a stage joined with the texture replaces the colour. A shader that multiplies the lightmap over its texture in a pass of its own keeps the texture, as in game'},
@@ -5629,7 +5661,7 @@ function updateHoverText(h){
   el.textContent=s;
 }
 function updateHint(){
-  $('hintCam').textContent=(camMode==='free'?'free-look ':'radiant-look ')+fvec(cam.pos)+'  yaw '+fnum(cam.yaw)+' pitch '+fnum(cam.pitch)+(clipOn?'  clip '+clipDist:'');
+  $('hintCam').textContent=(camMode==='free'?'free-look ':'radiant-look ')+fvec(cam.pos)+'  yaw '+fnum(cam.yaw)+' pitch '+fnum(cam.pitch)+(Math.abs(wrap180(cam.roll))>=0.005?' roll '+fnum(camAngles()[2]):'')+(clipOn?'  clip '+clipDist:'');
 }
 
 // ============================================================================
@@ -5738,7 +5770,8 @@ const DISPLAY=[
  {k:'links',l:'Links',key:'7',t:'A line from each entity to the entities its "target" key points at'},
  {k:'fog',l:'Fog',key:'8',t:'The map\'s distance fog (worldspawn farplane / farplane_color), like in game'},
  {k:'xray',l:'X-ray',key:'9',t:'Show the selection\'s outline, box, target links and facing arrow faintly through walls (everything else stays hidden behind them)'},
- {k:'lights',l:'Lights off',key:'0',t:'Every light entity of the map off, as if it had never been there: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the sun, the sky and the ambient light give it. Again: every light back on. Single lights turn off and on from Selection (Turn off / Turn on). The first time takes a moment, while the page works out how much of the baked light each light gave'}];
+ {k:'lights',l:'Lights off',key:'0',t:'Every light entity of the map off, as if it had never been there: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the sun, the sky and the ambient light give it. Again: every light back on. Single lights turn off and on from Selection (Turn off / Turn on). The first time takes a moment, while the page works out how much of the baked light each light gave'},
+ {k:'sun',l:'Sun light',key:'-',t:'The sun\'s and the sky\'s light on the map (worldspawn suncolor, sundirection, sundiffuse). Off: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the lights and the ambient light give it, so open ground goes dark. The sun flare (J) is separate. The first time takes a moment, as Lights off does'}];
 const FILTERS=[
  {m:C_WORLD,l:'World',key:'Alt+1',t:'Structural world brushes'},
  {m:C_ENTITIES,l:'Entities',key:'Alt+2',t:'Every entity: brush entities, models, lights, nodes, markers'},
@@ -5770,8 +5803,9 @@ function buildPanel(){
   const db=$('dispBtns');
   for(const d of DISPLAY){const b=document.createElement('button');b.id='d_'+d.k;b.innerHTML=esc(d.l)+'<span class="k">'+d.key+'</span>';
     b.title=d.t+' ('+d.key+')';b.onclick=()=>toggleDisplay(d.k);db.appendChild(b);}
-  // Lights off needs a .bsp's baked light (ltCheck says why not)
-  if(!ltCheck()){$('d_lights').disabled=true;$('d_lights').title=LT.why;}
+  // Lights off and Sun light need a .bsp's baked light (ltCheck says why not), Sun light a sun
+  if(!ltCheck()){for(const k of ['lights','sun']){$('d_'+k).disabled=true;$('d_'+k).title=LT.why;}}
+  else if(!LT.sunHas){$('d_sun').disabled=true;$('d_sun').title=LT.sunWhy;}
   const fb=$('filtBtns');
   for(const f of FILTERS){const b=document.createElement('button');b.innerHTML=esc(f.l)+(f.key?'<span class="k">'+f.key+'</span>':'');
     b.title=f.t+(f.key?' ('+f.key+')':'')+' - click to show / hide';f.el=b;b.onclick=()=>toggleFilter(f.m);fb.appendChild(b);}
@@ -5821,7 +5855,8 @@ function editorLook(){hiddenMask=EDIT_LOOK;simpleSky=true;fullBright=true;setSun
 // a look's sun flare setting counts only on a map that has a flare
 function flareAs(on){return !sunHas()||sunFlare===on;}
 function syncButtons(){
-  for(const d of DISPLAY){const b=$('d_'+d.k);if(b&&d.k!=='lights')b.classList.toggle('on',!!view[d.k]);}
+  for(const d of DISPLAY){const b=$('d_'+d.k);if(b&&d.k!=='lights'&&d.k!=='sun')b.classList.toggle('on',!!view[d.k]);}
+  {const b=$('d_sun');if(b)b.classList.toggle('on',LT.ok?(LT.sunHas&&!LT.sunOff):false);}
   // Lights off: on while every light is off, dashed while only some are
   {const b=$('d_lights');if(b){const n=LT.off?LT.off.reduce((a,x)=>a+x,0):0,all=LT.off&&n===LT.off.length&&n>0;
     b.classList.toggle('on',!!all);b.classList.toggle('part',n>0&&!all);
@@ -5844,7 +5879,8 @@ function syncButtons(){
   $('bFree').classList.toggle('on',camMode==='free');$('bRad').classList.toggle('on',camMode==='rad');
   $('camHelpFree').style.display=camMode==='free'?'':'none';$('camHelpRad').style.display=camMode==='rad'?'':'none';
 }
-function toggleDisplay(k){if(k==='lights'){toggleLightsOff();return;}view[k]=!view[k];syncButtons();saveOpts();
+function toggleDisplay(k){if(k==='lights'){toggleLightsOff();return;}if(k==='sun'){toggleSunLight();return;}
+  view[k]=!view[k];syncButtons();saveOpts();
   if(k==='wire'&&view.wire)rebuildWire();
   if(k==='fog'&&view.fog&&!FOG.far)flash('This map has no farplane fog');
   lineDirty=true;requestDraw();}

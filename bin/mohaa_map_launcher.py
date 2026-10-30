@@ -41,7 +41,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 32
+MAP_VIEWER_REV_REQUIRED = 35
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".cfg": "scr"}
@@ -223,8 +223,12 @@ class MapApp(ML.App):
         self.after(150, self._enable_win_drop)
         self.after(250, self._apply_titlebar)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-        saved = [p for p in (self._cfg.get("pk3s") or []) if os.path.exists(p)]
+        # the paks both programs share (mohaa_launcher.PAKS_SHARED), else this one's own
+        saved = ML.read_shared_paks()
+        if saved is None: saved = self._cfg.get("pk3s") or []
+        saved = [p for p in saved if os.path.exists(p)]
         if saved and self._remember.get(): self.after(200, lambda: self._add_pk3s(saved))
+        self._paks_watch()
         if initial_file: self.after(350, lambda: self._load(initial_file))
 
     # ------------------------------------------------------------- config ---
@@ -671,7 +675,7 @@ class MapApp(ML.App):
             if path not in self._pk3_paths: self._pk3_paths.append(path); added += 1
         if not added and paths: return
         self._cfg["pk3s"] = self._pk3_paths if self._remember.get() else []
-        self._save_config()
+        self._save_config(); self._paks_changed()
         self._pk3_label.configure(text=self._pak_label())
         self._reload_all()
         self._log_line(f"Loaded {len(self._pk3_paths)} pak(s): " + ", ".join(os.path.basename(p) for p in self._pk3_paths), "ok")
@@ -682,7 +686,7 @@ class MapApp(ML.App):
         if path in self._pk3_paths:
             self._pk3_paths.remove(path)
             self._cfg["pk3s"] = self._pk3_paths if self._remember.get() else []
-            self._save_config()
+            self._save_config(); self._paks_changed()
             self._pk3_label.configure(text=self._pak_label())
             self._log_line(f"Removed {os.path.basename(path)}", "dim")
             if self._pk3_paths: self._reload_all()
