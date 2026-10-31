@@ -41,10 +41,13 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 32
+MAP_VIEWER_REV_REQUIRED = 48
 # Files the map tree lists, and what each kind is.
-MAP_KINDS = {".bsp": "bsp", ".map": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
-             ".min": "bin", ".dcl": "bin", ".vis": "bin", ".cfg": "scr"}
+MAP_KINDS = {".bsp": "bsp", ".map": "map", ".bak": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
+             ".min": "bin", ".dcl": "bin", ".vis": "bin", ".lin": "bin", ".cfg": "scr"}
+# Files that open in the viewer: a .bak is MOHRadiant's previous save of a .map (or a
+# backed-up .bsp), opened as what it holds; its page and decompile have "_bak" in the name.
+MAP_EXTS = (".bsp", ".map", ".bak")
 TEXT_KINDS = ("scr",)
 
 # The launcher's own shortcuts: the "Launcher" tab of the F1 window (its "3D viewer" tab
@@ -56,7 +59,7 @@ MAP_KEYS_LAUNCHER = {
         {"title": "Launcher", "rows": [
             ML._kx_sub("Anywhere in the launcher", "app"),
             ML._kx("Ctrl+O", "add .pk3 pak(s)", ("Ctrl+O", "add paks")),
-            ML._kx("Ctrl+Shift+O", "open a loose .bsp / .map file", ("Ctrl+Shift+O", "open file")),
+            ML._kx("Ctrl+Shift+O", "open a loose .bsp / .map / .bak file", ("Ctrl+Shift+O", "open file")),
             ML._kx("Ctrl+F", "focus the search box", ("Ctrl+F", "search")),
             ML._kx("Esc", "clear the search / close a menu / cancel loading", ("Esc", "cancel")),
             ML._kx("F5", "reload all loaded paks", ("F5", "reload")),
@@ -142,7 +145,7 @@ class MapApp(ML.App):
 
     # The only kinds of pak file ever extracted to the workspace: maps to build and text
     # files to open in the text editor.
-    _EXTRACT_OK = {".bsp", ".map", ".scr", ".txt", ".shader", ".tik", ".cfg"}
+    _EXTRACT_OK = {".bsp", ".map", ".bak", ".scr", ".txt", ".shader", ".tik", ".cfg"}
 
     def __init__(self, initial_file=None):
         # Same start-up as the Model Viewer's window (mohaa_launcher.App.__init__), with
@@ -223,8 +226,12 @@ class MapApp(ML.App):
         self.after(150, self._enable_win_drop)
         self.after(250, self._apply_titlebar)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-        saved = [p for p in (self._cfg.get("pk3s") or []) if os.path.exists(p)]
+        # the paks both programs share (mohaa_launcher.PAKS_SHARED), else this one's own
+        saved = ML.read_shared_paks()
+        if saved is None: saved = self._cfg.get("pk3s") or []
+        saved = [p for p in saved if os.path.exists(p)]
         if saved and self._remember.get(): self.after(200, lambda: self._add_pk3s(saved))
+        self._paks_watch()
         if initial_file: self.after(350, lambda: self._load(initial_file))
 
     # ------------------------------------------------------------- config ---
@@ -348,9 +355,9 @@ class MapApp(ML.App):
                                     highlightbackground=ML.LINE, highlightcolor=ML.ACCENT, highlightthickness=1,
                                     relief="flat", font=ML.FONT_MONO)
         self._path_entry.pack(side="left", fill="x", expand=True, padx=(10, 4), pady=2, ipady=3)
-        self._tip(self._path_entry, "Selected map.\nPaste a full path here, pick from the tree,\nor drag a .bsp/.map onto this window.")
+        self._tip(self._path_entry, "Selected map.\nPaste a full path here, pick from the tree,\nor drag a .bsp/.map/.bak onto this window.")
         self._mkbtn(top, text="Browse...", command=self._browse,
-                    tip="Pick a loose .bsp or .map from disk.\n(Ctrl+Shift+O)").pack(side="left", padx=(0, 4))
+                    tip="Pick a loose .bsp, .map or .bak from disk.\n(Ctrl+Shift+O)").pack(side="left", padx=(0, 4))
         self._mkbtn(top, text="▶ Open Viewer", style="Accent.TButton", command=self._run,
                     tip="Build the viewer for the selected map and show it in the middle pane\n(also runs on double-click / Enter in the tree)").pack(side="left", padx=(0, 14))
         self._lines = [tk.Frame(self, bg=ML.LINE, height=1)]; self._lines[0].pack(fill="x", padx=8)
@@ -399,7 +406,7 @@ class MapApp(ML.App):
         self._viewpane = ttk.Frame(upper, style="Panel.TFrame")
         self._viewpane.pack(fill="both", expand=True)
         _ph = ("3D map viewer\n\nadd your .pk3 paks, then pick a map in the tree\n(maps / dm, obj ...),"
-               "\nor drag a .bsp / .map onto this window,\nthen Open Viewer")
+               "\nor drag a .bsp / .map / .bak onto this window,\nthen Open Viewer")
         if ML.WEBVIEW2 is None:
             _ph += ("\n\nembedded view unavailable - maps open in your browser."
                     + (("\n(" + ML._WEBVIEW_ERR[:80] + ")") if ML._WEBVIEW_ERR else "")
@@ -477,6 +484,8 @@ class MapApp(ML.App):
                 return "Double-click / Enter opens the map in the viewer (a .bsp is decompiled to .map first)"
             if kind in TEXT_KINDS:
                 return "Double-click / Enter opens it in your Text Editor"
+            if os.path.splitext(self._tree_entry[row].lower())[1] in (".pth", ".dcl", ".lin"):
+                return "Map data the viewer shows with its map (AI paths, decals, leak trail): open the .bsp"
             return "Compiled map data the viewer doesn't show yet"
         return "Backspace goes up a folder - Enter opens selected folder"
 
@@ -531,7 +540,7 @@ class MapApp(ML.App):
         and .map files that start with the decompiler's own first line. A 'maps' folder is
         a common name in a game install, so anything else in it is never touched."""
         fl = os.path.basename(path).lower()
-        if fl.endswith(("_bsp_view.html", "_map_view.html")): return True
+        if fl.endswith(("_bsp_view.html", "_map_view.html", "_bak_view.html")): return True
         return fl.endswith(".map") and MB is not None and MB.is_decompiled_map(path)
 
     def _built_scan(self):
@@ -671,7 +680,7 @@ class MapApp(ML.App):
             if path not in self._pk3_paths: self._pk3_paths.append(path); added += 1
         if not added and paths: return
         self._cfg["pk3s"] = self._pk3_paths if self._remember.get() else []
-        self._save_config()
+        self._save_config(); self._paks_changed()
         self._pk3_label.configure(text=self._pak_label())
         self._reload_all()
         self._log_line(f"Loaded {len(self._pk3_paths)} pak(s): " + ", ".join(os.path.basename(p) for p in self._pk3_paths), "ok")
@@ -682,7 +691,7 @@ class MapApp(ML.App):
         if path in self._pk3_paths:
             self._pk3_paths.remove(path)
             self._cfg["pk3s"] = self._pk3_paths if self._remember.get() else []
-            self._save_config()
+            self._save_config(); self._paks_changed()
             self._pk3_label.configure(text=self._pak_label())
             self._log_line(f"Removed {os.path.basename(path)}", "dim")
             if self._pk3_paths: self._reload_all()
@@ -910,10 +919,11 @@ class MapApp(ML.App):
         threading.Thread(target=work, daemon=True).start()
 
     def _browse(self):
-        """Browse... : pick a loose .bsp / .map (Open Viewer then builds it)."""
-        p = filedialog.askopenfilename(title="Select a MOHAA map (.bsp or .map)",
-                                       filetypes=[("MOHAA map", "*.bsp *.map"), ("Compiled map", "*.bsp"),
-                                                  ("Map source", "*.map"), ("All files", "*.*")])
+        """Browse... : pick a loose .bsp / .map / .bak (Open Viewer then builds it)."""
+        p = filedialog.askopenfilename(title="Select a MOHAA map (.bsp, .map or .bak)",
+                                       filetypes=[("MOHAA map", "*.bsp *.map *.bak"), ("Compiled map", "*.bsp"),
+                                                  ("Map source", "*.map"), ("MOHRadiant backup", "*.bak"),
+                                                  ("All files", "*.*")])
         if p: self._path_var.set(p)
 
     def _run(self):
@@ -923,8 +933,8 @@ class MapApp(ML.App):
         if path.startswith("pk3 map:") and self._last_build:
             self._load(*self._last_build); return
         if not path: self._log_line("No file selected.", "err"); return
-        if not path.lower().endswith((".bsp", ".map")):
-            self._log_line("File must be a .bsp or .map", "err"); return
+        if not path.lower().endswith(MAP_EXTS):
+            self._log_line("File must be a .bsp, .map or .bak", "err"); return
         if not os.path.exists(path): self._log_line(f"Not found: {path}", "err"); return
         if not self._pyexe: self._log_line("Python not found on PATH.", "err"); return
         if not os.path.exists(MAP_BUILDER): self._log_line("mohaa_map_view.py not found next to the launcher.", "err"); return
@@ -934,8 +944,8 @@ class MapApp(ML.App):
         """Build (or reuse) the page for a map file on disk. Pak entries arrive here once
         extracted (_cont=True); loose files from Browse, drag-drop or Recent come straight in."""
         if not _cont and self._viewer_open_busy(): return
-        if not path.lower().endswith((".bsp", ".map")):
-            self._log_line(f"{os.path.basename(path)}: only .bsp and .map files open in the map viewer.", "err"); return
+        if not path.lower().endswith(MAP_EXTS):
+            self._log_line(f"{os.path.basename(path)}: only .bsp, .map and .bak files open in the map viewer.", "err"); return
         if (not _cont and subdir is None and os.path.isfile(path)
                 and not (self._tmp and path.startswith(self._tmp))):
             subdir = ML.STANDALONE_SUBDIR
@@ -1040,7 +1050,16 @@ class MapApp(ML.App):
                 return False
             with open(hp, "r", encoding="utf-8", errors="ignore") as f: head = f.read(400)
             m = re.search(r"mohaa-map-viewer-rev:(\d+)", head)
-            if m and int(m.group(1)) >= MAP_VIEWER_REV_REQUIRED: return True
+            if m and int(m.group(1)) >= MAP_VIEWER_REV_REQUIRED:
+                # the loose files it was built from (the map opened from disk, its .scr,
+                # .dcl, .lin, .pth): one that changed, appeared or went means a rebuild
+                for dp, mt in self._read_page_info(hp).get("deps") or ():
+                    now = round(os.path.getmtime(dp), 3) if os.path.isfile(dp) else 0
+                    if abs(now - (mt or 0)) > 0.002:
+                        self._log_line(f"({os.path.basename(dp)} {'changed' if now and mt else 'appeared' if now else 'is gone'}"
+                                       f" since {os.path.basename(hp)} was built - rebuilding)", "dim")
+                        return False
+                return True
             self._log_line(f"({os.path.basename(hp)} is from an older viewer build - rebuilding)", "dim")
             return False
         except Exception:
@@ -1215,7 +1234,7 @@ class MapApp(ML.App):
             def _drop(s, a):
                 try:
                     for p in a.Data.GetData(DataFormats.FileDrop):
-                        if str(p).lower().endswith((".bsp", ".map")): self._drop_paths.append(str(p))
+                        if str(p).lower().endswith(MAP_EXTS): self._drop_paths.append(str(p))
                 except Exception: pass
             self._wv_drag_cbs = (_enter, _drop)
             for c in (getattr(wv, "web", None), getattr(wv, "control", None)):
@@ -1302,7 +1321,7 @@ class MapApp(ML.App):
                             need = shell32.DragQueryFileW(wp, i, None, 0)
                             buf = ctypes.create_unicode_buffer(need + 1)
                             shell32.DragQueryFileW(wp, i, buf, need + 1)
-                            if buf.value.lower().endswith((".bsp", ".map")): self._drop_paths.append(buf.value)
+                            if buf.value.lower().endswith(MAP_EXTS): self._drop_paths.append(buf.value)
                         shell32.DragFinish(wp)
                     except Exception: pass
                     return 0
@@ -1318,7 +1337,7 @@ class MapApp(ML.App):
                 except Exception: pass
             self._restore_drop = _restore
             self.bind("<Destroy>", lambda e: _restore() if e.widget is self else None)
-            self._log_line("Drag-and-drop ready - drop a .bsp/.map onto this window.", "dim")
+            self._log_line("Drag-and-drop ready - drop a .bsp/.map/.bak onto this window.", "dim")
         except Exception as e:
             self._log_line(f"(drag-drop unavailable: {e}; use Browse)", "dim")
 
@@ -1586,7 +1605,7 @@ class MapApp(ML.App):
 if __name__ == "__main__":
     init = None
     for a in sys.argv[1:]:
-        if a.lower().endswith((".bsp", ".map")) and os.path.exists(a): init = a; break
+        if a.lower().endswith(MAP_EXTS) and os.path.exists(a): init = a; break
 
     def _run_app():
         MapApp(initial_file=init).mainloop()

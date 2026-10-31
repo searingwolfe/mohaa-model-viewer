@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================================
 REM  RUN -- Medal of Honor Map Viewer.bat
-REM  Starts the MOHAA Map Viewer launcher. Drop a .bsp/.map file onto this to
+REM  Starts the MOHAA Map Viewer launcher. Drop a .bsp/.map/.bak file onto this to
 REM  open it directly, or double-click to browse for one. Expects the scripts in
 REM  the bin\ folder next to this file (the Map Viewer shares several of them with
 REM  the Model Viewer).
@@ -29,6 +29,7 @@ set "FIRST="
 if "%~1"=="" goto argdone
 if not defined FIRST if /i "%~x1"==".bsp" set "FIRST=%~1"
 if not defined FIRST if /i "%~x1"==".map" set "FIRST=%~1"
+if not defined FIRST if /i "%~x1"==".bak" set "FIRST=%~1"
 shift
 goto argloop
 :argdone

@@ -51,6 +51,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  /* "N unreadable blocks skipped" under the map's stats: opens the list of them */
  a.errlink{color:var(--err);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
  a.errlink:hover{text-decoration-style:solid}
+ a.scrlink{color:var(--accent);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
+ a.scrlink:hover{text-decoration-style:solid}
  /* the real / simple / static-prop entity counts (each explains itself in its tooltip) */
  #stats .ek{cursor:help;border-bottom:1px dotted var(--line)} #stats .ek.over{color:var(--err)}
  .row{display:flex;align-items:center;gap:8px;margin:5px 0;flex-wrap:wrap}
@@ -165,6 +167,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  .li.sel .nm{color:var(--accent)}
  /* hidden (Hide, or a Show button off) in red; a class with some of its entities hidden in yellow */
  .li.hid .nm,.li.hid .ct{color:var(--err)} .li.part .nm,.li.part .ct{color:var(--warn)}
+ /* the Entities tab's client slots (0 to sv_maxclients - 1): greyed, not clickable */
+ .li.res{cursor:default;opacity:.45} .li.res:hover{background:none} .li.res .nm{color:var(--dim)}
  #findIn{width:100%}
  ::-webkit-scrollbar{width:10px;height:10px}
  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
@@ -183,6 +187,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  .amHead{display:flex;align-items:center;gap:6px;padding:3px 8px 5px 8px;color:var(--dim);
    font-size:11px;border-bottom:1px solid var(--line);margin-bottom:4px}
  .amHead .amPathTxt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .amHead .amReset{padding:1px 8px;font-size:11px}
  .amSearch{width:calc(100% - 12px);margin:2px 6px 5px 6px;padding:3px 6px;
    background:var(--btn);color:var(--txt);border:1px solid var(--line);border-radius:4px;
    font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
@@ -380,12 +385,13 @@ const TF_SKY=1, TF_NODRAW=2, TF_ALPHATEST=4, TF_BLEND=8, TF_ADD=16, TF_TWOSIDED=
 const C_WORLD=1<<0, C_DETAIL=1<<1, C_ENTBRUSH=1<<2, C_PATCH=1<<3, C_TERRAIN=1<<4, C_CAULK=1<<5,
       C_CLIP=1<<6, C_TRIGGER=1<<7, C_HINT=1<<8, C_SKY=1<<9, C_LIQUID=1<<10, C_TRANS=1<<11,
       C_ORIGIN=1<<12, C_PORTAL=1<<13, C_NODRAW=1<<14, C_POINT=1<<15, C_LIGHT=1<<16, C_AINODE=1<<17,
-      C_PATH=1<<18, C_MODEL=1<<19, C_STATIC=1<<20, C_VIS=1<<21, C_RAIN=1<<22, C_FOLIAGE=1<<23;
+      C_PATH=1<<18, C_MODEL=1<<19, C_STATIC=1<<20, C_VIS=1<<21, C_RAIN=1<<22, C_FOLIAGE=1<<23, C_SCRIPT=1<<24;
 const C_ENTITIES=C_ENTBRUSH|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_MODEL|C_STATIC|C_VIS;
 // C_STATIC has no Show button of its own: it marks the static props, which get no label
 // unless selected; Models and Entities hide them. C_RAIN (common/rain, the volumes of
 // func_rain entities) and C_FOLIAGE (common/foliageclip) have their own Show buttons,
-// apart from Nodraw and Clips.
+// apart from Nodraw and Clips. C_SCRIPT marks the entities the level script spawns
+// (scriptEnts), on top of their own kind.
 
 // ---- tokenizer -------------------------------------------------------------
 // Tokens: { } ( ) "quoted text" and bare words. // starts a comment that runs to
@@ -1047,7 +1053,7 @@ let NF=0;            // number of pickable faces (ids 1..NF); entity markers use
 const glcv=$('gl'), cv2=$('c'), ctx=cv2.getContext('2d');
 let gl=null;
 let W=1,H=1,DPR=Math.min(2,window.devicePixelRatio||1);
-const view={tex:true,shade:true,wire:false,ss:false,arrows:true,labels:true,links:true,fog:false,xray:true};
+const view={tex:true,shade:true,wire:false,ss:false,arrows:true,labels:true,links:true,fog:false,xray:true,decals:true,leak:true};
 let hiddenMask=C_HINT|C_PORTAL|C_RAIN;
 const hidEnt=new Set(), hidPrim=new Set();
 const SEL=new Set();            // 'e<entity>' (whole entity) or 'p<primitive>' (one world brush/patch/terrain)
@@ -1150,6 +1156,7 @@ function buildEntities(){
       }
     }
     if(hasGeo&&ei>0&&!WORLDLIKE[e.cls])X.cat|=C_ENTBRUSH;
+    if(e.scr){X.cat|=C_SCRIPT;X.scr=true;}
     const tn=e.kvl.targetname;if(tn){let l=tnIndex.get(tn);if(!l){l=[];tnIndex.set(tn,l);}l.push(ei);}
     ENTS.push(X);
   }
@@ -1255,9 +1262,26 @@ layout(location=0) in vec3 aPos; layout(location=1) in vec2 aUV;
 layout(location=3) in vec4 aR0; layout(location=4) in vec4 aR1; layout(location=5) in vec4 aR2; layout(location=6) in float aIPick;
 layout(location=9) in float aEng; layout(location=10) in vec4 aILight;
 layout(location=11) in vec4 aA2; layout(location=12) in vec3 aA2M; layout(location=15) in float aISlot;
+layout(location=13) in float aIStatic; layout(location=14) in vec3 aNrm;
 uniform mat4 uVP; uniform int uLit; uniform highp sampler2D uStatic; uniform int uAuto2; uniform vec3 uFwd; uniform int uRel;
+uniform vec4 uDv; uniform vec4 uDw; uniform int uDf; uniform float uTime; uniform vec4 uMul;
 out vec2 vUV; out vec3 vPos; out vec4 vCol; flat out float vPick;
-void main(){vec4 p=vec4(aPos,1.0);vec3 w=vec3(dot(aR0,p),dot(aR1,p),dot(aR2,p));
+// the engine's wave tables (tr_init.c): sin, triangle, square, sawtooth, inverse sawtooth
+float wf(int f,float x){x=fract(x);
+  if(f==1)return x<0.25?4.0*x:x<0.75?2.0-4.0*x:4.0*x-4.0;
+  if(f==2)return x<0.5?1.0:-1.0; if(f==3)return x; if(f==4)return 1.0-x;
+  return sin(x*6.28318530718);}
+void main(){vec4 p=vec4(aPos,1.0);
+  // deformVertexes wave / flap (tr_shade_calc.c RB_CalcDeformVertexes, RB_CalcFlapVertexes):
+  // along the vertex's normal by base + amplitude x wave(phase + time x frequency), a wave
+  // shifted by (x + y + z) / spread, a flap scaled by min .. max along s or t. A static
+  // model's four are scaled by r_static_shadermultiplier0 .. 3 (it has no entity)
+  if(uDv.x>0.5&&uAuto2==0){vec4 q=uDw;if(aIStatic>0.5)q*=uMul;
+    float sc;
+    if(uDv.x<1.5){float off=(p.x+p.y+p.z)*uDv.y;sc=q.w==0.0?q.x+wf(uDf,q.z)*q.y:q.x+wf(uDf,q.z+off+uTime*q.w)*q.y;}
+    else{sc=(q.x+wf(uDf,q.z+uTime*q.w)*q.y)*((uDv.w-uDv.z)*(uDv.x<2.5?aUV.x:aUV.y)+uDv.z);}
+    p.xyz+=aNrm*sc;}
+  vec3 w=vec3(dot(aR0,p),dot(aR1,p),dot(aR2,p));
   if(uAuto2==1){vec4 m=vec4(aA2.xyz,1.0);
     vec3 ax=vec3(dot(aR0.xyz,aA2M),dot(aR1.xyz,aA2M),dot(aR2.xyz,aA2M)), mn=cross(ax,uFwd);
     float l=length(mn), sc=length(vec3(aR0.x,aR1.x,aR2.x));
@@ -1509,6 +1533,8 @@ function initGL(){
   if(LIT)initLitGL();
   initSkyGL();
   sunFlareGL();
+  dclGL();
+  wxGL();
   glcv.addEventListener('webglcontextlost',e=>{e.preventDefault();
     failLoad('The graphics driver reset the 3D view'+(LT.step?' while turning lights off ('+LT.step+')':'')+'. Reopen the map to continue'+
       (LT.step?' (if this shows again, close the viewer and open the map again, or use Rebuild in viewer).':'.'));});
@@ -1548,6 +1574,7 @@ function prepMaterials(){
 let faceVis=null;
 function faceShown(f){
   if(SC.faceCat[f]&hiddenMask)return false;
+  if(THU.hid&&THU.ents&&THU.ents.has(SC.faceEnt[f]))return false;
   if(hidEnt.size&&hidEnt.has(SC.faceEnt[f]))return false;
   if(hidPrim.size&&hidPrim.has(SC.facePrim[f]))return false;
   return true;
@@ -1680,11 +1707,11 @@ function instRows(X){
 // Per instance: three rows of the placement matrix, the pick id, then its light for the
 // game's lighting: light grid colour and the first vertex of its baked light (or -1), and
 // its slot among the lights' probes (its grid colour relit with a light off; -1: none).
-const INST_FLOATS=18;
+const INST_FLOATS=19;
 function instData(ei){
   const X=ENTS[ei], rows=instRows(X), L=D.lit, g=L&&L.el?L.el[ei]:null, st=L&&L.st?L.st[ei]:null;
   const slot=LT.entSlot&&LT.entSlot.has(ei)?LT.entSlot.get(ei):-1;
-  return rows.concat([NF+1+ei, g?g[0]/255:1, g?g[1]/255:1, g?g[2]/255:1, st!=null?st:-1, slot]);
+  return rows.concat([NF+1+ei, g?g[0]/255:1, g?g[1]/255:1, g?g[2]/255:1, st!=null?st:-1, slot, isStaticProp(ei)?1:0]);
 }
 function initModels(){
   (D.models||[]).forEach((M,mi)=>{
@@ -1699,6 +1726,9 @@ function initModels(){
     const eng=new Float32Array(R.pos.length/3);
     for(const s of M.s)if(s.length>=7)for(let k=0;k<s[5];k++)eng[s[4]+k]=s[6]+k;
     R.vbE=makeBuf(gl.ARRAY_BUFFER,eng);R.eng=eng;
+    // the vertex normals (signed bytes), for deformVertexes; which surfaces move
+    if(M.n!=null){const nb=D.i8(M.n);if(nb.length>=R.pos.length)R.vbN=makeBuf(gl.ARRAY_BUFFER,nb);}
+    R.dv=!!R.vbN&&R.surfs.some(s=>(TEX[s.ti]||{}).dv);
     const a2=R.hasLod?auto2Data(R):null;
     if(a2){R.vbA2=makeBuf(gl.ARRAY_BUFFER,a2.mid);R.vbA2M=makeBuf(gl.ARRAY_BUFFER,a2.axis);}
     R.instBuf=gl.createBuffer();R.selBuf=gl.createBuffer();
@@ -1710,6 +1740,8 @@ function initModels(){
       gl.enableVertexAttribArray(6);gl.vertexAttribPointer(6,1,gl.FLOAT,false,st,48);gl.vertexAttribDivisor(6,1);
       gl.enableVertexAttribArray(10);gl.vertexAttribPointer(10,4,gl.FLOAT,false,st,52);gl.vertexAttribDivisor(10,1);
       gl.enableVertexAttribArray(15);gl.vertexAttribPointer(15,1,gl.FLOAT,false,st,68);gl.vertexAttribDivisor(15,1);
+      gl.enableVertexAttribArray(13);gl.vertexAttribPointer(13,1,gl.FLOAT,false,st,72);gl.vertexAttribDivisor(13,1);
+      if(R.vbN){gl.bindBuffer(gl.ARRAY_BUFFER,R.vbN);gl.enableVertexAttribArray(14);gl.vertexAttribPointer(14,3,gl.BYTE,true,0,0);}
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,R.ib);gl.bindVertexArray(null);return v;};
     R.vao=mk(R.instBuf);R.vaoSel=mk(R.selBuf);
     for(const s of R.surfs)if(s.sprite){let c=[0,0,0],n=0,r=0;
@@ -2111,7 +2143,7 @@ const FOG={far:0,col:[0.5,0.5,0.5]};
 // a farplane's fog, so r_farplane turns it on here whatever the Fog switch says.
 function farOverride(){return !!Math.trunc(CVARS.r_farplane);}
 function fogFar(){return farOverride()?CVARS.r_farplane:FOG.far;}
-function fogCol(){return farOverride()?(parseVec(CVARS.r_farplane_color,3)||[0.5,0.5,0.5]):FOG.col;}
+function fogCol(){return farOverride()?(parseVec(CVARS.r_farplane_color,3)||[0.5,0.5,0.5]):THU.flash?[0.9,0.9,0.9]:FOG.col;}
 function fogOn(){return (view.fog||farOverride())&&fogFar()>0&&!CVARS.r_farplane_nofog;}
 let _drawReq=false;
 function requestDraw(){if(_drawReq||!gl)return;_drawReq=true;requestAnimationFrame(()=>{_drawReq=false;draw();});}
@@ -2132,6 +2164,9 @@ function setCommon(p,vp,mode){
 // game: drawing the game's own polygons (its picture and material where they differ)
 function bindMat(p,ti,mode,game){
   const m=(game&&MAT[ti]?MAT[ti].lit:MAT[ti])||{kind:0,af:0,alpha:1}, te=TEX[ti]||{c:[0.5,0.5,0.5]};
+  if(p===PM){const dv=te.dv;
+    if(dv){gl.uniform4f(PM.u.uDv,dv[0],dv[1],dv[7],dv[8]);gl.uniform4f(PM.u.uDw,dv[3],dv[4],dv[5],dv[6]);gl.uniform1i(PM.u.uDf,dv[2]|0);}
+    else gl.uniform4f(PM.u.uDv,0,0,0,1);}
   gl.bindTexture(gl.TEXTURE_2D,(game&&GLTG[ti])||GLT[ti]||whiteTex);
   gl.uniform1i(p.u.uUseTex,(view.tex||mode===1)?1:0);
   gl.uniform3fv(p.u.uFlat,te.c||[0.5,0.5,0.5]);
@@ -2161,6 +2196,7 @@ function bindLit(p){
 }
 function setModelCommon(vp,mode,lit){
   setCommon(PM,vp,mode);
+  dvUniforms();
   gl.activeTexture(gl.TEXTURE3);gl.bindTexture(gl.TEXTURE_2D,(LT.active?LT.pOut:B.smTex)||whiteTex);gl.activeTexture(gl.TEXTURE0);
   gl.uniform1i(PM.u.uStatic,3);gl.uniform1i(PM.u.uLit,0);gl.uniform1i(PM.u.uRel,LT.active?1:0);
   gl.uniform1i(PM.u.uAuto2,0);gl.uniform3fv(PM.u.uFwd,camAxes().f);
@@ -2187,7 +2223,7 @@ function drawScene(vp,mode){
     setCommon(PLIT,vp,0);bindLit(PLIT);gl.bindVertexArray(B.vLit);
     for(const op of LIT.ops){bindMat(PLIT,op.ti,0,true);gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
   }
-  if(gameSky&&mode===0)drawGameSky(vp);
+  if(gameSky&&mode===0&&!THU.flash)drawGameSky(vp);
   // models (solid surfaces)
   setModelCommon(vp,mode,lit);
   for(const R of MODELS){if(!R.n)continue;gl.bindVertexArray(R.vao);
@@ -2220,6 +2256,7 @@ function drawScene(vp,mode){
       gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
     gl.depthMask(false);
   }
+  drawDecals(vp,lit);
   setCommon(PW,vp,0);gl.bindVertexArray(B.vTri);
   for(const op of drawTransG){if(lit&&op.rep)continue;blendFor(op.m.kind);bindMat(PW,op.ti,0);gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
   setModelCommon(vp,0,lit);
@@ -2237,6 +2274,7 @@ function drawScene(vp,mode){
       gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
     gl.cullFace(gl.BACK);}
   drawSprites(vp);
+  drawWeather(vp);
   gl.depthMask(true);gl.disable(gl.BLEND);gl.bindVertexArray(null);
 }
 // The game's sky (Simple Sky off): the sky box in the direction of each pixel of the
@@ -2295,6 +2333,400 @@ function drawSprites(vp){
   setCommon(PW,vp,0);gl.bindVertexArray(B.vSp);gl.disable(gl.CULL_FACE);
   for(const op of ops){const k=(MAT[op[0]]||{}).kind||0;blendFor(k===0?3:k);bindMat(PW,op[0],0);gl.disable(gl.CULL_FACE);gl.drawArrays(gl.TRIANGLES,op[1],op[2]);}
 }
+// ---- the map's permanent decals (Decals, =) -----------------------------------------------
+// D.dcl: the fragments of maps/<map>.dcl (R_LoadPermanentMarks, tr_marks_permanent.c),
+// each a fan of up to 8 vertices with its shader and the colour the game lit it with
+// (rgbGen / alphaGen vertex). Drawn after the solid world and models, blended, pushed
+// toward the camera (the decal shaders' polygonOffset) and without writing depth. With
+// the game's lighting off (Full Brightness, a .map) the colour is white and only the
+// alpha is kept. Not pickable: a click goes to the wall under the decal.
+const VS_DCL=`#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec2 aUV; layout(location=7) in vec4 aCol;
+uniform mat4 uVP; uniform int uWhite;
+out vec2 vUV; out vec3 vPos; out vec4 vCol; flat out float vPick;
+void main(){vUV=aUV;vPos=aPos;vCol=uWhite==1?vec4(1.0,1.0,1.0,aCol.a):aCol;vPick=0.0;gl_Position=uVP*vec4(aPos,1.0);}`;
+const DCL={P:null,vao:null,ops:[],n:0};
+function dclHas(){return !!(D&&D.dcl&&!D.dcl.err&&D.dcl.nf>0);}
+function dclWhy(){
+  if(!D||!D.dcl)return 'This map has no decals: no '+(D&&D.name||'map')+'.dcl in the paks or beside the file.';
+  if(D.dcl.err)return 'The decals '+D.dcl.src+' can\'t be read: '+D.dcl.err;
+  return 'The map\'s .dcl ('+D.dcl.src+') has no decals.';}
+function dclGL(){
+  if(!dclHas())return;
+  const G=D.dcl,T=D.i32(G.t),K=D.i32(G.k),P=D.f32(G.p),S=D.f32(G.s),C=D.bytes(G.c);
+  // triangle fans into one list, grouped by texture
+  const by=new Map();let v=0;
+  for(let f=0;f<T.length;f++){const n=K[f];if(!by.has(T[f]))by.set(T[f],[]);
+    const L=by.get(T[f]);for(let k=1;k+1<n;k++)L.push(v,v+k,v+k+1);v+=n;}
+  const pos=[],uv=[],col=[];DCL.ops=[];
+  for(const[ti,L]of by){const first=pos.length/3;
+    for(const i of L){pos.push(P[i*3],P[i*3+1],P[i*3+2]);uv.push(S[i*2],S[i*2+1]);col.push(C[i*4],C[i*4+1],C[i*4+2],C[i*4+3]);}
+    DCL.ops.push([ti,first,L.length]);}
+  DCL.n=pos.length/3;
+  DCL.P=compile(VS_DCL,FS_MAIN);
+  DCL.vao=gl.createVertexArray();gl.bindVertexArray(DCL.vao);
+  attr(0,makeBuf(gl.ARRAY_BUFFER,new Float32Array(pos)),3);attr(1,makeBuf(gl.ARRAY_BUFFER,new Float32Array(uv)),2);
+  gl.bindBuffer(gl.ARRAY_BUFFER,makeBuf(gl.ARRAY_BUFFER,new Uint8Array(col)));gl.enableVertexAttribArray(7);
+  gl.vertexAttribPointer(7,4,gl.UNSIGNED_BYTE,true,0,0);
+  gl.bindVertexArray(null);
+}
+function drawDecals(vp,lit){
+  if(!view.decals||!DCL.n)return;
+  const P=DCL.P;setCommon(P,vp,0);gl.uniform1f(P.u.uShade,0);gl.uniform1i(P.u.uWhite,lit?0:1);
+  gl.bindVertexArray(DCL.vao);gl.depthMask(false);
+  gl.enable(gl.POLYGON_OFFSET_FILL);gl.polygonOffset(-1,-2);
+  for(const[ti,first,count]of DCL.ops){const k=(MAT[ti]||{}).kind||0;
+    bindMat(P,ti,0);gl.disable(gl.CULL_FACE);gl.uniform4f(P.u.uTint,1,1,1,1);blendFor(k===0||k===4?2:k);
+    gl.drawArrays(gl.TRIANGLES,first,count);}
+  gl.disable(gl.POLYGON_OFFSET_FILL);gl.polygonOffset(0,0);gl.bindVertexArray(null);
+}
+
+// ---- the leak trail (Leak, P) ---------------------------------------------------------------
+// D.leak: maps/<map>.lin, the line q3map writes when the void outside the map reaches an
+// entity (LeakFile in the compiler: from the outside node, the middle of each portal on
+// the shortest way in, then the origin of the entity it reached). The first point is
+// therefore in the opening the void comes in through: that is where the map isn't sealed.
+// Drawn over everything, so it shows through walls.
+function leakHas(){return !!(D&&D.leak&&D.leak.p&&D.leak.p.length>=2);}
+function leakWhy(){
+  if(!D||!D.leak)return 'No leak trail: there is no '+(D&&D.name||'map')+'.lin in the paks or beside the file (the compiler writes one only when the map leaks).';
+  return 'The leak trail '+D.leak.src+' can\'t be used: '+(D.leak.err||'it has fewer than 2 points');}
+let LEAKENT=undefined;
+// the entity the trail ends at: its origin is the last point (GetVectorForKey "origin")
+function leakEnt(){
+  if(LEAKENT!==undefined)return LEAKENT;
+  const p=D.leak.p[D.leak.p.length-1];LEAKENT=-1;
+  for(let ei=1;ei<MAP.ents.length;ei++){const o=parseVec(MAP.ents[ei].kvl.origin,3);
+    if(o&&Math.abs(o[0]-p[0])<0.6&&Math.abs(o[1]-p[1])<0.6&&Math.abs(o[2]-p[2])<0.6){LEAKENT=ei;break;}}
+  return LEAKENT;
+}
+function leakLen(){const p=D.leak.p;let l=0;for(let i=1;i<p.length;i++)l+=Math.hypot(p[i][0]-p[i-1][0],p[i][1]-p[i-1][1],p[i][2]-p[i-1][2]);return l;}
+function drawLeak2D(){
+  if(!view.leak||!leakHas())return;
+  const a=camAxes(), e=cam.pos, pts=D.leak.p;
+  const depth=p=>(p[0]-e[0])*a.f[0]+(p[1]-e[1])*a.f[1]+(p[2]-e[2])*a.f[2];
+  const segs=[];
+  for(let i=1;i<pts.length;i++){let A=pts[i-1],Bq=pts[i],za=depth(A),zb=depth(Bq);const N=NEAR+0.5;
+    if(za<N&&zb<N)continue;
+    if(za<N){const t=(N-za)/(zb-za);A=[A[0]+(Bq[0]-A[0])*t,A[1]+(Bq[1]-A[1])*t,A[2]+(Bq[2]-A[2])*t];}
+    else if(zb<N){const t=(N-zb)/(za-zb);Bq=[Bq[0]+(A[0]-Bq[0])*t,Bq[1]+(A[1]-Bq[1])*t,Bq[2]+(A[2]-Bq[2])*t];}
+    const pa=project(A),pb=project(Bq);if(pa&&pb)segs.push([pa,pb]);}
+  ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
+  for(const[w,c]of[[6,'rgba(0,0,0,.55)'],[3,'#ff3030']]){ctx.lineWidth=w;ctx.strokeStyle=c;ctx.beginPath();
+    for(const[pa,pb]of segs){ctx.moveTo(pa[0],pa[1]);ctx.lineTo(pb[0],pb[1]);}ctx.stroke();}
+  // the points along it, the hole and the entity marked
+  ctx.fillStyle='#ffd040';
+  for(let i=1;i<pts.length-1;i++){const s=project(pts[i]);if(s){ctx.beginPath();ctx.arc(s[0],s[1],3,0,Math.PI*2);ctx.fill();}}
+  ctx.font='bold 11px ui-monospace,Menlo,Consolas,monospace';ctx.textBaseline='middle';
+  const tag=(p,txt,col)=>{const s=project(p);if(!s)return;
+    ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,.6)';ctx.beginPath();ctx.arc(s[0],s[1],9,0,Math.PI*2);ctx.stroke();
+    ctx.lineWidth=2;ctx.strokeStyle=col;ctx.beginPath();ctx.arc(s[0],s[1],9,0,Math.PI*2);ctx.stroke();
+    const tw=ctx.measureText(txt).width;ctx.fillStyle='rgba('+TH.labelbg+',.85)';ctx.fillRect(s[0]+13,s[1]-8,tw+8,16);
+    ctx.fillStyle=col;ctx.fillText(txt,s[0]+17,s[1]);};
+  const ei=leakEnt();
+  tag(pts[pts.length-1],'leak: '+(ei>0?(MAP.ents[ei].kvl.classname||'entity')+' (entity '+ei+')':'the entity')+' reaches the void','#ffd040');
+  tag(pts[0],'leak: the hole is here','#ff3030');
+  ctx.restore();
+}
+function leakCard(){
+  infoMode='leak';
+  if(!leakHas()){card('Leak trail','<div class="note">'+esc(leakWhy())+'</div>');return;}
+  // Go looks at a point from along the trail (the next point's side, the last one from the
+  // one before it): the trail runs through open space, so the camera is never in a wall,
+  // and at the hole it looks out through it from inside
+  const L=D.leak,p=L.p,ei=leakEnt(),
+    go=i=>{const q=p[i],f=p[i+1<p.length?i+1:i-1];
+      return ' <button class="sm" data-go="'+q.join(' ')+'" data-from="'+f.join(' ')+'" title="Fly to it, looking along the trail">Go</button>'+copyBtn(fvec(q));};
+  let h='<div><b>'+esc(L.src)+'</b>: '+p.length+' points, '+fnum(Math.round(leakLen()))+' units long</div>';
+  if(L.old)h+='<div class="warn">The .lin is older than the .map beside it: the map was saved after the compile that leaked, so this hole may already be sealed. Compile again to know.</div>';
+  h+='<div class="note">The compiler found that the void outside the map reaches an entity: the map isn\'t sealed. The trail runs from the opening the void comes in through (the first point) along the open way to that entity (the last point). Close the opening with a structural brush (patches, terrain and detail brushes never seal a map: caulk under terrain is the usual fix) or move the entity inside, and compile again; while a map leaks the compiler leaves out its vis, so the whole map is drawn from everywhere and the outside faces aren\'t removed.</div>';
+  if(GV&&!GV.pvs)h+='<div class="note warn">This .bsp has no vis data, as a map that leaked compiles.</div>';
+  h+='<h4>Where</h4>'+kvTable([
+    ['the hole',esc(fvec(p[0]))+go(0)],
+    ['the entity',(ei>0?linkEnt(ei)+' ':'')+esc(fvec(p[p.length-1]))+go(p.length-1)]]);
+  if(!(ei>0))h+='<div class="note">No entity of this map has its origin at the last point: the .lin may be from another version of the map.</div>';
+  h+='<h4>Points<span class="sp"></span>'+copyBtn(p.map(fvec).join('\n'),'Copy all')+'</h4>';
+  h+=kvTable(p.slice(0,200).map((q,i)=>[String(i+1),esc(fvec(q))+go(i)]));
+  if(p.length>200)h+='<div class="note">… and '+(p.length-200)+' more (Copy all has them)</div>';
+  card('Leak trail',h);
+}
+// a look at a point, close enough to see what is around it: from the side of point
+// "from" when given (no further than 80% of the way there), else from where the camera is
+function flyLook(c,r,from){
+  let dist=Math.max(64,r||160),dir=null;
+  if(from){dir=vnorm(vsub(c,from));if(dir)dist=Math.min(dist,Math.max(8,0.8*Math.hypot(c[0]-from[0],c[1]-from[1],c[2]-from[2])));}
+  dir=dir||vnorm(vsub(c,cam.pos))||camAxes().f;
+  const yaw=Math.atan2(dir[1],dir[0])*180/Math.PI, pitch=-Math.asin(Math.max(-1,Math.min(1,dir[2])))*180/Math.PI;
+  flyTo([c[0]-dir[0]*dist,c[1]-dir[1]*dist,c[2]-dir[2]*dist],yaw,pitch);requestDraw();
+}
+
+// ---- weather: rain and snow (Weather, Y; cg_rain_* in the game cvars) ---------------------
+// As the client makes it (cgame/cg_nature.cpp CG_Rain, cg_beam.cpp): every client frame
+// (com_maxfps a second), each func_rain the client has (in the snapshot: its box touches a
+// cluster the player's PVS sees) starts sqrt(width x depth) x density / 200 drops in its box
+// cut to rain_min_dist round the viewer (a square), the ones outside that circle skipped.
+// A drop is a beam from its start to a point at the bottom of the box slant (and the wind,
+// vss_wind_x / _y) across, at speed + a random part of speed_vary: it starts at the top of
+// the box in Allied Assault 1.11, anywhere in its height in 2.0 / OpenMoHAA (with a 10 s
+// most), and is drawn as a streak "length" long and twice "width" wide, facing the camera
+// sideways (CG_BuildRendererBeam_Fast). Each beam keeps the shader, length and width it was
+// started with (CG_CreateBeam stores them), so changing those cvars, or cg_weather, only
+// changes the drops started after it. The snow shaders turn it into a little square
+// facing the camera (deformVertexes autoSprite). Drops go through roofs: nothing stops one
+// before the bottom of its box. All beams share MAX_BEAMS (4096): with none free a drop
+// isn't started, which is what makes the gaps and clumps of slow snow from high boxes.
+// The random numbers are the game's: rand() once a frame, then the client's own
+// 214013 x + 2531011 step on the 15-bit value. The shader: one per box per frame,
+// shader + a random 0 .. numshaders - 1 (cg_main.c).
+const VS_WX=`#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec2 aUV;
+uniform mat4 uVP; out vec2 vUV; out vec3 vPos; out vec4 vCol; flat out float vPick;
+void main(){vUV=aUV;vPos=aPos;vCol=vec4(1.0);vPick=0.0;gl_Position=uVP*vec4(aPos,1.0);}`;
+const WX_MAX=4096;                         // MAX_BEAMS (cg_commands.h)
+const WX={P:null,vao:null,bP:null,bT:null,
+  sx:new Float32Array(WX_MAX),sy:new Float32Array(WX_MAX),sz:new Float32Array(WX_MAX),
+  ex:new Float32Array(WX_MAX),ey:new Float32Array(WX_MAX),ez:new Float32Array(WX_MAX),
+  end:new Float64Array(WX_MAX),life:new Float64Array(WX_MAX),sh:new Int16Array(WX_MAX),on:new Uint8Array(WX_MAX),
+  len:new Float32Array(WX_MAX),wid:new Float32Array(WX_MAX),shTab:[],shIds:new Map(),
+  free:[],n:0,t:0,wall:0,seed:1,rainEnts:[],world:null,mapDef:{},
+  stat:{at:0,made:0,missed:0,frames:0,last:null},names:[],nameKey:''};
+// The rain cvars and the level settings they stand for (Level::SetRain*, the CS_RAIN_*
+// configstrings the client reads into cg.rain).
+const WX_KEYS=['density','speed','speed_vary','slant','length','min_dist','width','shader','numshaders'];
+// weather.scr's presets (cg_weather), its "snow_original" and "rain_original" being the
+// game's own snow (m6l1a) and the client's defaults
+const WX_PRESETS={
+  snow:[1,50,25,500,3,1800,2,'textures/snow10',0],snow_fast:[1,150,50,900,3,1800,2,'textures/snow10',0],
+  blizzard:[3,350,150,1500,4,1800,3,'textures/snow10',0],hail:[0.25,1000,250,75,4,2048,3,'textures/snow10',0],
+  snow_original:[0.2,32,16,250,2,1800,1,'textures/snow10',0],rain:[1,2048,512,75,50,1024,0.5,'textures/rain',0],
+  drizzle:[0.1,2048,512,50,50,2048,0.5,'textures/rain',0],monsoon:[3,2048,512,250,50,1024,0.5,'textures/rain',0],
+  rain_original:[1,2048,512,50,90,512,0.4,'textures/rain',0],off:[0,0,0,0,0,0,0,'textures/rain',0]};
+// preset order: density, speed, speed_vary, slant, length, min_dist, width, shader, numshaders
+const WX_PRESET_KEYS=['density','speed','speed_vary','slant','length','min_dist','width','shader','numshaders'];
+// The map's own settings, as its script makes them, become the cvars' defaults; a map that
+// runs global/weather.scr changes its density as it plays (a storm cycle): the viewer starts
+// at that script's middle setting (width .4, min_dist 512, density 3, slant 50).
+function wxInit(){
+  const W=D.weather||{},S=W.set||{},def={};
+  if(W.wscr){def.width=0.4;def.min_dist=512;def.density=3;def.slant=50;}
+  for(const k of WX_KEYS){const s=S[k];if(s&&s[0]!=null&&s[0]!=='')def[k]=(k==='shader')?String(s[0]):parseFloat(s[0]);}
+  for(const k in def){const n='cg_rain_'+k;if(k==='shader'||isFinite(def[k])){
+    const v=k==='shader'?def[k]:(k==='numshaders'||k==='slant'||k==='speed_vary'?Math.trunc(def[k]):def[k]);
+    CVAR_DEFAULTS[n]=v;CVARS[n]=v;WX.mapDef[n]=v;}}
+  // weather.scr's tree sway at its middle storm: (raindensity 3 + 1.5) / 2.5
+  if(W.wscr){CVAR_DEFAULTS.r_static_shadermultiplier1=1.8;CVARS.r_static_shadermultiplier1=1.8;}
+  WX.rainEnts=[];for(let ei=1;ei<MAP.ents.length;ei++)if(MAP.ents[ei].cls==='func_rain')WX.rainEnts.push(ei);
+  for(let i=WX_MAX-1;i>=0;i--)WX.free.push(i);
+  WX.seed=(Date.now()&0x7fffffff)|1;
+}
+function wxGL(){
+  WX.P=compile(VS_WX,FS_MAIN);
+  WX.bP=gl.createBuffer();WX.bT=gl.createBuffer();
+  WX.vao=gl.createVertexArray();gl.bindVertexArray(WX.vao);attr(0,WX.bP,3);attr(1,WX.bT,2);gl.bindVertexArray(null);
+}
+// cg_weather: one of weather.scr's presets, or "map" for the map's own settings
+function wxPreset(name){
+  name=String(name||'').toLowerCase();
+  if(name==='map'){for(const k of WX_KEYS){const n='cg_rain_'+k;CVARS[n]=(n in WX.mapDef)?WX.mapDef[n]:WX_BASE[n];}return true;}
+  const p=WX_PRESETS[name==='0'?'off':name];if(!p)return false;
+  WX_PRESET_KEYS.forEach((k,i)=>{CVARS['cg_rain_'+k]=p[i];});return true;
+}
+// the client's starting values (ClientGameCommandManager::InitializeRainCvars)
+const WX_BASE={cg_rain_density:0,cg_rain_speed:2048,cg_rain_speed_vary:512,cg_rain_slant:50,cg_rain_length:90,
+  cg_rain_min_dist:512,cg_rain_width:1,cg_rain_shader:'textures/rain',cg_rain_numshaders:0};
+// the shaders (CS_RAIN_SHADER / CS_RAIN_NUMSHADERS in cg_main.c): numshaders of them, the
+// shader's name with 0, 1, 2 ... after it (a digit it ends with dropped first, as
+// OpenMoHAA does), else the shader itself
+function wxNames(){
+  const key=CVARS.cg_rain_shader+'|'+CVARS.cg_rain_numshaders;if(WX.nameKey===key)return WX.names;
+  let s=String(CVARS.cg_rain_shader||'').trim().toLowerCase();const n=Math.max(0,Math.min(32,Math.trunc(CVARS.cg_rain_numshaders)||0));
+  const out=[];
+  if(n){if(/\d$/.test(s))s=s.slice(0,-1);for(let i=0;i<n;i++)out.push(s+i);}else if(s)out.push(s);
+  WX.names=out;WX.nameKey=key;return out;
+}
+// a shader name's number in WX.shTab (a beam keeps the number of the shader it started with)
+function wxShId(name){let id=WX.shIds.get(name);if(id==null){id=WX.shTab.length;WX.shTab.push(name);WX.shIds.set(name,id);}return id;}
+function wxTex(name){const t=D.weather&&D.weather.tex&&D.weather.tex[name];return t||null;}
+// the rain boxes the client has: each func_rain in the snapshot (its box in a cluster the
+// camera's PVS sees), and with cg_rain_wholemap the whole map's
+function wxVolumes(){
+  const out=[];
+  if(GV)gvCamera();
+  for(const ei of WX.rainEnts){const B=gameBox(ei);if(!B||(GV&&!gvSent(GV,ei)))continue;
+    const mn=[B.o[0]+B.mins[0],B.o[1]+B.mins[1],B.o[2]+B.mins[2]],mx=[B.o[0]+B.maxs[0],B.o[1]+B.maxs[1],B.o[2]+B.maxs[2]];
+    if(mx[0]>mn[0]&&mx[1]>mn[1])out.push([mn,mx,ei]);}
+  if(CVARS.cg_rain_wholemap){if(!WX.world)WX.world=worldBounds();out.push([WX.world.mins,WX.world.maxs,-1]);}
+  return out;
+}
+function wxRand(){WX.seed=(Math.imul(WX.seed,214013)+2531011)>>>0;return (WX.seed>>>16)&0x7fff;}   // MSVC rand()
+function wxStep(r){return ((Math.imul(214013,r)+2531011)>>16)&0x7fff;}                           // CG_Rain's own
+// one CG_Rain for one box
+function wxRain(mn,mx){
+  const md=+CVARS.cg_rain_min_dist||0,vo=cam.pos;
+  const x0=Math.max(mn[0],vo[0]-md),y0=Math.max(mn[1],vo[1]-md),z0=mn[2];
+  const x1=Math.min(mx[0],vo[0]+md),y1=Math.min(mx[1],vo[1]+md),z1=mx[2];
+  if(x0>x1||y0>y1)return;
+  const ex=x1-x0,ey=y1-y0,ez=z1-z0;
+  let n=Math.trunc(Math.sqrt(ex*ey)*((+CVARS.cg_rain_density||0)/200));
+  if(n>WX_MAX)n=WX_MAX;
+  let r=wxRand();
+  const names=wxNames(),si=names.length?wxShId(names[Math.trunc(CVARS.cg_rain_numshaders)>0?r%names.length:0]):-1,
+    blen=+CVARS.cg_rain_length||0,bwid=+CVARS.cg_rain_width||0;
+  const v2=CVARS.com_target_game>=1,slant=Math.trunc(CVARS.cg_rain_slant)||0,vary=Math.trunc(CVARS.cg_rain_speed_vary)||0,
+    speed=+CVARS.cg_rain_speed||0,wx=+CVARS.vss_wind_x||0,wy=+CVARS.vss_wind_y||0,md2=md*md;
+  const mx0=Math.trunc(ex+1),my0=Math.trunc(ey+1),mz0=Math.trunc(ez+1);
+  for(let i=0;i<n;i++){
+    const sx=(r%mx0)+x0;r=wxStep(r);
+    const sy=(r%my0)+y0;r=wxStep(r);
+    // 2.0 / OpenMoHAA: anywhere in the box's height; 1.11: at its top
+    const sz=v2?(r%mz0)+z0:z1;
+    const dx=vo[0]-sx,dy=vo[1]-sy;
+    if(dx*dx+dy*dy>md2)continue;
+    r=wxStep(r);
+    const exx=(slant>0?r%slant:0)+sx+wx;r=wxStep(r);
+    const eyy=(slant>0?r%slant:0)+sy+wy;
+    const sp=(vary>0?r%vary:0)+speed;
+    let life=sp>0?Math.trunc((sz-z0)/sp*1000):1e9;
+    if(v2&&life>10000)life=10000;
+    if(!WX.free.length){WX.stat.missed++;continue;}
+    const b=WX.free.pop();
+    WX.sx[b]=sx;WX.sy[b]=sy;WX.sz[b]=sz;WX.ex[b]=exx;WX.ey[b]=eyy;WX.ez[b]=z0;
+    WX.end[b]=WX.t+life;WX.life[b]=life;WX.sh[b]=si;WX.len[b]=blen;WX.wid[b]=bwid;WX.on[b]=1;WX.n++;WX.stat.made++;}
+}
+// one client frame: the boxes' new drops (CG_AddPacketEntities), then the beams whose
+// time is up freed (CG_AddBeams)
+function wxFrame(vols){
+  if(CVARS.cg_rain)for(const v of vols)wxRain(v[0],v[1]);
+  const t=WX.t;
+  for(let b=0;b<WX_MAX;b++)if(WX.on[b]&&WX.end[b]<t){WX.on[b]=0;WX.n--;WX.free.push(b);}
+  WX.stat.frames++;
+}
+// Run the client frames due since the last call (each 1000 / com_maxfps ms, as many as
+// the game would have run), at most a fifth of a second's worth at once.
+function wxAdvance(now){
+  if(!WX.wall){WX.wall=now;return;}
+  const ms=Math.max(1,Math.floor(1000/Math.max(1,+CVARS.com_maxfps||85)));
+  let due=Math.floor((now-WX.wall)/ms);
+  if(due<=0)return;
+  WX.wall+=due*ms;
+  if(due>Math.ceil(200/ms)){WX.t+=(due-Math.ceil(200/ms))*ms;due=Math.ceil(200/ms);}
+  const vols=wxVolumes();WX.vols=vols.length;
+  for(let i=0;i<due;i++){WX.t+=ms;wxFrame(vols);}
+  // the last second, for the list's foot
+  if(now-WX.stat.at>=1000){WX.stat.last={made:WX.stat.made,missed:WX.stat.missed,frames:WX.stat.frames,secs:(now-WX.stat.at)/1000};
+    WX.stat.made=WX.stat.missed=WX.stat.frames=0;WX.stat.at=now;}
+}
+// keep running while drops are falling or can start
+function wxActive(){return WX.n>0||(!!CVARS.cg_rain&&(+CVARS.cg_rain_density>0)&&(WX.rainEnts.length>0||!!CVARS.cg_rain_wholemap));}
+function drawWeather(vp){
+  if(!WX.n||!WX.P)return;
+  const t=WX.t,a=camAxes(),L=[-a.r[0],-a.r[1],-a.r[2]],U=a.u;
+  const groups=new Map();
+  for(let b=0;b<WX_MAX;b++){if(!WX.on[b]||!(WX.life[b]>0))continue;let g=groups.get(WX.sh[b]);if(!g){g=[];groups.set(WX.sh[b],g);}g.push(b);}
+  const P=new Float32Array(WX.n*18),T=new Float32Array(WX.n*12),ops=[];let q=0;
+  const put=(v,s,t2)=>{P[q*3]=v[0];P[q*3+1]=v[1];P[q*3+2]=v[2];T[q*2]=s;T[q*2+1]=t2;q++;};
+  for(const[si,list]of groups){
+    const name=si>=0?WX.shTab[si]:null,tx=name?wxTex(name):null,ti=tx?tx[0]:-1,te=ti>=0?TEX[ti]:null,sprite=!!(te&&(te.f&TF_SPRITE));
+    const first=q;
+    for(const b of list){
+      const fade=(WX.end[b]-t)/WX.life[b],len=WX.len[b],sc=WX.wid[b];
+      const dx=WX.ex[b]-WX.sx[b],dy=WX.ey[b]-WX.sy[b],dz=WX.ez[b]-WX.sz[b],dl=Math.hypot(dx,dy,dz)||1;
+      const hx=WX.sx[b]+(1-fade)*dx,hy=WX.sy[b]+(1-fade)*dy,hz=WX.sz[b]+(1-fade)*dz;
+      const tx2=hx-dx/dl*len,ty2=hy-dy/dl*len,tz2=hz-dz/dl*len;
+      const p0=[hx+L[0]*sc,hy+L[1]*sc,hz+L[2]*sc],p1=[tx2+L[0]*sc,ty2+L[1]*sc,tz2+L[2]*sc],
+        p2=[tx2-L[0]*sc,ty2-L[1]*sc,tz2-L[2]*sc],p3=[hx-L[0]*sc,hy-L[1]*sc,hz-L[2]*sc];
+      if(sprite){
+        // deformVertexes autoSprite (tr_shade_calc.c AutospriteDeform): a square facing
+        // the camera on the middle of the quad, its half-size 0.707 x a corner's distance
+        const m=[(hx+tx2)/2,(hy+ty2)/2,(hz+tz2)/2],rad=Math.hypot(p0[0]-m[0],p0[1]-m[1],p0[2]-m[2])*0.707;
+        const c=(sl,su)=>[m[0]+L[0]*rad*sl+U[0]*rad*su,m[1]+L[1]*rad*sl+U[1]*rad*su,m[2]+L[2]*rad*sl+U[2]*rad*su];
+        const A=c(1,1),B2=c(-1,1),C=c(-1,-1),Dd=c(1,-1);
+        put(A,0,0);put(B2,1,0);put(C,1,1);put(A,0,0);put(C,1,1);put(Dd,0,1);
+      }else{put(p0,1,1);put(p1,0,1);put(p2,0,0);put(p0,1,1);put(p2,0,0);put(p3,1,0);}
+    }
+    ops.push([ti,first,q-first,tx?tx[1]:[1,1,1]]);
+  }
+  if(!q)return;
+  gl.bindBuffer(gl.ARRAY_BUFFER,WX.bP);gl.bufferData(gl.ARRAY_BUFFER,P.subarray(0,q*3),gl.STREAM_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER,WX.bT);gl.bufferData(gl.ARRAY_BUFFER,T.subarray(0,q*2),gl.STREAM_DRAW);
+  // an added shader fades to black in the fog (Q3's FP_BLACK), not to the fog's colour
+  const Pr=WX.P;setCommon(Pr,vp,0);gl.uniform1f(Pr.u.uShade,0);gl.uniform3f(Pr.u.uFogCol,0,0,0);
+  gl.bindVertexArray(WX.vao);gl.depthMask(false);
+  for(const[ti,first,count,rgb]of ops){
+    if(ti>=0){bindMat(Pr,ti,0);const k=(MAT[ti]||{}).kind||0;blendFor(k===0?3:k);}
+    else{gl.bindTexture(gl.TEXTURE_2D,whiteTex);gl.uniform1i(Pr.u.uUseTex,1);gl.uniform1i(Pr.u.uAF,0);blendFor(3);}
+    gl.disable(gl.CULL_FACE);gl.uniform4f(Pr.u.uTint,rgb[0],rgb[1],rgb[2],1);
+    gl.drawArrays(gl.TRIANGLES,first,count);}
+  gl.bindVertexArray(null);
+}
+function wxSummary(){
+  const s=WX.stat.last,v=WX.vols|0;
+  let h='weather: '+WX.n+' of '+WX_MAX+' beams falling, from '+v+' rain box'+(v===1?'':'es')+' the client has';
+  if(s)h+=' · last second: '+s.made+' started'+(s.missed?', <span class="warn">'+s.missed+' not started (no free beam: MAX_BEAMS)</span>':'')+
+    ' in '+s.frames+' client frames';
+  return h;
+}
+function toggleWeather(){
+  setCvar('cg_rain',CVARS.cg_rain?0:1);syncButtons();
+  if(!CVARS.cg_rain){flash('Weather off (cg_rain 0)');return;}
+  if(!WX.rainEnts.length&&!CVARS.cg_rain_wholemap){flash('Weather on, but this map has no func_rain: the game makes none here. cg_rain_wholemap 1 (game cvars, `) lets it fall over the whole map');return;}
+  if(!(+CVARS.cg_rain_density>0)){flash('Weather on, but its density is 0: set cg_rain_density, or cg_weather snow / rain (game cvars, `)');return;}
+  flash('Weather on: '+(wxNames()[0]||'no shader')+', density '+CVARS.cg_rain_density);
+}
+
+// ---- moving leaves: deformVertexes on models ----------------------------------------------
+// A model surface whose shader has deformVertexes wave or flap (the trees' leaves: flap t 24
+// sin 0 3.5 0 0.2 1 0) is moved in the model shader (VS_MODEL) by the game's time. A static
+// model has no entity, so the renderer scales its wave's base, amplitude, phase and frequency
+// by r_static_shadermultiplier0 .. 3 (tr_shade_calc.c); a model with an entity keeps its
+// shader's. global/weather.scr sets r_static_shadermultiplier1 each second to
+// (raindensity + 1.5) / 2.5, so a map's trees sway harder as its storm grows.
+const DVT={at:0};
+function dvUniforms(){
+  gl.uniform1f(PM.u.uTime,(performance.now()-T0)/1000);
+  gl.uniform4f(PM.u.uMul,+CVARS.r_static_shadermultiplier0||0,+CVARS.r_static_shadermultiplier1||0,
+    +CVARS.r_static_shadermultiplier2||0,+CVARS.r_static_shadermultiplier3||0);
+  gl.uniform4f(PM.u.uDv,0,0,0,1);
+}
+// any moving surface on a model that is drawn
+function dvActive(){
+  for(const R of MODELS)if(R.dv&&R.n)return true;
+  return false;
+}
+
+// ---- thunder (cg_thunder) -------------------------------------------------------------------
+// global/weather.scr's lightning (thunder, flash, unflash), without its sound: every
+// level.thundertime + randomint(level.thundertime x 1.5) seconds one of three flickers (flash
+// 0.2 s / 0.1 s, then off 1 s / 0.1 s ...), then 1 + randomfloat(2) seconds. A flash is
+// r_fastsky 1 (no sky: the screen is cleared to the fog colour where the map has a farplane,
+// else to 0.5 0.5 1), the farplane colour 0.9 0.9 0.9, and the map's $weatherF entities (the
+// windows lit by the lightning) shown; unflash puts back the sky and the colour and hides
+// them. level.thundertime starts at 20 and follows the storm (20, 8, 6, 4): the viewer keeps
+// the map script's, else 6 (the middle storm) on a map that runs weather.scr, else 20.
+const THU_PATTERNS=[[1,0.2,0,1,1,0.1,0,0.1,1,0.1,0],[1,0.1,0,0.1,1,0.1,0,1,1,0.2,0],[1,0.1,0,0.1,1,0.2,0,0.5,1,0.1,0]];
+const THU={flash:false,next:0,ev:[],ents:null,hid:false};
+function thTime(){const S=(D.weather&&D.weather.set)||{},t=S.thundertime&&parseFloat(S.thundertime[0]);
+  return isFinite(t)&&t>0?t:(D.weather&&D.weather.wscr?6:20);}
+function thEnts(){if(!THU.ents){THU.ents=new Set();MAP.ents.forEach((e,i)=>{if(i>0&&e.kvl.targetname==='weatherF')THU.ents.add(i);});}return THU.ents;}
+function thSet(flash){
+  THU.flash=flash;
+  // the $weatherF windows: hidden while thunder runs, shown in a flash
+  const hide=!!CVARS.cg_thunder&&!flash;
+  if(hide!==THU.hid){THU.hid=hide;if(thEnts().size)rebuildWorld();}
+  requestDraw();
+}
+function thTick(now){
+  if(!CVARS.cg_thunder){if(THU.flash||THU.hid||THU.next){THU.next=0;THU.ev=[];thSet(false);}return;}
+  const tt=thTime();
+  if(!THU.next){THU.next=now+(tt+Math.floor(Math.random()*Math.floor(tt*1.5)))*1000;thSet(false);return;}
+  if(!THU.ev.length&&now>=THU.next){
+    const P=THU_PATTERNS[Math.floor(Math.random()*3)];let t=now;
+    for(let i=0;i<P.length;i+=2){THU.ev.push([t,!!P[i]]);t+=(P[i+1]||0)*1000;}
+    t+=(1+Math.random()*2)*1000;
+    THU.next=t+(tt+Math.floor(Math.random()*Math.floor(tt*1.5)))*1000;}
+  while(THU.ev.length&&THU.ev[0][0]<=now){const e=THU.ev.shift();if(e[1]!==THU.flash)thSet(e[1]);}
+}
+
 // ---- the sun flare (Sun flare, J) -------------------------------------------------------
 // The game draws its sun only as a lens flare (RB_DrawSun is compiled out), after the 3D
 // view (R_DrawLensFlares, renderergl1/tr_sun_flare.cpp): flat on the screen, over
@@ -2509,6 +2941,7 @@ function drawSunFlare(vp){
 const LT={ok:null,why:'',lights:[],byEnt:new Map(),off:null,applied:null,nOff:0,active:false,
   prepped:false,totReady:false,busy:false,queue:[],want:null,entSlot:null,sun:[],
   fence:null,batch:4,step:'',crash:null,crashArm:0,settleT:0,
+  sunOff:false,sunHas:false,sunWhy:'',what:'',
   // lam: the share each light also gets without shadows, within its reach; kap: how many
   // times that unshadowed light a light turned off may take away (FS_LTREL)
   lam:0.02,kap:2};
@@ -2561,6 +2994,10 @@ function ltCheck(){
   LT.lights.forEach((l,i)=>{if(!LT.byEnt.has(l.ei))LT.byEnt.set(l.ei,i);});
   LT.off=new Uint8Array(LT.lights.length);LT.applied=new Uint8Array(LT.lights.length);
   LT.crash=ltCrumbRead();
+  // Sun light: a sun or sky light that reaches the map (sky faces, a sun colour)
+  LT.sunHas=ltSunDirs().some(x=>x[1][0]+x[1][1]+x[1][2]>0);
+  LT.sunWhy=LT.sunHas?'':!ltHasSky()?'This map has no sky faces, so no sunlight reaches it.'
+    :'This map has no sun: its worldspawn has no suncolor (or sunlight).';
   LT.ok=true;return true;
 }
 function ltIsLight(ei){return LT.ok&&LT.byEnt.has(ei);}
@@ -2652,51 +3089,63 @@ precision mediump float; out vec4 o; void main(){o=vec4(1.0);}`;
 // Each light adds its share without shadows (uF.z, its photons / distance squared) wherever
 // it reaches, so OFF / that share bounds what they gave; uCap is twice that, in the
 // page's units. A texel only a little of their light reaches keeps the rest of its light
-// (sky light, light the compiler bent around a corner).
+// (sky light, light the compiler bent around a corner). With the sun off (uSunOn 0) its
+// share goes too, and the light left is no more than the lights still on could give
+// (TOT - OFF, bounded the same way): what nothing traced explains was the sky's.
 const VS_LTQ=`#version 300 es
 layout(location=0) in vec2 aQ; void main(){gl_Position=vec4(aQ,0.0,1.0);}`;
 const FS_LTREL=`#version 300 es
 precision highp float;
 uniform highp sampler2DArray uBake; uniform highp sampler2D uTot; uniform highp sampler2D uOff;
 uniform highp sampler2D uSun; uniform highp sampler2D uCov;
-uniform int uLayer; uniform int uCols; uniform vec3 uA; uniform int uDark; uniform float uCap;
+uniform int uLayer; uniform int uCols; uniform vec3 uA; uniform int uDark; uniform float uCap; uniform int uSunOn;
 out vec4 o;
 // the texels around one, the ring beside it first, then the one two texels out
 const ivec2 NB[24]=ivec2[24](ivec2(-1,-1),ivec2(0,-1),ivec2(1,-1),ivec2(-1,0),ivec2(1,0),ivec2(-1,1),ivec2(0,1),ivec2(1,1),
   ivec2(-2,-2),ivec2(-1,-2),ivec2(0,-2),ivec2(1,-2),ivec2(2,-2),ivec2(-2,-1),ivec2(2,-1),ivec2(-2,0),
   ivec2(2,0),ivec2(-2,1),ivec2(2,1),ivec2(-2,2),ivec2(-1,2),ivec2(0,2),ivec2(1,2),ivec2(2,2));
 vec3 fac(ivec2 a){vec3 t=texelFetch(uTot,a,0).rgb,f=texelFetch(uOff,a,0).rgb,s=texelFetch(uSun,a,0).rgb,d=t+s;
-  vec3 on=max(t-f,vec3(0.0))+s;
-  return clamp(vec3(d.r>1e-4?on.r/d.r:1.0,d.g>1e-4?on.g/d.g:1.0,d.b>1e-4?on.b/d.b:1.0),0.0,1.0);}
+  float u=float(uSunOn);                      // nothing traced: kept with the sun, gone without
+  vec3 on=max(t-f,vec3(0.0))+s*u;
+  return clamp(vec3(d.r>1e-4?on.r/d.r:u,d.g>1e-4?on.g/d.g:u,d.b>1e-4?on.b/d.b:u),0.0,1.0);}
+// what is left of X: no more taken out than the lights off could give (sun on), no more
+// left than the lights still on could give (sun off)
+vec3 left(vec3 X,vec3 F,vec3 t,vec3 f){
+  if(uDark==1)return vec3(0.0);
+  if(uSunOn==1)return max(X*F,X-uCap*max(f,vec3(0.0)));
+  return min(X*F,uCap*max(t-f,vec3(0.0)));}
 void main(){
   ivec2 t=ivec2(gl_FragCoord.xy), b=ivec2((uLayer%uCols)*128,(uLayer/uCols)*128);
-  vec3 F=vec3(1.0),f=vec3(0.0);
-  if(uDark==1)F=vec3(0.0);
-  else if(texelFetch(uCov,b+t,0).r>0.5){F=fac(b+t);f=texelFetch(uOff,b+t,0).rgb;}
+  vec3 F=vec3(1.0),f=vec3(0.0),tt=vec3(0.0);
+  if(texelFetch(uCov,b+t,0).r>0.5){F=fac(b+t);f=texelFetch(uOff,b+t,0).rgb;tt=texelFetch(uTot,b+t,0).rgb;}
   else{
     // a texel no polygon covers (the filtering reaches it) takes the factor of the covered
     // texels of the nearest ring that has any; loops of fixed length, nothing skipped
-    vec3 s1=vec3(0.0),g1=vec3(0.0),s2=vec3(0.0),g2=vec3(0.0);float n1=0.0,n2=0.0;
+    vec3 s1=vec3(0.0),g1=vec3(0.0),h1=vec3(0.0),s2=vec3(0.0),g2=vec3(0.0),h2=vec3(0.0);float n1=0.0,n2=0.0;
     for(int i=0;i<8;i++){ivec2 q=t+NB[i],c=clamp(q,ivec2(0),ivec2(127));
       float w=(q==c?1.0:0.0)*step(0.5,texelFetch(uCov,b+c,0).r);
-      s1+=fac(b+c)*w;g1+=texelFetch(uOff,b+c,0).rgb*w;n1+=w;}
+      s1+=fac(b+c)*w;g1+=texelFetch(uOff,b+c,0).rgb*w;h1+=texelFetch(uTot,b+c,0).rgb*w;n1+=w;}
     for(int i=8;i<24;i++){ivec2 q=t+NB[i],c=clamp(q,ivec2(0),ivec2(127));
       float w=(q==c?1.0:0.0)*step(0.5,texelFetch(uCov,b+c,0).r);
-      s2+=fac(b+c)*w;g2+=texelFetch(uOff,b+c,0).rgb*w;n2+=w;}
-    if(n1>0.0){F=s1/n1;f=g1/n1;}else if(n2>0.0){F=s2/n2;f=g2/n2;}}
+      s2+=fac(b+c)*w;g2+=texelFetch(uOff,b+c,0).rgb*w;h2+=texelFetch(uTot,b+c,0).rgb*w;n2+=w;}
+    if(n1>0.0){F=s1/n1;f=g1/n1;tt=h1/n1;}else if(n2>0.0){F=s2/n2;f=g2/n2;tt=h2/n2;}
+    else tt=vec3(1e4);                        // out of reach of every polygon: as it is
+  }
   vec3 V=texelFetch(uBake,ivec3(t,uLayer),0).rgb,X=max(V-uA,vec3(0.0));
-  vec3 Y=uDark==1?vec3(0.0):max(X*F,X-uCap*max(f,vec3(0.0)));
-  o=vec4(min(V,uA)+Y,1.0);}`;
+  o=vec4(min(V,uA)+left(X,F,tt,f),1.0);}`;
 const FS_LTPREL=`#version 300 es
 precision highp float;
 uniform highp sampler2D uBake; uniform highp sampler2D uTot; uniform highp sampler2D uOff; uniform highp sampler2D uSun;
-uniform vec3 uA; uniform int uDark; uniform float uCap;
+uniform vec3 uA; uniform int uDark; uniform float uCap; uniform int uSunOn;
 out vec4 o;
 void main(){ivec2 a=ivec2(gl_FragCoord.xy);
-  vec3 t=texelFetch(uTot,a,0).rgb,f=texelFetch(uOff,a,0).rgb,s=texelFetch(uSun,a,0).rgb,d=t+s,on=max(t-f,vec3(0.0))+s;
-  vec3 F=clamp(vec3(d.r>1e-4?on.r/d.r:1.0,d.g>1e-4?on.g/d.g:1.0,d.b>1e-4?on.b/d.b:1.0),0.0,1.0);
-  vec3 V=texelFetch(uBake,a,0).rgb,X=max(V-uA,vec3(0.0));
-  vec3 Y=uDark==1?vec3(0.0):max(X*F,X-uCap*max(f,vec3(0.0)));
+  vec3 t=texelFetch(uTot,a,0).rgb,f=texelFetch(uOff,a,0).rgb,s=texelFetch(uSun,a,0).rgb,d=t+s;
+  float u=float(uSunOn);vec3 on=max(t-f,vec3(0.0))+s*u;
+  vec3 F=clamp(vec3(d.r>1e-4?on.r/d.r:u,d.g>1e-4?on.g/d.g:u,d.b>1e-4?on.b/d.b:u),0.0,1.0);
+  vec3 V=texelFetch(uBake,a,0).rgb,X=max(V-uA,vec3(0.0)),Y;
+  if(uDark==1)Y=vec3(0.0);
+  else if(uSunOn==1)Y=max(X*F,X-uCap*max(f,vec3(0.0)));
+  else Y=min(X*F,uCap*max(t-f,vec3(0.0)));
   o=vec4(min(V,uA)+Y,1.0);}`;
 
 // ---- matrices ----------------------------------------------------------------------------
@@ -2923,11 +3372,12 @@ function ltWeigh(l,fLm,fPr,sign){
 // The sun's weights, on a map with sky and a sun: straight sunlight (suncolor, the angle
 // to the sun, a shadow map toward it) and the sky's (sundiffuse x sundiffusecolor, the
 // sky seen from 16 directions, each through its own shadow map)
+// whether the .bsp has sky polygons at all (LIT.sky holds only the ones shown)
+function ltHasSky(){return !!LIT&&LIT.units.some(u=>u.n&&((TEX[u.ti]||{}).f&TF_SKY));}
 function ltSunDirs(){
   const wk=MAP.ents[0]||{kv:[]}, sd=ltVec(ltKey(wk,'sundirection'));
   const sc=ltVec(ltKey(wk,'suncolor'))||ltVec(ltKey(wk,'sunlight'));
-  const hasSky=LIT.sky&&LIT.sky.length;
-  if(!hasSky||(!sd&&!sc))return [];
+  if(!ltHasSky()||(!sd&&!sc))return [];
   const col=sc||[0,0,0], out=[];
   if(sd)out.push([ltForward(sd),col]);
   const diff=ltNum(ltKey(wk,'sundiffuse'),1), dc=ltVec(ltKey(wk,'sundiffusecolor'))||col, dirs=[];
@@ -2977,13 +3427,15 @@ function ltCopy(src,dst,w,h){gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);gl.bind
 // The relit lightmap pages, then the relit probes (the props' light, vertex light, the
 // models' grid colours: each read at its slot while relit)
 function ltCap(){return LT.kap*16*(1<<(D.lit.shift|0))/(255*LT.lam);}  // OFF to the pages' brightened units
-function ltDark(){return (LT.nOff===LT.lights.length&&!LT.sun.length)?1:0;}
+// every light off and no sun (none, or turned off): only the ambient floor is left
+function ltDark(){return (LT.nOff===LT.lights.length&&(!LT.sun.length||LT.sunOff))?1:0;}
 function ltRelightPages(){
   gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);
   gl.useProgram(LT.Prel);gl.bindVertexArray(LT.vQ);
   const tx=[[gl.TEXTURE_2D_ARRAY,B.lmTex,'uBake'],[gl.TEXTURE_2D,LT.tTot,'uTot'],[gl.TEXTURE_2D,LT.tOff,'uOff'],[gl.TEXTURE_2D,LT.tSun,'uSun'],[gl.TEXTURE_2D,LT.tCov,'uCov']];
   tx.forEach((t,k)=>{gl.activeTexture(gl.TEXTURE0+k);gl.bindTexture(t[0],t[1]);gl.uniform1i(LT.Prel.u[t[2]],k);});
   gl.uniform1i(LT.Prel.u.uCols,LT.cols);gl.uniform3f(LT.Prel.u.uA,LT.amb[0],LT.amb[1],LT.amb[2]);gl.uniform1i(LT.Prel.u.uDark,ltDark());gl.uniform1f(LT.Prel.u.uCap,ltCap());
+  gl.uniform1i(LT.Prel.u.uSunOn,LT.sunOff?0:1);
   gl.bindFramebuffer(gl.FRAMEBUFFER,LT.fLM);gl.viewport(0,0,128,128);
   for(let k=0;k<B.lmN;k++){gl.framebufferTextureLayer(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,LT.lmOut,0,k);
     gl.uniform1i(LT.Prel.u.uLayer,k);gl.drawArrays(gl.TRIANGLES,0,3);}
@@ -2996,6 +3448,7 @@ function ltRelightProbes(){
   const pt=[[LT.pBake,'uBake'],[LT.pTot,'uTot'],[LT.pOff,'uOff'],[LT.pSun,'uSun']];
   pt.forEach((t,k)=>{gl.activeTexture(gl.TEXTURE0+k);gl.bindTexture(gl.TEXTURE_2D,t[0]);gl.uniform1i(LT.Pprel.u[t[1]],k);});
   gl.uniform3f(LT.Pprel.u.uA,LT.amb[0],LT.amb[1],LT.amb[2]);gl.uniform1i(LT.Pprel.u.uDark,ltDark());gl.uniform1f(LT.Pprel.u.uCap,ltCap());
+  gl.uniform1i(LT.Pprel.u.uSunOn,LT.sunOff?0:1);
   gl.bindFramebuffer(gl.FRAMEBUFFER,LT.fpOut);gl.viewport(0,0,LT_PW,LT.ph);gl.drawArrays(gl.TRIANGLES,0,3);
   ltUnbind(4);
 }
@@ -3062,7 +3515,7 @@ function ltApply(){
       steps.push(ltStep('turning light '+(i+1)+' (entity '+LT.lights[i].ei+') '+(sign>0?'off':'on'),()=>{if(diff>3)ltProgress('Turning lights '+(sign>0?'off':'on')+': '+j+' of '+diff);ltWeigh(LT.lights[i],LT.fOff,LT.fpOff,sign);ap[i]=off[i];}));}}
     steps.push(ltStep('relighting the lightmap pages',()=>{LT.nOff=nOff;ltRelightPages();}));
     steps.push(ltStep('relighting the props, vertex light and models',()=>{ltRelightProbes();}));
-    steps.push(ltStep('drawing the map with the new light',()=>{LT.active=nOff>0;rebuildModels();ltDone();}));
+    steps.push(ltStep('drawing the map with the new light',()=>{LT.active=nOff>0||LT.sunOff;rebuildModels();ltDone();}));
     q.unshift(...steps);
   });
   requestAnimationFrame(ltRun);
@@ -3070,7 +3523,10 @@ function ltApply(){
 function ltDone(){
   const n=LT.lights.length;
   syncButtons();updateSelPanel();requestDraw();
-  flash(LT.nOff===0?'Every light is on: the map as the game lights it':LT.nOff===n?'Every light is off'+(LT.sun.length?' (the sun and the sky still light the map)':''):LT.nOff+' of '+n+' lights off');
+  if(LT.what==='sun')flash(LT.sunOff?'Sun light off: '+(LT.nOff===n?'only the ambient light is left':'the map lit by its lights alone')
+    :'Sun light on: the sun and the sky light the map again');
+  else flash(LT.nOff===0?'Every light is on'+(LT.sunOff?' (the sun is still off)':': the map as the game lights it')
+    :LT.nOff===n?'Every light is off'+(LT.sunHas&&!LT.sunOff?' (the sun and the sky still light the map)':''):LT.nOff+' of '+n+' lights off');
   if(fullBright)setTimeout(()=>flash('Full Brightness is on: turn it off (B) to see the game\'s light'),1700);
 }
 // After a graphics driver reset on this map, the first press only says so; another within
@@ -3087,7 +3543,14 @@ function ltMayRun(){
 function toggleLightsOff(){
   if(!ltCheck()){flash(LT.why);return;}
   if(!ltMayRun())return;
-  const all=LT.off.every(x=>x);LT.off.fill(all?0:1);ltApply();
+  const all=LT.off.every(x=>x);LT.off.fill(all?0:1);LT.what='lights';ltApply();
+}
+// Display: Sun light. Off takes the sun's and the sky's light out of the baked light.
+function toggleSunLight(){
+  if(!ltCheck()){flash(LT.why);return;}
+  if(!LT.sunHas){flash(LT.sunWhy);return;}
+  if(!ltMayRun())return;
+  LT.sunOff=!LT.sunOff;LT.what='sun';ltApply();
 }
 // Selection: Turn off / Turn on the selected lights
 function setSelLights(on){
@@ -3098,7 +3561,7 @@ function setSelLights(on){
   if(!want.length){flash(on?'The selected lights are already on':'The selected lights are already off');return;}
   if(!ltMayRun())return;
   for(const j of want){LT.off[j]=on?0:1;k++;}
-  ltApply();
+  LT.what='lights';ltApply();
 }
 function draw(){
   if(!gl||!SC)return;
@@ -3106,7 +3569,9 @@ function draw(){
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
   gl.viewport(0,0,glcv.width,glcv.height);
   // with the map's fog on, everything past the fog's far end is fog colour, as in game
-  const bg=fogOn()?fogCol():TH.bg;
+  // a lightning flash (r_fastsky 1): no sky, cleared to the fog colour where there is a
+  // farplane, else to 0.5 0.5 1 (RB_BeginDrawingView)
+  const bg=THU.flash&&!simpleSky?((FOG.far>0||farOverride())?fogCol():[0.5,0.5,1]):fogOn()?fogCol():TH.bg;
   gl.clearColor(bg[0],bg[1],bg[2],1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   VP=viewProj(null);
   updateInside(false);
@@ -3115,6 +3580,7 @@ function draw(){
   drawSunFlare(VP);
   drawSelection(VP);
   drawLines(VP);
+  drawOutlines(VP);
   drawShowTris(VP);
   drawShowNormals(VP);
   drawRoutes(VP);
@@ -3136,12 +3602,21 @@ function drawSelection(vp){
   if(markSelCount){setCommon(PC,vp,2);gl.uniform4f(PC.u.uTint,sc[0],sc[1],sc[2],0.5);gl.bindVertexArray(B.vMarkSel);
     gl.drawElements(gl.TRIANGLES,markSelCount,gl.UNSIGNED_INT,0);}
   // a model's tint follows what is drawn of it: its alpha-tested leaves, its sprite version
-  setCommon(PM,vp,2);gl.uniform4f(PM.u.uTint,sc[0],sc[1],sc[2],0.45);gl.uniform1i(PM.u.uLit,0);gl.uniform3fv(PM.u.uFwd,camAxes().f);
+  setCommon(PM,vp,2);dvUniforms();gl.uniform4f(PM.u.uTint,sc[0],sc[1],sc[2],0.45);gl.uniform1i(PM.u.uLit,0);gl.uniform3fv(PM.u.uFwd,camAxes().f);
   for(const R of MODELS){if(!R.nsel)continue;gl.bindVertexArray(R.vaoSel);
     for(const s of R.surfs){if(!surfOn(R,s))continue;gl.uniform1i(PM.u.uAuto2,s.lod?1:0);bindMat(PM,s.ti,2);
       gl.drawElementsInstanced(gl.TRIANGLES,s.count,gl.UNSIGNED_INT,s.first*4,R.nsel);}}
   gl.uniform1i(PM.u.uAuto2,0);gl.disable(gl.CULL_FACE);
   gl.disable(gl.POLYGON_OFFSET_FILL);
+  gl.bindVertexArray(null);gl.depthMask(true);gl.disable(gl.BLEND);gl.depthFunc(gl.LEQUAL);
+}
+
+// The selection's and the mouse-over's outlines, drawn after the lines so the Wire
+// button's white edges don't cover them (the hovered brush's own edges are among those).
+function drawOutlines(vp){
+  if(!selEdgeCount&&!hovEdgeCount&&!hovBoxVerts)return;
+  gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);gl.enable(gl.DEPTH_TEST);
+  const sc=hexRGB(TH.sel);
   gl.useProgram(PL);gl.uniformMatrix4fv(PL.u.uVP,false,vp);
   if(selEdgeCount){
     gl.bindVertexArray(B.vSelE);gl.disableVertexAttribArray(7);gl.vertexAttrib4f(7,sc[0],sc[1],sc[2],1);
@@ -3149,7 +3624,7 @@ function drawSelection(vp){
     gl.depthFunc(gl.LEQUAL);gl.uniform1f(PL.u.uAlpha,1);gl.drawElements(gl.LINES,selEdgeCount,gl.UNSIGNED_INT,0);
   }
   if(hovEdgeCount||hovBoxVerts){
-    const hc=hexRGB(TH.accent);gl.depthFunc(gl.LEQUAL);gl.uniform1f(PL.u.uAlpha,0.9);
+    const hc=hexRGB(TH.accent);gl.depthFunc(gl.LEQUAL);gl.uniform1f(PL.u.uAlpha,view.wire?1:0.9);
     if(hovEdgeCount){gl.bindVertexArray(B.vHovE);gl.disableVertexAttribArray(7);gl.vertexAttrib4f(7,hc[0],hc[1],hc[2],1);
       gl.drawElements(gl.LINES,hovEdgeCount,gl.UNSIGNED_INT,0);}
     if(hovBoxVerts){gl.bindVertexArray(B.vHovBox);gl.vertexAttrib4f(7,hc[0],hc[1],hc[2],1);gl.drawArrays(gl.LINES,0,hovBoxVerts);}
@@ -3311,6 +3786,7 @@ function draw2D(){
       shown++;}
     ctx.globalAlpha=1;
   }
+  drawLeak2D();
   if(radFly){ctx.strokeStyle=TH.accent;ctx.globalAlpha=0.8;ctx.lineWidth=1;ctx.beginPath();
     ctx.moveTo(W/2-10,H/2);ctx.lineTo(W/2+10,H/2);ctx.moveTo(W/2,H/2-10);ctx.lineTo(W/2,H/2+10);ctx.stroke();
     ctx.beginPath();ctx.moveTo(W/2,H/2);ctx.lineTo(radFly.x,radFly.y);ctx.stroke();ctx.globalAlpha=1;}
@@ -4311,6 +4787,71 @@ function inhibitEntity(sf,map){
 // each map entity in turn takes the next number from sv_maxclients up; radnum counts every
 // object spawned, from 1. What the cvars that set this are now is part of the key.
 let GAMEENTS=null;
+// ---- the level script: what it spawns and sets (D.scr, LevelScript in mohaa_map_view.py) ----
+// The viewer doesn't run the script: the build reads its spawn lines and the lines that
+// give the same entity its origin, angles, targetname, target, model... (through
+// local.x / level.x = spawn, or its $targetname). The entities it could place are added
+// after the map's own (MAP.nMap is where the map's end), so they are drawn, labelled,
+// linked (a waypoint's "target"), found and selected like the map's. They have no entity
+// number here (the game gives one when the script runs) and aren't in the .pth.
+function scriptEnts(){
+  MAP.nMap=MAP.ents.length;
+  const S=D.scr;if(!S||!S.ents)return;
+  // the build numbered their models from the map's entity count; if the page reads
+  // another count, those numbers point elsewhere
+  if(S.base!==MAP.nMap&&D.modelOf)for(const k of Object.keys(D.modelOf))if(+k>=S.base)delete D.modelOf[k];
+  for(const r of S.ents){
+    const e={kv:r.kv.map(x=>[x[0],x[1]]),kvl:{},brushes:[],patches:[],terrains:[],prims:[],ts:-1,te:-1,scr:r};
+    for(const[k,v]of e.kv){const kl=k.toLowerCase();if(!(kl in e.kvl))e.kvl[kl]=v;}
+    e.cls=(e.kvl.classname||'').toLowerCase();
+    MAP.ents.push(e);}
+  // the map's own entities whose target the script sets (a map node joined to its own)
+  for(const m of S.mods||[]){const e=MAP.ents[m[0]];if(!e||m[0]>=MAP.nMap)continue;
+    e.kv=e.kv.filter(kv=>!/^[$#]?target$/i.test(kv[0]));e.kv.push([m[1],m[2]]);e.kvl[m[1]]=m[2];
+    (e.scrMods=e.scrMods||[]).push(m);}
+}
+// placed script entities the game gives an entity number to (not simple ones such as
+// waypoints), as entityKinds counts the map's
+function scrReal(){const ek=D.ek||{},simple=new Set([...(ek.simple||[]),...(ek.dropped||[])]);let n=0;
+  for(let ei=MAP.nMap;ei<MAP.ents.length;ei++)if(!simple.has(MAP.ents[ei].cls))n++;return n;}
+function scrWhere(f,l){const F=(D.scr.files||[])[f];return (F?F[0]:'?')+' line '+l;}
+function scrSummary(){const S=D.scr,n=S.ents.length,u=S.nun|0;
+  return n+' entit'+(n===1?'y':'ies')+' placed, '+scrReal()+' real placed, '+u+' not, '+S.cvars.length+' setcvar';}
+function scrEntHtml(e){
+  const r=e.scr;let lines=['// '+scrWhere(r.f,r.l),r.s];
+  for(const x of r.x||[])lines.push('// line '+x[1]+(x[0]!==r.f?' of '+((D.scr.files[x[0]]||['?'])[0]):''),x[2]);
+  let h='<h4>Level script<span class="sp"></span>'+copyBtn(lines.join('\n'),'Copy')+'</h4><pre>'+esc(lines.join('\n'))+'</pre>';
+  h+='<div class="note">Spawned while the game runs. The viewer doesn\'t run the script: it puts the entity where these lines say.</div>';
+  if(r.u){const u=Object.entries(r.u);if(u.length)h+='<div class="note warn">Not followed (worked out while the game runs): '+u.map(([k,v])=>esc(k)+' from <code>'+esc(v)+'</code>').join('; ')+'</div>';}
+  return h;
+}
+function scrCard(){
+  infoMode='scr';
+  const S=D.scr;if(!S){card('Level script','<div class="note">This map has no level script.</div>');return;}
+  let h='<div class="note">What the map\'s .scr spawns and sets, read from its lines (the script isn\'t run). Spawned entities are placed where the lines that follow give their origin; one whose origin comes from something only the game knows (a thread\'s parameter, a loop, another entity moved by script) is listed below, not drawn. Show > Script ents (Ctrl+E) shows or hides them.</div>';
+  h+='<h4>Files</h4>'+kvTable(S.files.map((F,i)=>[i?'runs':'map',esc(F[0])+' <span class="co">'+esc(F[1])+'</span>']));
+  if(S.miss&&S.miss.length)h+='<div class="note warn">Run by the script but not found: '+S.miss.map(esc).join(', ')+'</div>';
+  // the placed entities, by class
+  const placed=[];for(let ei=MAP.nMap;ei<MAP.ents.length;ei++)placed.push(ei);
+  h+='<h4>Spawned and placed ('+placed.length+')</h4>';
+  if(placed.length){
+    const by=new Map();for(const ei of placed){const c=MAP.ents[ei].kvl.classname||'?';if(!by.has(c))by.set(c,[]);by.get(c).push(ei);}
+    for(const[c,l]of[...by.entries()].sort((a,b)=>a[0].localeCompare(b[0]))){
+      h+='<div><b>'+esc(c)+'</b> <span class="co">'+l.length+'</span></div>';
+      h+=kvTable(l.slice(0,300).map(ei=>{const e=MAP.ents[ei];return[String(e.scr.l),linkEnt(ei)+' '+esc(e.kvl.origin?fvec(parseVec(e.kvl.origin,3)||[0,0,0]):'')+(e.kvl.target?' → $'+esc(e.kvl.target):'')];}));
+      if(l.length>300)h+='<div class="note">… and '+(l.length-300)+' more</div>';}
+  }else h+='<div class="note">None: every spawn line takes its place from something only the game knows.</div>';
+  if(S.nun){h+='<h4>Spawned, not placed ('+S.nun+')</h4>';
+    h+=kvTable(S.un.map(r=>[esc(scrWhere(r.f,r.l)),'<code>'+esc(r.s)+'</code><div class="note">'+esc(r.why)+'</div>']));
+    if(S.nun>S.un.length)h+='<div class="note">… and '+(S.nun-S.un.length)+' more</div>';}
+  if((S.mods||[]).length){h+='<h4>The map\'s entities it joins ('+S.mods.length+')</h4>';
+    h+=kvTable(S.mods.slice(0,300).map(m=>[esc(scrWhere(m[3],m[4])),linkEnt(m[0])+' → $'+esc(m[2])]));}
+  h+='<h4>setcvar ('+S.cvars.length+')<span class="sp"></span>'+(S.cvars.length?copyBtn(S.cvars.map(c=>'setcvar "'+c[0]+'" "'+(c[1]==null?'':c[1])+'"').join('\n'),'Copy'):'')+'</h4>';
+  h+=S.cvars.length?kvTable(S.cvars.map(c=>[esc(c[0]),(c[1]==null?'<span class="warn">worked out while the game runs</span>':'"'+esc(c[1])+'"')+' <span class="co">'+esc(scrWhere(c[2],c[3]))+'</span>'])):'<div class="note">none</div>';
+  if(S.world.length){h+='<h4>$world lines ('+S.world.length+')</h4>'+kvTable(S.world.map(w=>[esc(scrWhere(w[1],w[2])),'<code>'+esc(w[0])+'</code>']));
+    h+='<div class="note">The worldspawn settings the script changes as it runs (farplane, farplane_color...). The view keeps the map\'s own; r_farplane in the game cvars (`) tries a distance out.</div>';}
+  card('Level script',h);
+}
 function gameEnts(){
   const key=[CVARS.g_gametype,CVARS.skill,CVARS.developer,CVARS.sv_maxclients].join(':');
   if(GAMEENTS&&GAMEENTS.key===key)return GAMEENTS.e;
@@ -4319,6 +4860,7 @@ function gameEnts(){
   for(let ei=0;ei<MAP.ents.length;ei++){
     const e=MAP.ents[ei],k=e.kvl,c=e.cls,R={g:'',num:-1,rad:0,gone:false,cn:'',why:''};out.push(R);
     if(ei===0){R.g='entity';R.num=1022;continue;}
+    if(e.scr){R.g='script';R.why='spawned by the level script while the game runs: it gets its entity number then';continue;}
     if(isStaticProp(ei)){R.g='static';R.why='a static model: scenery the map compiler made, not an entity';continue;}
     if(WORLDLIKE[c]){R.g='none';R.why='its brushes become part of the world when the map is compiled';continue;}
     if(k.spawnflags!=null&&c!=='info_pathnode'&&c!=='info_patharea'&&inhibitEntity(parseInt(k.spawnflags,10)|0,map)){
@@ -4491,7 +5033,7 @@ function pathCells(){
   return PATHCELLS=cells;
 }
 function gridCoord(c){let v=c+8192;if(v<0)v=c+8192+256-1;return Math.trunc(v)>>8;}   // GridCoordinate
-function pnEnts(){if(!PN_ENTS){PN_ENTS=[];MAP.ents.forEach((e,j)=>{if(e.cls==='info_pathnode')PN_ENTS.push(j);});}return PN_ENTS;}
+function pnEnts(){if(!PN_ENTS){PN_ENTS=[];MAP.ents.forEach((e,j)=>{if(e.cls==='info_pathnode'&&!e.scr)PN_ENTS.push(j);});}return PN_ENTS;}
 // a node's yaw: its info_pathnode's (the .pth keeps nodes in the map's order)
 function nodeYaw(i){const pn=pnEnts(),ei=pn.length===D.paths.n?pn[i]:-1;return ei>=0?entAngles(MAP.ents[ei].kvl)[1]:0;}
 // GetPathnodeColor, by spawnflags: black for flags the AI can't combine (IsValidPathnode)
@@ -4668,13 +5210,12 @@ function dlSplines(cams,fly){
 // CG_Rain: a func_rain's box, cut to rain_min_dist round the player across; the red
 // rectangle at its bottom is where its drops land
 function dlRain(feet){
-  const md=(D.rain&&D.rain.min)||512;
-  for(let ei=1;ei<MAP.ents.length;ei++){if(MAP.ents[ei].cls!=='func_rain')continue;
-    const B=gameBox(ei);if(!B||(GV&&!gvSent(GV,ei)))continue;
-    const lo=[Math.max(B.o[0]+B.mins[0],feet[0]-md),Math.max(B.o[1]+B.mins[1],feet[1]-md)];
-    const hi=[Math.min(B.o[0]+B.maxs[0],feet[0]+md),Math.min(B.o[1]+B.maxs[1],feet[1]+md)];
+  const md=+CVARS.cg_rain_min_dist||0;
+  for(const[mn,mx]of wxVolumes()){
+    const lo=[Math.max(mn[0],feet[0]-md),Math.max(mn[1],feet[1]-md)];
+    const hi=[Math.min(mx[0],feet[0]+md),Math.min(mx[1],feet[1]+md)];
     if(lo[0]>hi[0]||lo[1]>hi[1])continue;
-    const z=B.o[2]+B.mins[2],C=[[lo[0],lo[1],z],[hi[0],lo[1],z],[hi[0],hi[1],z],[lo[0],hi[1],z]];
+    const z=mn[2],C=[[lo[0],lo[1],z],[hi[0],lo[1],z],[hi[0],hi[1],z],[lo[0],hi[1],z]];
     for(let i=0;i<4;i++)dl(C[i],C[(i+1)%4],DC.red);}}
 
 // ---- r_showstaticbboxes ----------------------------------------------------------------------
@@ -4682,7 +5223,7 @@ function dlRain(feet){
 // its scale, turned with it, every edge magenta (R_DebugRotatedBBox)
 function dlStaticBoxes(){
   const G=GV,fs=D.bsp&&D.bsp.firstStatic!=null?D.bsp.firstStatic:MAP.ents.length,f=camAxes().f,fe=vdot(f,cam.pos);
-  for(let ei=fs;ei<ENTS.length;ei++){const X=ENTS[ei];if(X.model<0||!X.origin)continue;
+  for(let ei=fs;ei<MAP.nMap;ei++){const X=ENTS[ei];if(X.model<0||!X.origin)continue;
     if(G.stM[ei-fs]!==G.frame)continue;          // not in a leaf the game draws
     const M=D.models[X.model],k=MAP.ents[ei].kvl,sc=parseFloat(k.scale)||1,tb=M.tb||[[-4,-4,-4],[4,4,4]];
     const P=boxPts(X.origin,tb[0].map(v=>v*sc),tb[1].map(v=>v*sc),anglesAxis(entAngles(k)));
@@ -4911,14 +5452,30 @@ const CVAR_DEFAULTS={r_showtris:0,r_shownormals:0,r_lockpvs:0,r_novis:0,cm_noAre
   r_farplane:0,r_farplane_color:'.5 .5 .5',r_farplane_nocull:0,r_farplane_nofog:0,r_lightmap:0,r_light_showgrid:0,
   sv_showentnums:0,sv_showbboxes:0,g_entinfo:0,g_entinfo_max:2048,sv_showcameras:0,g_showflypath:0,cg_rain_drawcoverage:0,
   ai_showroutes:0,ai_showroutes_distance:8200,ai_fallheight:96,ai_shownodenums:0,ai_shownode:0,ai_showallnode:0,g_nodecheck:0,
-  g_gametype:0,skill:1,developer:0,sv_maxclients:1};
+  g_gametype:0,skill:1,developer:0,sv_maxclients:1,
+  cg_rain:0,cg_weather:'map',cg_rain_density:0,cg_rain_speed:2048,cg_rain_speed_vary:512,cg_rain_slant:50,cg_rain_length:90,
+  cg_rain_width:1,cg_rain_min_dist:512,cg_rain_shader:'textures/rain',cg_rain_numshaders:0,vss_wind_x:8,vss_wind_y:4,
+  com_maxfps:85,com_target_game:0,cg_rain_wholemap:0,cg_thunder:0,
+  r_static_shadermultiplier0:1,r_static_shadermultiplier1:1,r_static_shadermultiplier2:1,r_static_shadermultiplier3:1};
 const CVARS=Object.assign({},CVAR_DEFAULTS);
-const CVAR_NOSAVE=new Set(['r_lockpvs']);      // a lock is of where the camera was: not kept for next time
+// a lock is of where the camera was, and the weather is the map's (its script's) unless
+// changed while it is open: not kept for next time
+const CVAR_NOSAVE=new Set(['r_lockpvs','cg_weather','cg_rain_density','cg_rain_speed','cg_rain_speed_vary','cg_rain_slant',
+  'cg_rain_length','cg_rain_width','cg_rain_min_dist','cg_rain_shader','cg_rain_numshaders','cg_rain_wholemap','r_static_shadermultiplier1']);
 // the values a cvar without a number box takes (the rest are switches, 0 or 1)
-const CVAR_RANGE={r_showtris:[0,3],r_lightmap:[0,2],sv_showbboxes:[-28,128],g_entinfo:[0,4]};
+const CVAR_RANGE={r_showtris:[0,3],r_lightmap:[0,2],sv_showbboxes:[-28,128],g_entinfo:[0,4],com_target_game:[0,2]};
 // the cvars the viewer starts at another value than the game does: the game's (the console says so)
-const CVAR_GAMEDEF={ai_showroutes_distance:1000};
+const CVAR_GAMEDEF={ai_showroutes_distance:1000,cg_rain:1};
 const CVAR_ROWS=[
+ {h:'Render distance: farplane fog and culling'},
+ {n:'r_farplane',num:[0,65536],step:64,f:1,d:'units, for the map\'s',
+  t:'Fog and cull at this distance in place of the map\'s farplane (0: the map\'s own), in the colour r_farplane_color, culling what r_farplane_nocull says. The game always draws a farplane\'s fog, so this turns the fog on here'},
+ {n:'r_farplane_color',str:1,need:'farset',d:'r g b, 0 to 1',
+  t:'The fog colour of r_farplane, red green blue from 0 to 1 (the game\'s default .5 .5 .5)'},
+ {n:'r_farplane_nocull',num:[-1,1],need:'farset',d:'1 none, -1 sky',
+  t:'What r_farplane culls: 0 (the default) the BSP nodes and the models past it, 1 nothing, -1 the models only (as for a portal sky). r_showtris shows it'},
+ {n:'r_farplane_nofog',v:1,need:'fog',d:'no fog',
+  t:'Don\'t draw the farplane\'s fog, the map\'s or r_farplane\'s (what is past the farplane is still culled: r_showtris shows it)'},
  {h:'What the renderer draws'},
  {n:'r_showtris',v:1,need:'vis',d:'outline what the game draws',
   t:'Outline every triangle the game draws from where the camera is, hidden behind walls: what is in the camera\'s PVS and in an area joined to its own, without the faces turned away from it'},
@@ -4938,14 +5495,6 @@ const CVAR_ROWS=[
   t:'Draw the parts of the sky box the game draws from here in front of everything: the sky polygons in view are projected onto the six sides of a box round the eye and rounded out to quarters of a side (tr_sky.c). In game the walls are drawn after the sky and still cover it, unless the sky has a solid cloud layer'},
  {n:'r_showstaticbboxes',v:1,need:'vis',d:'static models\' boxes',
   t:'A magenta box round each static model the game draws from here (the leafs it keeps and the farplane decide): its .tik\'s bounds times its scale, turned with it'},
- {n:'r_farplane',num:[0,65536],step:64,f:1,d:'units, for the map\'s',
-  t:'Fog and cull at this distance in place of the map\'s farplane (0: the map\'s own), in the colour r_farplane_color, culling what r_farplane_nocull says. The game always draws a farplane\'s fog, so this turns the fog on here'},
- {n:'r_farplane_color',str:1,need:'farset',d:'r g b, 0 to 1',
-  t:'The fog colour of r_farplane, red green blue from 0 to 1 (the game\'s default .5 .5 .5)'},
- {n:'r_farplane_nocull',num:[-1,1],need:'farset',d:'1 none, -1 sky',
-  t:'What r_farplane culls: 0 (the default) the BSP nodes and the models past it, 1 nothing, -1 the models only (as for a portal sky). r_showtris shows it'},
- {n:'r_farplane_nofog',v:1,need:'fog',d:'no fog',
-  t:'Don\'t draw the farplane\'s fog, the map\'s or r_farplane\'s (what is past the farplane is still culled: r_showtris shows it)'},
  {h:'Lighting'},
  {n:'r_lightmap',v:1,need:'lit',d:'lightmaps only',
   t:'Lightmapped surfaces show their lightmap in place of their texture (the texture\'s alpha still cuts or blends it): the game draws a surface\'s stages only as far as its lightmap stage, and a stage joined with the texture replaces the colour. A shader that multiplies the lightmap over its texture in a pass of its own keeps the texture, as in game'},
@@ -4979,8 +5528,54 @@ const CVAR_ROWS=[
   t:'The cameras (a wire stand-in: func_camera.tik isn\'t in the game\'s files) and their spline paths in yellow: each func_camera\'s from its target (a loop with ORBIT), and every other info_splinepath chain. In game a path shows while a camera follows it'},
  {n:'g_showflypath',v:1,need:'spline',d:'fly paths',
   t:'The paths a script_object can fly along (flypath): a cyan box on each info_splinepath node and a green line to the next. In game they show while something flies them'},
+ {h:'Weather: rain and snow (func_rain)'},
+ {n:'cg_rain',v:1,d:'weather on',
+  t:'The client\'s weather switch. The viewer starts with it off; the game\'s default is 1 (the Low graphics preset sets 0). Display > Weather (Y) is the same switch'},
+ {n:'cg_thunder',v:1,d:'thunder on',
+  t:'global/weather.scr\'s lightning, without its sound: every so many seconds one of its three flickers (the sky gone and the screen and fog flashed white, the $weatherF windows lit), at its own timings',
+  ng:'This is not a real game cvar. In-game, thunder only runs on a map whose script runs global/weather.scr (m5l1a, m5l1b), every level.thundertime + a random 0 to 1.5 x level.thundertime seconds (level.thundertime = 20 at first, 6 at the middle of its storm); a map script changes it with level.thundertime = 20'},
+ {n:'cg_weather',str:1,d:'snow, rain, blizzard … map',
+  t:'Sets every cg_rain_ value below at once, as weather.scr does:\nsnow, snow_fast, blizzard, hail, snow_original (the game\'s m6l1a snow), rain, drizzle, monsoon, rain_original (the game\'s m5l1a rain), off, map, for the map script\'s values',
+  ng:'This is not a real game cvar. In-game, the values can only be changed in map script with level.rain_density = 0.2, level.rain_speed = 32 ... (weather.scr copies them from cvars of these names)'},
+ {n:'cg_rain_density',num:[0,100],step:0.05,f:1,d:'drops a frame',
+  t:'level.rain_density: each client frame, each rain box near you starts sqrt(width x depth) x density / 200 drops (in the square rain_min_dist round you), at most 4096',
+  ng:'This is not a real game cvar. In-game, the value can only be changed in map script with level.rain_density = 0.2'},
+ {n:'cg_rain_speed',num:[0,100000],step:16,f:1,d:'units a second',t:'level.rain_speed: how fast a drop falls',
+  ng:'This is not a real game cvar. In-game, the value can only be changed in map script with level.rain_speed = 32'},
+ {n:'cg_rain_speed_vary',num:[0,100000],step:16,d:'units a second',t:'level.rain_speed_vary: a random 0 to this much added to each drop\'s speed',
+  ng:'This is not a real game cvar. In-game, the value can only be changed in map script with level.rain_speed_vary = 16'},
+ {n:'cg_rain_slant',num:[0,100000],step:16,d:'units',t:'level.rain_slant: each drop lands a random 0 to this many units over in x and in y (both the same way: the rain leans toward +x +y), plus the wind',
+  ng:'This is not a real game cvar. In-game, the value can only be changed in map script with level.rain_slant = 250'},
+ {n:'cg_rain_length',num:[0,10000],step:1,f:1,d:'units',t:'level.rain_length: the length of a drop\'s streak (snow: the flake\'s size, with the width)',
+  ng:'This is not a real game cvar. In-game, the value can only be changed in map script with level.rain_length = 2'},
+ {n:'cg_rain_width',num:[0,1000],step:0.1,f:1,d:'units',t:'level.rain_width: half the width of a drop (the streak is twice this wide)',
+  ng:'This is not a real game cvar. In-game, the value can only be changed in map script with level.rain_width = 1'},
+ {n:'cg_rain_min_dist',num:[0,65536],step:64,f:1,d:'units round you',t:'level.rain_min_dist: drops start only this close to the viewer (across): the rest of a rain box stays dry. cg_rain_drawcoverage shows it',
+  ng:'This is not a real game cvar. In-game, the value can only be changed in map script with level.rain_min_dist = 1800'},
+ {n:'cg_rain_shader',str:1,d:'textures/rain, textures/snow0',
+  t:'level.rain_shader: the drops\' shader. The game has:\ntextures/rain (a streak) and textures/snow0 to textures/snow11 (flakes: squares that face the camera)',
+  ng:'This is not a real game cvar. In-game, the value can only be changed in map script with level.rain_shader = "textures/snow0"'},
+ {n:'cg_rain_numshaders',num:[0,32],d:'0: just the shader',t:'level.rain_numshaders: with N, each box each frame takes one of the shader\'s name + 0 to N - 1 (a digit it ends with dropped: textures/snow0 and 12 give snow0 to snow11)',
+  ng:'This is not a real game cvar. In-game, the value can only be changed in map script with level.rain_numshaders = 12'},
+ {n:'vss_wind_x',num:[-100000,100000],step:1,f:1,d:'units',t:'The wind added to where every drop lands, in x (the game\'s default 8)',
+  ng:'This cvar comes from OpenMoHAA: it doesn\'t exist in the original Allied Assault 1.11 game'},
+ {n:'vss_wind_y',num:[-100000,100000],step:1,f:1,d:'units',t:'The wind in y (the game\'s default 4)',
+  ng:'This cvar comes from OpenMoHAA: it doesn\'t exist in the original Allied Assault 1.11 game'},
+ {n:'com_maxfps',num:[10,1000],d:'frames a second',
+  t:'How many client frames a second the weather is made at (the game\'s default 85): each frame starts drops, so a faster client makes more rain, and runs out of beams sooner'},
+ {n:'com_target_game',num:[0,2],d:'0 AA 1.11, 2 OpenMoHAA',
+  t:'Which game\'s weather: 0 Allied Assault 1.11 (drops start at the top of the rain box and live as long as they take to fall), 1 Spearhead / 2 Breakthrough and OpenMoHAA (drops start anywhere in the box\'s height, 10 s at most, so tall boxes fill at once)',
+  ng:'This cvar comes from OpenMoHAA: it doesn\'t exist in the original Allied Assault 1.11 game'},
+ {n:'cg_rain_wholemap',v:1,d:'rain over the whole map',
+  t:'The whole map\'s box counts as one more rain box, as a func_rain over the whole map would (what weather.scr\'s spawned volumes are for), so a map without one can be tried',
+  ng:'This is not a real game cvar. In-game, weather can only fall in func_rain brushes (Rain in MOHRadiant), or in func_rain entities a map script spawns'},
+ {n:'r_static_shadermultiplier1',num:[-100,100],step:0.1,f:1,d:'how far leaves sway',
+  t:'Scales the amplitude of every static model\'s deformVertexes wave or flap: how far the trees\' leaves and the plants sway (the game\'s default 1, 0 stills them). global/weather.scr sets it each second to (raindensity + 1.5) / 2.5: 0.2 calm, 1.8 at the middle of its storm (where the viewer starts on its maps), 4.6 at the storm\'s height'},
+ {n:'r_static_shadermultiplier0',num:[-100,100],step:0.1,f:1,d:'their base',t:'Scales the base of every static model\'s deformVertexes wave or flap (the game\'s default 1)'},
+ {n:'r_static_shadermultiplier2',num:[-100,100],step:0.1,f:1,d:'their phase',t:'Scales the phase of every static model\'s deformVertexes wave or flap (the game\'s default 1)'},
+ {n:'r_static_shadermultiplier3',num:[-100,100],step:0.1,f:1,d:'their speed',t:'Scales the frequency of every static model\'s deformVertexes wave or flap: how fast its leaves move (the game\'s default 1)'},
  {n:'cg_rain_drawcoverage',v:1,need:'rain',d:'where the rain lands',
-  t:'A red rectangle at the bottom of each func_rain the client gets, cut to rain_min_dist round the player (the map script\'s, else 512): where its drops land'},
+  t:'A red rectangle at the bottom of each rain box the client gets, cut to cg_rain_min_dist round the player: where its drops land'},
  {h:'AI paths'},
  {n:'ai_showroutes',v:1,need:'paths',d:'AI path connections',
   t:'The connections the AI can walk between path nodes, from the map\'s .pth file: green both ways, a red arrowhead one way (pointing where it goes), a red X on a node with no connections, a blue circle on a node marked not to link. Only the nodes within ai_showroutes_distance of the camera'},
@@ -5014,13 +5609,13 @@ function cvarWhyNot(need){
     return D.kind==='map'?'a .map has no PVS yet: open the compiled .bsp':'this .bsp has no BSP tree to walk';}
   if(need==='paths'){if(pathsOk())return '';
     if(D.paths&&D.paths.err)return 'the path file '+(D.paths.src||'')+' can\'t be read: '+D.paths.err;
-    if(!MAP.ents.some(e=>e.cls==='info_pathnode'))return 'this map has no AI path nodes (info_pathnode), so the game makes no path file for it';
+    if(!MAP.ents.some(e=>e.cls==='info_pathnode'&&!e.scr))return 'this map has no AI path nodes (info_pathnode), so the game makes no path file for it';
     return 'no path file for this map ('+String(D.path||'maps/?.bsp').replace(/\.(bsp|map)$/i,'.pth')+'): the game writes one when it first loads a map that has path nodes';}
   if(need==='lit'){if(!LIT)return D.kind==='map'?'a .map has no lightmaps: open the compiled .bsp':'this .bsp has no lightmaps (the game draws it at full brightness)';
     if(fullBright)return 'Full Brightness is on: turn it off (B) to see the game\'s lighting';return '';}
   if(need==='lgrid'){if(D.lg)return '';return D.kind==='map'?'a .map has no light grid: open the compiled .bsp':'this .bsp has no light grid';}
   if(need==='spline'){if(MAP.ents.some(e=>e.cls==='info_splinepath'||e.cls==='func_camera'))return '';return 'this map has no info_splinepath or func_camera';}
-  if(need==='rain'){if(MAP.ents.some(e=>e.cls==='func_rain'))return '';return 'this map has no func_rain';}
+  if(need==='rain'){if(MAP.ents.some(e=>e.cls==='func_rain')||CVARS.cg_rain_wholemap)return '';return 'this map has no func_rain (cg_rain_wholemap 1 makes the whole map one)';}
   if(need==='farset'){if(Math.trunc(CVARS.r_farplane))return '';return 'only with r_farplane set';}
   if(need==='fog'){if(fogFar()>0)return '';return 'the map has no farplane (worldspawn "farplane") and r_farplane isn\'t set';}
   return '';
@@ -5038,7 +5633,11 @@ function cvarClamp(n,v){
 function setCvar(name,val){
   const n=CVAR_NAMES[String(name).toLowerCase()];if(!n)return false;
   const v=cvarClamp(n,val);if(v==null)return false;
+  if(n==='cg_weather'){if(!wxPreset(v))return false;}
   CVARS[n]=v;
+  if(n==='cg_rain_wholemap')WX.world=null;
+  if(n.startsWith('cg_rain')||n==='cg_weather')syncButtons();
+  if(n==='cg_thunder')thTick(performance.now());
   if(GV&&(n==='cm_noAreas'||n==='r_novis')){GV.key='';GV.skey='';}
   if(GV&&n==='r_lockpvs'){GV.key='';GV.marked=false;if(v)gvMark(GV,gvPointLeaf(GV,cam.pos));}
   if(GV&&(n==='r_farplane'||n==='r_farplane_nocull'))GV.dirty=true;
@@ -5048,6 +5647,13 @@ function setCvar(name,val){
   if(curTab==='ent'&&(n==='g_gametype'||n==='skill'||n==='developer'||n==='sv_maxclients'))renderList();
   saveOpts();cvarCountRender();cvarMenuRender();requestDraw();
   return true;
+}
+// the game cvars list's Reset button: every cvar that is set goes back to its default
+function resetCvars(){
+  const keys=cvarsSet();if(!keys.length)return;
+  // cg_weather first: its "map" puts the cg_rain_ cvars back to the map's own, their defaults
+  keys.sort((a,b)=>(b==='cg_weather')-(a==='cg_weather'));
+  for(const k of keys)setCvar(k,CVAR_DEFAULTS[k]);
 }
 function cvarsSet(){return Object.keys(CVAR_DEFAULTS).filter(k=>String(CVARS[k])!==String(CVAR_DEFAULTS[k]));}
 function cvarCountRender(){
@@ -5060,6 +5666,9 @@ function cvarCountRender(){
 // ---- the list ------------------------------------------------------------------
 let cvEl=null,cvBack=null,cvMsg='';
 const CV_W=340,CV_GAP=6;
+// the game cvars list closes when the window changes size (maximize, restore...), so it is
+// never left stranded away from its button
+window.addEventListener('resize',()=>{if(cvEl)cvarMenuClose();});
 function cvarMenuClose(){
   if(cvEl){cvEl.remove();cvEl=null;}
   if(cvBack){cvBack.remove();cvBack=null;}
@@ -5129,9 +5738,10 @@ function cvarMenuOpen(){
   cvBack.onclick=ev=>{if(!cvEl||!cvEl.contains(ev.target))cvarMenuClose();};
   document.body.appendChild(cvBack);
   cvEl=document.createElement('div');cvEl.className='amPanel';cvEl.id='cvPanel';
-  cvEl.innerHTML='<div class="amHead"><span class="amPathTxt">game cvars</span><span class="amCnt" id="cvHeadCnt"></span></div>'+
+  cvEl.innerHTML='<div class="amHead"><span class="amPathTxt">game cvars</span><span class="amCnt" id="cvHeadCnt"></span><button class="amReset" id="cvReset" title="Set every game cvar back to its default">Reset</button></div>'+
     '<input class="amSearch" id="cvSearch" type="text" spellcheck="false" autocomplete="off" placeholder="filter, or a cvar and value then Enter…">'+
     '<div class="amBody" id="cvBody"></div><div class="amNote" id="cvWhere"></div>';
+  cvEl.querySelector('#cvReset').onclick=ev=>{ev.stopPropagation();resetCvars();};
   const se=cvEl.querySelector('#cvSearch');
   se.oninput=()=>{cvMsg='';cvarMenuRender();};
   // keep the focus in the filter box while rows are clicked (a row's mousedown would take
@@ -5154,7 +5764,7 @@ function cvarMenuRender(){
       (r.num?'<input type="number" min="'+r.num[0]+'" max="'+r.num[1]+'" step="'+(r.step||1)+'" data-cvar="'+r.n+'" value="'+esc(CVARS[r.n])+'">':
        r.str?'<input type="text" class="wide" spellcheck="false" data-cvar="'+r.n+'" value="'+esc(CVARS[r.n])+'">':'')+
       '<span class="cnt">'+esc(r.d)+'</span>';
-    d.title=r.t+(why?'\n\n'+why:'')+(box?'':'\n\nClick to '+(on?'set it back to '+CVAR_DEFAULTS[r.n]:'set it')+'.');
+    d.title=r.t+(r.ng?'\n\n'+r.ng:'')+(why?'\n\n'+why:'')+(box?'':'\n\nClick to '+(on?'set it back to '+CVAR_DEFAULTS[r.n]:'set it')+'.');
     d.onclick=ev=>{if(ev.target.tagName==='INPUT')return;ev.stopPropagation();cvarRowClick(r);};
     if(box){const i=d.querySelector('input');i.onchange=()=>setCvar(r.n,i.value);}
     bd.appendChild(d);
@@ -5163,6 +5773,7 @@ function cvarMenuRender(){
     d.textContent=CVAR_NAMES[f.toLowerCase()]?'':'No cvar in this list matches that. Enter tries it as a command.';if(d.textContent)bd.appendChild(d);}
   const on=cvarsSet();
   cvEl.querySelector('#cvHeadCnt').textContent=on.length?on.length+' set':'all at default';
+  cvEl.querySelector('#cvReset').disabled=!on.length;
   cvarWhereRender();
   bd.scrollTop=sv;
 }
@@ -5204,12 +5815,12 @@ function cvarWhereRender(){
     h+='<div>farplane '+(ff>0?fnum(ff)+(Math.trunc(CVARS.r_farplane)?' (r_farplane)':' (the map\'s)'):'none')+(fogOn()?', fog '+fogCol().map(fnum).join(' '):', no fog')+'</div>';}
   if(CVARS.r_lightmap===2&&B.lmBright!=null)h+='<div>Brightest lightmap value: '+B.lmBright+'</div>';
   if(CVARS.r_light_showgrid&&LGRID)h+='<div>light grid: '+(LGRID.n||0)+' points within 256 units, '+LGRID.s.map(fnum).join(' x ')+' apart</div>';
-  if(CVARS.cg_rain_drawcoverage&&D.rain&&!cvarWhyNot('rain'))h+='<div>rain_min_dist '+fnum(D.rain.min)+' ('+(D.rain.set?esc(D.rain.src):'the game\'s default: the map script doesn\'t set it')+')</div>';
+  if(CVARS.cg_rain&&(WX.n||wxActive()))h+='<div>'+wxSummary()+'</div>';
   if(CVARS.sv_showentnums||CVARS.g_entinfo||CVARS.sv_showbboxes){gameEnts();const n=GAMEENTS.count;
     h+='<div>'+n+' entities spawn for g_gametype '+CVARS.g_gametype+', skill '+CVARS.skill+(CVARS.developer?', developer 1':'')+
       (n?': numbers '+CVARS.sv_maxclients+' to '+(CVARS.sv_maxclients+n-1):'')+', the world 1022</div>';}
   if(pathsOk()){
-    const np=MAP.ents.reduce((s,e)=>s+(e.cls==='info_pathnode'?1:0),0);
+    const np=MAP.ents.reduce((s,e)=>s+(e.cls==='info_pathnode'&&!e.scr?1:0),0);
     h+='<div>AI paths: '+esc(D.paths.src||'')+', '+D.paths.n+' nodes'+(np!==D.paths.n?' <span class="warn">but the map has '+np+' info_pathnode: the file is from another version of the map (the game rebuilds it)</span>':'')+'</div>';
     if(CVARS.ai_shownode>0&&NODELIST)h+='<div>ai_shownode: '+(NODELIST.list.length?NODELIST.list.length+' node'+(NODELIST.list.length===1?'':'s')+' found from here':'no node in this cell at your height')+
       (NODELIST.lift>0.5?' (your feet lifted '+fnum(NODELIST.lift)+' units out of a brush)':'')+'</div>';
@@ -5321,7 +5932,7 @@ function setHover(h){
 setHover.key=null;setHover.h=null;
 // a click that selects what is under the mouse takes its hover outline away
 function refreshHover(){if(!gl)return;setHover.key=undefined;setHover(setHover.h);}
-function selectionChanged(){rebuildSelection();refreshHover();updateSelPanel();if($('info').classList.contains('on'))showInfo(infoMode==='errs'?'sel':infoMode);requestDraw();listSoon();}
+function selectionChanged(){rebuildSelection();refreshHover();updateSelPanel();if($('info').classList.contains('on'))showInfo(infoMode==='errs'||infoMode==='leak'||infoMode==='scr'?'sel':infoMode);requestDraw();listSoon();}
 // The Find lists show what is selected in green, however it was selected (a click in the
 // view, Enter in the search box, a list row): they are drawn again once, a frame after.
 let _listRaf=0;
@@ -5498,8 +6109,15 @@ function loop(t){
   }
   // doors on the move, or waiting to close
   const doors=DOORS_BUSY.size?doorsAdvance(performance.now()):false;
+  // moving leaves (deformVertexes on models): redrawn 30 times a second while any is seen
+  const sway=dvActive()&&performance.now()-DVT.at>=33;if(sway)DVT.at=performance.now();
+  // thunder's flashes
+  thTick(performance.now());
+  // the weather: its client frames run with the page's clock while drops fall or can start
+  let wx=false;
+  if(wxActive()){wxAdvance(performance.now());wx=true;}else WX.wall=0;
   if(moved){camChanged();draw();}
-  else if(doors)draw();
+  else if(doors||wx||sway)draw();
 }
 // Turn the view dx degrees right and dy degrees down as seen on the screen. With the camera
 // tilted (Q / E), the screen's right and down are tilted too, so the turn is rotated by the
@@ -5629,7 +6247,7 @@ function updateHoverText(h){
   el.textContent=s;
 }
 function updateHint(){
-  $('hintCam').textContent=(camMode==='free'?'free-look ':'radiant-look ')+fvec(cam.pos)+'  yaw '+fnum(cam.yaw)+' pitch '+fnum(cam.pitch)+(clipOn?'  clip '+clipDist:'');
+  $('hintCam').textContent=(camMode==='free'?'free-look ':'radiant-look ')+fvec(cam.pos)+'  yaw '+fnum(cam.yaw)+' pitch '+fnum(cam.pitch)+(Math.abs(wrap180(cam.roll))>=0.005?' roll '+fnum(camAngles()[2]):'')+(clipOn?'  clip '+clipDist:'');
 }
 
 // ============================================================================
@@ -5640,7 +6258,7 @@ const CAM_KEYS_FREE=new Set(['w','a','s','d','q','e','c',' ','arrowup','arrowdow
 const CAM_KEYS_RAD=new Set(['arrowup','arrowdown','arrowleft','arrowright',',','.','d','c','a','z']);
 const FILTER_KEYS={'alt+1':C_WORLD,'alt+2':C_ENTITIES,'alt+3':C_PATCH,'alt+4':C_TRANS,'alt+5':C_LIQUID,'alt+6':C_CAULK,
   'alt+7':C_CLIP,'alt+8':C_PATH,'alt+9':C_AINODE,'alt+0':C_LIGHT,'ctrl+d':C_DETAIL,'ctrl+h':C_HINT,'ctrl+m':C_MODEL,
-  'ctrl+r':C_TERRAIN,'ctrl+t':C_TRIGGER,'ctrl+p':C_PORTAL,'ctrl+k':C_SKY,'ctrl+o':C_NODRAW,'ctrl+i':C_RAIN,'ctrl+g':C_FOLIAGE};
+  'ctrl+r':C_TERRAIN,'ctrl+t':C_TRIGGER,'ctrl+p':C_PORTAL,'ctrl+k':C_SKY,'ctrl+o':C_NODRAW,'ctrl+i':C_RAIN,'ctrl+g':C_FOLIAGE,'ctrl+e':C_SCRIPT};
 window.addEventListener('keydown',e=>{
   if(typing()){if(e.key==='Escape'){document.activeElement.blur();e.preventDefault();}return;}
   const kl=e.key.length===1?e.key.toLowerCase():e.key.toLowerCase();
@@ -5690,7 +6308,7 @@ window.addEventListener('keydown',e=>{
     case '/':$('findIn').focus();e.preventDefault();break;
     case '\\':case '|':$('sideTab').click();e.preventDefault();break;
     case 'escape':escape();break;
-    default:{const d=DISPLAY.find(x=>x.key===e.key);if(d){toggleDisplay(d.k);}}
+    default:{const d=DISPLAY.find(x=>x.key===e.key||x.key.toLowerCase()===kl);if(d){toggleDisplay(d.k);}}
   }
 });
 window.addEventListener('keyup',e=>{const kl=e.key.length===1?e.key.toLowerCase():e.key;keys.delete(kl);keys.delete(kl.toLowerCase());
@@ -5738,7 +6356,11 @@ const DISPLAY=[
  {k:'links',l:'Links',key:'7',t:'A line from each entity to the entities its "target" key points at'},
  {k:'fog',l:'Fog',key:'8',t:'The map\'s distance fog (worldspawn farplane / farplane_color), like in game'},
  {k:'xray',l:'X-ray',key:'9',t:'Show the selection\'s outline, box, target links and facing arrow faintly through walls (everything else stays hidden behind them)'},
- {k:'lights',l:'Lights off',key:'0',t:'Every light entity of the map off, as if it had never been there: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the sun, the sky and the ambient light give it. Again: every light back on. Single lights turn off and on from Selection (Turn off / Turn on). The first time takes a moment, while the page works out how much of the baked light each light gave'}];
+ {k:'lights',l:'Lights off',key:'0',t:'Every light entity of the map off, as if it had never been there: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the sun, the sky and the ambient light give it. Again: every light back on. Single lights turn off and on from Selection (Turn off / Turn on). The first time takes a moment, while the page works out how much of the baked light each light gave'},
+ {k:'sun',l:'Sun light',key:'-',t:'The sun\'s and the sky\'s light on the map (worldspawn suncolor, sundirection, sundiffuse). Off: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the lights and the ambient light give it, so open ground goes dark. The sun flare (J) is separate. The first time takes a moment, as Lights off does'},
+ {k:'decals',l:'Decals',key:'=',t:'The map\'s permanent decals (its .dcl: signs, cracks, numbers placed in MOHRadiant), as the game draws them, lit by the colour the file keeps (white with Full Brightness)'},
+ {k:'weather',l:'Weather',key:'Y',t:'The game\'s rain and snow (cg_rain): drops start in the map\'s func_rain boxes near you as the client makes them, with the map\'s settings (its script\'s level.rain_*). The game cvars (`) have every setting: cg_weather snow / rain / blizzard ..., density, speed, size, shader, the client\'s frame rate'},
+ {k:'leak',l:'Leak',key:'P',t:'The compiler\'s leak trail (the map\'s .lin): a red line through walls from the hole in the map to the entity the void reaches. On: its card says where, with Go buttons'}];
 const FILTERS=[
  {m:C_WORLD,l:'World',key:'Alt+1',t:'Structural world brushes'},
  {m:C_ENTITIES,l:'Entities',key:'Alt+2',t:'Every entity: brush entities, models, lights, nodes, markers'},
@@ -5760,6 +6382,7 @@ const FILTERS=[
  {m:C_NODRAW,l:'Nodraw',key:'Ctrl+O',t:'Other editor-only surfaces: nodraw, ladders, patharea, and the flat tree pictures that only cast a tree\'s shadow (misc_outside/commontreeshadow)'},
  {m:C_RAIN,l:'Rain',key:'Ctrl+I',t:'common/rain: the volumes of func_rain entities, where rain or snow falls in game. Hidden until you show them'},
  {m:C_FOLIAGE,l:'Foliage clips',key:'Ctrl+G',t:'common/foliageclip: walk-through brushes around trees and bushes that make foliage effects when shot'},
+ {m:C_SCRIPT,l:'Script ents',key:'Ctrl+E',t:'Entities the map\'s level script spawns (spawn lines in its .scr), placed where its lines say: waypoints, script models and origins, actors... They are drawn as their kind (a waypoint with the Paths, a model with the Models) and this hides them all. The map\'s stats line opens the list'},
  {m:C_ORIGIN,l:'Origin',key:'',t:'common/origin brushes (the pivot of doors and movers)'},
  {m:C_POINT,l:'Point ents',key:'',t:'Other point entities: player starts, script origins, info_* ...'}];
 // The entity kinds the Entities button (Alt+2) covers, named for its tooltip when only
@@ -5770,8 +6393,13 @@ function buildPanel(){
   const db=$('dispBtns');
   for(const d of DISPLAY){const b=document.createElement('button');b.id='d_'+d.k;b.innerHTML=esc(d.l)+'<span class="k">'+d.key+'</span>';
     b.title=d.t+' ('+d.key+')';b.onclick=()=>toggleDisplay(d.k);db.appendChild(b);}
-  // Lights off needs a .bsp's baked light (ltCheck says why not)
-  if(!ltCheck()){$('d_lights').disabled=true;$('d_lights').title=LT.why;}
+  // Lights off and Sun light need a .bsp's baked light (ltCheck says why not), Sun light a sun
+  if(!ltCheck()){for(const k of ['lights','sun']){$('d_'+k).disabled=true;$('d_'+k).title=LT.why;}}
+  else if(!LT.sunHas){$('d_sun').disabled=true;$('d_sun').title=LT.sunWhy;}
+  if(!dclHas()){$('d_decals').disabled=true;$('d_decals').title=dclWhy();}
+  else $('d_decals').title+='\n'+D.dcl.n+' decal'+(D.dcl.n===1?'':'s')+' ('+D.dcl.nf+' fragments) from '+D.dcl.src;
+  if(!leakHas()){$('d_leak').disabled=true;$('d_leak').title=leakWhy();}
+  else $('d_leak').title+='\n'+D.leak.p.length+' points from '+D.leak.src;
   const fb=$('filtBtns');
   for(const f of FILTERS){const b=document.createElement('button');b.innerHTML=esc(f.l)+(f.key?'<span class="k">'+f.key+'</span>':'');
     b.title=f.t+(f.key?' ('+f.key+')':'')+' - click to show / hide';f.el=b;b.onclick=()=>toggleFilter(f.m);fb.appendChild(b);}
@@ -5821,7 +6449,10 @@ function editorLook(){hiddenMask=EDIT_LOOK;simpleSky=true;fullBright=true;setSun
 // a look's sun flare setting counts only on a map that has a flare
 function flareAs(on){return !sunHas()||sunFlare===on;}
 function syncButtons(){
-  for(const d of DISPLAY){const b=$('d_'+d.k);if(b&&d.k!=='lights')b.classList.toggle('on',!!view[d.k]);}
+  for(const d of DISPLAY){const b=$('d_'+d.k);if(b&&d.k!=='lights'&&d.k!=='sun'&&d.k!=='weather')b.classList.toggle('on',!!view[d.k]&&!b.disabled);}
+  {const b=$('d_weather');if(b){b.classList.toggle('on',!!CVARS.cg_rain);
+    b.classList.toggle('part',!!CVARS.cg_rain&&(!(+CVARS.cg_rain_density>0)||(!WX.rainEnts.length&&!CVARS.cg_rain_wholemap)));}}
+  {const b=$('d_sun');if(b)b.classList.toggle('on',LT.ok?(LT.sunHas&&!LT.sunOff):false);}
   // Lights off: on while every light is off, dashed while only some are
   {const b=$('d_lights');if(b){const n=LT.off?LT.off.reduce((a,x)=>a+x,0):0,all=LT.off&&n===LT.off.length&&n>0;
     b.classList.toggle('on',!!all);b.classList.toggle('part',n>0&&!all);
@@ -5844,9 +6475,13 @@ function syncButtons(){
   $('bFree').classList.toggle('on',camMode==='free');$('bRad').classList.toggle('on',camMode==='rad');
   $('camHelpFree').style.display=camMode==='free'?'':'none';$('camHelpRad').style.display=camMode==='rad'?'':'none';
 }
-function toggleDisplay(k){if(k==='lights'){toggleLightsOff();return;}view[k]=!view[k];syncButtons();saveOpts();
+function toggleDisplay(k){if(k==='lights'){toggleLightsOff();return;}if(k==='sun'){toggleSunLight();return;}if(k==='weather'){toggleWeather();return;}
+  view[k]=!view[k];syncButtons();saveOpts();
   if(k==='wire'&&view.wire)rebuildWire();
   if(k==='fog'&&view.fog&&!FOG.far)flash('This map has no farplane fog');
+  if(k==='decals')flash(!dclHas()?dclWhy():view.decals?'Decals on: '+D.dcl.n+' from '+D.dcl.src:'Decals off');
+  if(k==='leak'){if(!leakHas())flash(leakWhy());else if(view.leak){leakCard();flash('Leak trail on: the red line runs from the hole to the entity the void reaches');}
+    else{if(infoMode==='leak')hideInfo();flash('Leak trail off');}}
   lineDirty=true;requestDraw();}
 function toggleFilter(m){if((hiddenMask&m)===m)hiddenMask&=~m;else hiddenMask|=m;filtersChanged();}
 function toggleSimpleSky(){
@@ -5994,6 +6629,7 @@ function renderList(){
       head.push('<div class="co">'+findRes.length+' found</div>');
       head.push('<div class="co">· Press Enter in search box to select all</div>');
       head.push('<div class="co">· Shift-click a colored square to hide it</div>');
+      head.push('<div class="co">· Shift-click any green text to deselect it</div>');
     }
     let n=0;for(const r of findRes){if(++n>600){rows.push('<div class="co">... '+(findRes.length-600)+' more (Enter selects them all)</div>');break;}
       if(r.e!=null)rows.push(entRow(r.e,false));
@@ -6004,6 +6640,7 @@ function renderList(){
     head.push('<div class="co">'+MAP.ents.length+' entities · '+names.length+' classes</div>');
     head.push('<div class="co">· click a class to list them & select all</div>');
     head.push('<div class="co">· shift-click a colored square to hide them</div>');
+    head.push('<div class="co">· Shift-click any green text to deselect it</div>');
     for(const c of names){const l=cnt.get(c),open=openCls.has(c),X=ENTS[l[0]];
       const nh=l.reduce((s,ei)=>s+(shown(ei)?0:1),0), st=!nh?'':nh===l.length?' hid':' part';
       // green while every one of them that is shown is selected
@@ -6024,12 +6661,18 @@ function renderList(){
       '). Simple entities (path nodes, player starts, waypoints...), lights and static props have no number; one that removes itself as it spawns (misc_model, func_remove) leaves its number unused.')+'">'+l.length+' real entities with entnums</div>');
     head.push('<div class="co">· click an entity to select it</div>');
     head.push('<div class="co">· shift-click a colored square to hide it</div>');
+    head.push('<div class="co">· Shift-click any green text to deselect it</div>');
+    // the client slots come first: entity 0 to sv_maxclients - 1, kept for the players
+    const nc=Math.max(1,Math.min(+CVARS.sv_maxclients||1,lo||1e9));
+    for(let k=0;k<nc;k++)rows.push('<div class="li res" data-r="'+k+'" title="'+esc(k?'reserved for $player['+(k+1)+'] in multiplayer':'reserved for $player, or $player[1] in multiplayer')+
+      '"><span class="sw" style="background:var(--dim)"></span><span class="nm">entity '+k+'</span><span class="ct"></span></div>');
     for(const ei of l)rows.push(numRow(ei,G[ei]));
   }else{
     const used=texCounts();
     head.push('<div class="co">'+used.length+' textures</div>');
     head.push('<div class="co">· click one to select everything using it</div>');
     head.push('<div class="co">· shift-click a texture square to hide them</div>');
+    head.push('<div class="co">· Shift-click any green text to deselect it</div>');
     for(const[ti]of used)rows.push(texRow(ti));
   }
   $('listHead').innerHTML=head.join('');
@@ -6058,6 +6701,7 @@ function secondClick(e,key){
 }
 $('listBox').addEventListener('click',e=>{
   const r=e.target.closest('.li');
+  if(r&&r.classList.contains('res'))return;   // a client slot (Entities tab)
   // Shift+click a texture's square: hide everything that uses it (again: show it)
   if(e.shiftKey&&r&&r.hasAttribute('data-t')&&e.target.closest('.tsq')){toggleHideTex(+r.getAttribute('data-t'));return;}
   // Shift+click a row's coloured square: hide that entity, or every entity of the class
@@ -6068,7 +6712,10 @@ $('listBox').addEventListener('click',e=>{
     return;}
   const o=e.target.closest('[data-o]');if(o){const c=o.getAttribute('data-o');if(openCls.has(c))openCls.delete(c);else openCls.add(c);renderList();return;}
   if(!r)return;
-  if(r.hasAttribute('data-e')){const ei=+r.getAttribute('data-e');SEL.clear();if(ei)SEL.add('e'+ei);selectionChanged();if(ei)focusSelection();renderList();}
+  // Shift+click a green (selected) row: deselect that entity, every entity of the class, or
+  // everything that uses the texture; the rest of the selection stays
+  if(e.shiftKey&&r.classList.contains('sel')&&!(r.hasAttribute('data-e')&&+r.getAttribute('data-e')===0)){deselectRow(r);return;}
+  if(r.hasAttribute('data-e')){const ei=+r.getAttribute('data-e');if(!e.shiftKey)SEL.clear();if(ei)SEL.add('e'+ei);selectionChanged();if(ei&&!e.shiftKey)focusSelection();renderList();}
   // a class row selects the class and opens (or closes) its list of entities; a
   // double-click leaves it open and flies to the class
   else if(r.hasAttribute('data-c')){const c=r.getAttribute('data-c'),again=secondClick(e,'c:'+c);selectClass(c,e.shiftKey);
@@ -6077,6 +6724,16 @@ $('listBox').addEventListener('click',e=>{
   else if(r.hasAttribute('data-t')){const ti=+r.getAttribute('data-t'),again=secondClick(e,'t:'+ti);
     selectByTexture(ti,e.shiftKey);selectionChanged();renderList();if(again)focusSelection();}
 });
+// Shift+click a selected (green) row in the right-side lists: take it out of the selection.
+function deselectRow(r){
+  let keys=[],nm;
+  if(r.hasAttribute('data-e')){const ei=+r.getAttribute('data-e');keys=['e'+ei];nm=entName(ei);}
+  else if(r.hasAttribute('data-c')){const c=r.getAttribute('data-c');keys=(classLists().get(c)||[]).filter(ei=>ei>0).map(ei=>'e'+ei);nm='every '+c;}
+  else if(r.hasAttribute('data-t')){const ti=+r.getAttribute('data-t');keys=[...texUse(ti).keys.keys()];nm=TEX[ti]?TEX[ti].n.replace(/^textures\//,''):'?';}
+  let n=0;for(const k of keys)if(SEL.delete(k))n++;
+  selectionChanged();renderList();
+  flash(nm+': '+n+' deselected, '+SEL.size+' still selected');
+}
 // Hide entities as Hide does (Ctrl+Z undoes it), or, when every one of them is hidden
 // already, show again the ones Hide hid. Those a Show button hides stay hidden: the
 // message names the button.
@@ -6214,13 +6871,14 @@ function errorLines(){                 // [{line, text}] for MAP.errors, in one 
 function entityKinds(){
   const ek=D.ek||{}, simple=new Set([...(ek.simple||[]),...(ek.dropped||[])]);
   let real=0,smp=0,stat=0;
-  MAP.ents.forEach((e,ei)=>{if(isStaticProp(ei))stat++;else if(simple.has(e.cls))smp++;else real++;});
+  MAP.ents.forEach((e,ei)=>{if(e.scr)return;if(isStaticProp(ei))stat++;else if(simple.has(e.cls))smp++;else real++;});
   return {real:real,simple:smp,stat:stat};
 }
 // A static prop: in a .map, a static_* class (the compiler makes those into static models);
 // decompiled from a .bsp, every entity from the static model lump, written after the
 // others (some take a .tik class name without the prefix).
 function isStaticProp(ei){const fs=D.bsp&&D.bsp.firstStatic;
+  if(MAP.ents[ei].scr)return false;
   return (fs>0)?ei>=fs:MAP.ents[ei].cls.startsWith('static_');}
 function errText(x,l){
   return 'entity '+x.ent+' ('+(MAP.ents[x.ent]?entName(x.ent):'?')+')'+(x.prim>=0?', '+x.kind+' '+x.prim:'')+', line '+l.line+': '+x.msg;
@@ -6244,10 +6902,12 @@ function reportMapErrors(){
   try{if(window.chrome&&window.chrome.webview){const L=errorLines();
     window.chrome.webview.postMessage('mohaa-map-errors\n'+TITLE+'\n'+n+'\n'+MAP.errors.slice(0,100).map((x,i)=>errText(x,L[i])).join('\n'));}}catch(_e){}
 }
-$('stats').addEventListener('click',e=>{if(e.target.closest('[data-errs]'))showInfo('errs');});
+$('stats').addEventListener('click',e=>{if(e.target.closest('[data-errs]'))showInfo('errs');if(e.target.closest('[data-scr]'))scrCard();});
 function showInfo(mode){
   infoMode=mode||'sel';
   if(infoMode==='errs')return infoErrors();
+  if(infoMode==='leak')return leakCard();
+  if(infoMode==='scr')return scrCard();
   if(infoMode==='face'){if(lastHit&&lastHit.face>=0)return infoFace(lastHit);}
   if(!SEL.size){if(lastHit&&lastHit.face>=0&&infoMode!=='sel')return infoFace(lastHit);card('Nothing selected','<div class="note">Click a brush or entity first (Ctrl+click opens this card straight away).</div>');return;}
   const ents=[...selectedEnts()], prims=selectedPrims();
@@ -6260,7 +6920,7 @@ function infoEntity(ei){
   const e=MAP.ents[ei],X=ENTS[ei],cls=e.kvl.classname||'?',tn=e.kvl.targetname,b=X.box,def=X.def;
   let h='';
   h+='<div><span class="sw" style="background:rgb('+X.col.map(v=>Math.round(v*255)).join(',')+')"></span><b>'+esc(cls)+'</b>'+(tn?'  <span style="color:var(--accent)">$'+esc(tn)+'</span>':'')+'</div>';
-  h+='<div class="note">entity '+ei+' in the .map'+(e.prims.length?' · '+e.prims.filter(p=>p&&p.kind===0).length+' brush(es)'+(e.patches.length?', '+e.patches.length+' patch(es)':'')+(e.terrains.length?', '+e.terrains.length+' terrain block(s)':''):'')+
+  h+='<div class="note">'+(e.scr?'spawned by the level script ('+esc(scrWhere(e.scr.f,e.scr.l))+'), not in the .map':'entity '+ei+' in the .map')+(e.prims.length?' · '+e.prims.filter(p=>p&&p.kind===0).length+' brush(es)'+(e.patches.length?', '+e.patches.length+' patch(es)':'')+(e.terrains.length?', '+e.terrains.length+' terrain block(s)':''):'')+
      (X.model>=0?' · model '+esc(D.models[X.model].p):'')+'</div>';
   // the number the game gives it (sv_showentnums, script errors), for the game the list's cvars set
   if(ei>0){const R=gameEnts()[ei];
@@ -6312,7 +6972,11 @@ function infoEntity(ei){
     if(cnt.size){h+='<h4>Textures</h4>'+kvTable([...cnt.entries()].map(([t,c])=>[c+'x','<a data-tex="'+t+'">'+esc(TEX[t].n.replace(/^textures\//,''))+'</a>']));}}
   if(lastHit&&lastHit.ent===ei&&lastHit.face>=0)h+=faceHtml(lastHit.face,true);
   if(def&&def.d)h+='<h4>About '+esc(def.n)+'</h4><div class="desc">'+esc(def.d)+'</div>'+(def.s?'<div class="note">from '+esc(def.s)+'</div>':'');
-  h+='<h4>.map source<span class="sp"></span>'+copyBtn(srcText(e.ts,e.te),'Copy')+openBtn(e.ts)+'</h4><pre>'+esc(clipText(srcText(e.ts,e.te)))+'</pre>';
+  if(e.scr)h+=scrEntHtml(e);
+  else if(e.scrMods){const L=e.scrMods.map(m=>'// '+scrWhere(m[3],m[4])+'\n'+m[5]).join('\n');
+    h+='<h4>Changed by the level script<span class="sp"></span>'+copyBtn(L,'Copy')+'</h4><pre>'+esc(L)+'</pre>'+
+      '<div class="note">Its "target" as the script sets it while the game runs (the .map below has its own).</div>';}
+  if(!e.scr)h+='<h4>.map source<span class="sp"></span>'+copyBtn(srcText(e.ts,e.te),'Copy')+openBtn(e.ts)+'</h4><pre>'+esc(clipText(srcText(e.ts,e.te)))+'</pre>';
   card(entName(ei),h);
 }
 // A path node's paths in the map's .pth (what ai_showroutes draws): node i is the map's
@@ -6320,7 +6984,7 @@ function infoEntity(ei){
 let PN_ENTS=null;
 function pathNodeInfo(ei){
   if(!pathsOk())return '';
-  if(!PN_ENTS){PN_ENTS=[];MAP.ents.forEach((e,i)=>{if(e.cls==='info_pathnode')PN_ENTS.push(i);});}
+  if(!PN_ENTS){PN_ENTS=[];MAP.ents.forEach((e,i)=>{if(e.cls==='info_pathnode'&&!e.scr)PN_ENTS.push(i);});}
   const P=D.paths,pn=PN_ENTS,i=pn.indexOf(ei);if(i<0)return '';
   let h='<h4>AI paths (ai_showroutes)</h4>';
   if(pn.length!==P.n)return h+'<div class="note warn">'+esc(P.src)+' has '+P.n+' nodes but the map has '+pn.length+' info_pathnode: it was made for another version of the map (the game rebuilds it).</div>';
@@ -6420,6 +7084,8 @@ function infoMulti(ents,prims){
 $('infoBody').addEventListener('click',e=>{
   const c=e.target.closest('[data-copy]');if(c){copyText(c.getAttribute('data-copy'));return;}
   const om=e.target.closest('[data-openmap]');if(om){openMapAt(+om.getAttribute('data-openmap'));return;}
+  const g=e.target.closest('[data-go]');if(g){const v=vecNums(g.getAttribute('data-go')),f=vecNums(g.getAttribute('data-from')||'');
+    if(v.length>=3)flyLook([v[0],v[1],v[2]],256,f.length>=3?[f[0],f[1],f[2]]:null);return;}
   const s=e.target.closest('[data-sel]');if(s){const ei=+s.getAttribute('data-sel');SEL.clear();SEL.add('e'+ei);lastHit=null;selectionChanged();focusSelection();showInfo('sel');return;}
   const t=e.target.closest('[data-tex]');if(t){selectByTexture(+t.getAttribute('data-tex'),false);selectionChanged();return;}
   const pa=e.target.closest('[data-path]');if(pa){const ei=+pa.getAttribute('data-path');selectPath({ent:ei,face:-1,prim:-1,point:null},false);return;}
@@ -6487,6 +7153,7 @@ async function main(){
     setLoad('Reading the .map…',0.15);await tick();
     D.srcText=new TextDecoder('windows-1252').decode(D.bytes(D.src));
     MAP=readMap(D.srcText);
+    scriptEnts();
     spawnKeys();
     TEX=(D.tex||[]).map((t,i)=>Object.assign({},t,{i:i}));
     for(const t of TEX)TEXI.set(t.n,t);
@@ -6499,6 +7166,7 @@ async function main(){
     if(D.lit){setLoad('Lighting the game\'s polygons…',0.6);await tick();LIT=buildLit();}
     gvInit();
     doorsInit();
+    wxInit();
     const wk=MAP.ents[0]?MAP.ents[0].kvl:{};
     FOG.far=parseFloat(wk.farplane)||0;FOG.col=parseVec(wk.farplane_color,3)||[0.5,0.5,0.5];
     setLoad('Uploading to the graphics card…',0.8);await tick();
@@ -6516,13 +7184,15 @@ async function main(){
     $('ttl').textContent=TITLE;
     const nb=MAP.ents.reduce((a,e)=>a+e.brushes.length,0),np=MAP.ents.reduce((a,e)=>a+e.patches.length,0),nt=MAP.ents.reduce((a,e)=>a+e.terrains.length,0);
     const K=entityKinds();
-    $('stats').innerHTML=nb+' brushes · '+np+' patches · '+nt+' terrain<br>'+MAP.ents.length+' entities · '+(D.models||[]).length+' models · '+TEX.length+' textures<br>'+
+    $('stats').innerHTML=nb+' brushes · '+np+' patches · '+nt+' terrain<br>'+MAP.nMap+' entities · '+(D.models||[]).length+' models · '+TEX.length+' textures<br>'+
       '<span class="ek'+(K.real>1024?' over':'')+'" title="Real entities: the ones the game spawns as entities, each with an entity number (.entnum). MOHAA has 1024 entity slots in all; the world, the players and whatever is spawned while playing (weapons, projectiles, effects) take some of them too.'+(K.real>1024?' This map has more than the 1024.':'')+'">'+K.real+' real</span> · '+
       '<span class="ek" title="Simple entities: path nodes, player starts, waypoints, vehicle points and grenade hints, which the game keeps without an entity number, and the lights, info_nulls and other editor-only entities it drops once the map is loaded.">'+K.simple+' simple</span> · '+
       '<span class="ek" title="Static props (static_* classes): models the compiler turns into scenery the game draws without an entity.">'+K.stat+' static props</span>'+
       (D.kind==='bsp'?'<br>decompiled from the .bsp (v'+(D.bsp&&D.bsp.version)+')':'')+
+      (wk.message?'<br>"'+esc(wk.message)+'"':'')+
+      (D.scr?'<br><a class="scrlink" data-scr title="What the level script spawns and sets: its entities (placed, and those whose place the viewer can\'t follow), setcvar and $world lines">level script: '+scrSummary()+'</a>':'')+
       (MAP.errors.length?'<br><a class="errlink" data-errs title="Which blocks, where they are in the .map, and why">'+MAP.errors.length+' unreadable block'+(MAP.errors.length===1?'':'s')+' skipped</a>':'');
-    $('msgLine').textContent=wk.message?'"'+wk.message+'"':'';
+    $('msgLine').textContent='';      // the map's title is in the stats, above the level script's line
     setTab('cls');
     $('loading').style.display='none';
     reportMapErrors();

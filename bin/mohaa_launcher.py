@@ -237,13 +237,29 @@ PAK_ENTRY_MAX=getattr(getattr(MTX,"Vfs",None),"MAX_ENTRY",192*1024*1024)
 # Source mtimes are the usual rebuild trigger, but a zip round-trip can scramble them,
 # so the baked rev is the backstop. Also gates the animation/attachment sidecar caches
 # (see _stamp_anim_cache).
-VIEWER_REV_REQUIRED=76
+VIEWER_REV_REQUIRED=78
 # Sentinel subdir for single-file builds (Browse / drag-drop / Recent / path bar). It
 # routes the output HTML to a "standalone" folder beside "models" instead of the
 # pak-mirroring tree; the null byte means it can't collide with a real folder name.
 STANDALONE_SUBDIR="\x00standalone"
 # Copy the config from the old flat location (HERE) on first run.
 CONFIG=os.path.join(DATADIR,"mohaa_viewer_config.json")
+# The paks both programs have loaded: one list beside their own settings, so the Model
+# Viewer and the Map Viewer open with the same paks and follow each other's changes.
+PAKS_SHARED=os.path.join(DATADIR,"mohaa_paks.json")
+def read_shared_paks():
+    """The shared pak list, or None when neither program has written one yet."""
+    try:
+        with open(PAKS_SHARED,encoding="utf-8") as f: v=json.load(f)
+        ps=v.get("pk3s") if isinstance(v,dict) else None
+        return [p for p in ps if isinstance(p,str)] if isinstance(ps,list) else None
+    except Exception: return None
+def write_shared_paks(paths):
+    try:
+        tmp=PAKS_SHARED+".tmp"
+        with open(tmp,"w",encoding="utf-8") as f: json.dump({"pk3s":list(paths)},f,indent=2)
+        os.replace(tmp,PAKS_SHARED)
+    except Exception: pass
 if not os.path.exists(CONFIG):
     try:
         _old=os.path.join(HERE,"mohaa_viewer_config.json")
@@ -1570,11 +1586,14 @@ class App(tk.Tk):
         self.after(150,self._enable_win_drop)
         self.after(250,self._apply_titlebar)
         self.protocol("WM_DELETE_WINDOW",self._on_close)
-        # Migrate the old single-pk3 config key to the pk3 list.
-        saved=self._cfg.get("pk3s")
-        if not saved and self._cfg.get("pk3"): saved=[self._cfg["pk3"]]
+        # The paks both programs share, else this program's own (and the old single-pk3 key)
+        saved=read_shared_paks()
+        if saved is None:
+            saved=self._cfg.get("pk3s")
+            if not saved and self._cfg.get("pk3"): saved=[self._cfg["pk3"]]
         saved=[p for p in (saved or []) if os.path.exists(p)]
         if saved and self._remember.get(): self.after(200,lambda:self._add_pk3s(saved))
+        self._paks_watch()
         if initial_file: self.after(350,lambda:self._load(initial_file))
 
     # ------------------------------------------------------------- config ---
@@ -3036,7 +3055,7 @@ class App(tk.Tk):
         if path in self._pk3_paths:
             self._pk3_paths.remove(path)
             self._cfg["pk3s"]=self._pk3_paths if self._remember.get() else []
-            self._save_config()
+            self._save_config(); self._paks_changed()
             n=len(self._pk3_paths)
             head=os.path.basename(self._pk3_paths[0]) if n else ""
             self._pk3_label.configure(text=(head+(f"  +{n-1} more" if n>1 else "")+"  /  models") if n else "No .pk3 loaded")
@@ -3475,8 +3494,33 @@ class App(tk.Tk):
             filetypes=[("MOHAA pak","*.pk3"),("Zip","*.zip"),("All files","*.*")])
         if ps: self._add_pk3s(list(ps))
 
+    # ------------------------------------------------- paks shared with the other program
+    def _paks_watch(self):
+        """Note the shared list's time now, and look again whenever this window gets the
+        focus: a change made in the other program meanwhile is taken up here."""
+        try: self._paks_seen=os.path.getmtime(PAKS_SHARED)
+        except OSError: self._paks_seen=None
+        self.bind("<FocusIn>",self._paks_follow,add="+")
+    def _paks_changed(self):
+        """This program's paks changed: write the shared list for the other one."""
+        write_shared_paks(self._pk3_paths)
+        try: self._paks_seen=os.path.getmtime(PAKS_SHARED)
+        except OSError: self._paks_seen=None
+    def _paks_follow(self,_e=None):
+        try: t=os.path.getmtime(PAKS_SHARED)
+        except OSError: return
+        if t==self._paks_seen: return
+        self._paks_seen=t
+        ps=read_shared_paks()
+        if ps is None: return
+        ps=[p for p in ps if os.path.exists(p)]
+        if ps==self._pk3_paths: return
+        self._log_line("The paks were changed in the other viewer; loading the same ones here","dim")
+        if not ps: self._clear_pk3s(); return
+        self._pk3_paths=[]; self._add_pk3s(ps)
+
     def _clear_pk3s(self):
-        self._pk3_paths=[]; self._cfg["pk3s"]=[]; self._save_config()
+        self._pk3_paths=[]; self._cfg["pk3s"]=[]; self._save_config(); self._paks_changed()
         self._tree.delete(*self._tree.get_children()); self._tree_entry.clear(); self._all_files=[]
         self._pk3_label.configure(text="No .pk3 loaded")
         self._vfs=None; self._SH=None; self._TI=None; self._ED=None; self._tex_ready=False
@@ -3491,7 +3535,7 @@ class App(tk.Tk):
             if path not in self._pk3_paths: self._pk3_paths.append(path); added+=1
         if not added and paths: return
         self._cfg["pk3s"]=self._pk3_paths if self._remember.get() else []
-        self._cfg.pop("pk3",None); self._save_config()
+        self._cfg.pop("pk3",None); self._save_config(); self._paks_changed()
         n=len(self._pk3_paths)
         head=os.path.basename(self._pk3_paths[0]) if n else ""
         self._pk3_label.configure(text=(head+(f"  +{n-1} more" if n>1 else "")+"  /  models") if n else "No .pk3 loaded")

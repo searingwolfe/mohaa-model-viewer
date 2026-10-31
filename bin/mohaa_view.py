@@ -1436,20 +1436,32 @@ def _parse_frame_cmds(sect):
         i=j+1
     return out
 
-def parse_tik_animations(text):
+def parse_tik_animations(text, every=False):
     """Parse the .tik animations{} section into
     [{"name": alias, "file": skc, "flags": [...], "client": [cmd], "server": [cmd]}, ...].
 
     Each entry is `alias filename [flags...]` (TIKI_ParseAnimations, tiki/tiki_parse.cpp:397;
     flags per TIKI_ParseAnimationFlags :230-268), optionally followed by a
     `{ client{...} server{...} }` block (TIKI_ParseAnimationCommands :192-226). $mapspec
-    sub-sections are skipped; comments are stripped first."""
+    sub-sections are skipped; comments are stripped first. Only the first animations{}
+    section unless every: TIKI_ParseFile parses each one it meets, and an $include'd .tik
+    (new_generic_human.tik, the dialogue .tiks) brings its own; the map builder reads them
+    all to find a character's idle."""
     if not text: return []
     t=_strip_tik_comments(text)
-    ma=re.search(r'\banimations\b\s*\{', t)
-    if not ma: return []
-    body,_=_brace_block(t, ma.end()-1)
-    out=[]; i=0; n=len(body)
+    out=[]; pos=0
+    while True:
+        ma=re.compile(r'\banimations\b\s*\{').search(t, pos)
+        if not ma: break
+        body,end=_brace_block(t, ma.end()-1)
+        _parse_anim_body(body, out)
+        if not every: break
+        pos=end+1
+    return out
+
+def _parse_anim_body(body, out):
+    """The entries of one animations{} section, appended to out."""
+    i=0; n=len(body)
     while i<n:
         while i<n and body[i] in " \t\r\n": i+=1
         if i>=n: break
@@ -1480,7 +1492,6 @@ def parse_tik_animations(text):
             out.append(entry)
         else:
             i=j+1
-    return out
 
 def _surf_nodraw_ops(cmds):
     """Every `surface <name> <+/-nodraw ...>` command in a parsed frame-command list, as
@@ -2486,7 +2497,7 @@ ANIM_PRELOAD_MAX=150
 # Page format revision, baked into each HTML as <!--mohaa-viewer-rev:N-->. Bump it when
 # the page gains features a cached HTML must pick up, and raise VIEWER_REV_REQUIRED in
 # mohaa_launcher.py to match so older pages are rebuilt. History: docs/CHANGELOG.md.
-VIEWER_REV=76
+VIEWER_REV=78
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!--mohaa-viewer-rev:__REV__-->
@@ -2538,6 +2549,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
  .amHead{display:flex;align-items:center;gap:6px;padding:3px 6px 5px 6px;color:var(--dim);
    font-size:11px;border-bottom:1px solid var(--line);margin-bottom:4px}
  .amHead .amPathTxt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .amHead .amReset{padding:1px 8px;font-size:11px}
  .amHead .amCnt{color:var(--dim)}
  .amUp{padding:2px 7px;font-size:11px;background:var(--btn);color:var(--txt);
    border:1px solid var(--line);border-radius:4px;cursor:pointer;white-space:nowrap;
@@ -5220,8 +5232,10 @@ const CVAR_ROWS=[
  {n:'cg_showtempmodels',v:1,need:'fx',d:'tempmodels drawn',
   t:'Each frame, TC:N, the number of tempmodels drawn (CG_AddTempModels): every particle but the volumetric smoke'},
  {n:'vss_showsources',v:1,need:'vss',d:'smoke sources',
-  t:'Each volumetric smoke source marked with a ring its radius wide, where the game draws the sprite VSSSource.spr'},
- {n:'vss_showsources',v:2,need:'vss',d:'and how many',t:'The rings of 1, and each frame a line VSS Sources In Use: N'}];
+  t:'Each volumetric smoke source marked with a ring its radius wide, where the game draws the sprite VSSSource.spr',
+  ng:'This cvar comes from OpenMoHAA: it doesn\'t exist in the original Allied Assault 1.11 game'},
+ {n:'vss_showsources',v:2,need:'vss',d:'and how many',t:'The rings of 1, and each frame a line VSS Sources In Use: N',
+  ng:'This cvar comes from OpenMoHAA: it doesn\'t exist in the original Allied Assault 1.11 game'}];
 const CVAR_NAMES={};for(const k in CVAR_DEFAULTS)CVAR_NAMES[k.toLowerCase()]=k;
 // each row's group header, for the filter
 {let g=null;for(const r of CVAR_ROWS){if(r.h)g=r;else r.grp=g;}}
@@ -5248,6 +5262,11 @@ function cvarClamp(n,v){
   if(row)return Math.max(row.num[0],Math.min(row.num[1],row.f?v:Math.round(v)));
   const lim=CVAR_RANGE[n];if(lim)return Math.max(lim[0],Math.min(lim[1],Math.round(v)));
   return v?1:0;
+}
+// the game cvars list's Reset button: every cvar that is set goes back to its default
+function resetCvars(){
+  const keys=cvarsSet();if(!keys.length)return;
+  for(const k of keys)setCvar(k,CVAR_DEFAULTS[k]);
 }
 function cvarsSet(){return Object.keys(CVAR_DEFAULTS).filter(k=>String(CVARS[k])!==String(CVAR_DEFAULTS[k]));}
 function cvarSave(){const o={};for(const k of cvarsSet())o[k]=CVARS[k];
@@ -5337,9 +5356,10 @@ function cvarMenuOpen(){
   document.body.appendChild(cvBack);
   cvEl=document.createElement('div');cvEl.className='amPanel';cvEl.id='cvPanel';
   cvEl.style.cssText='position:fixed;z-index:71';
-  cvEl.innerHTML='<div class="amHead"><span class="amPathTxt">game cvars</span><span class="amCnt" id="cvHeadCnt"></span></div>'+
+  cvEl.innerHTML='<div class="amHead"><span class="amPathTxt">game cvars</span><span class="amCnt" id="cvHeadCnt"></span><button class="amReset" id="cvReset" title="Set every game cvar back to its default">Reset</button></div>'+
     '<input class="amSearch" id="cvSearch" type="text" spellcheck="false" autocomplete="off" placeholder="filter, or a cvar and value then Enter…">'+
     '<div class="amBody" id="cvBody"></div><div class="amNote" id="cvWhere"></div>';
+  cvEl.querySelector('#cvReset').onclick=ev=>{ev.stopPropagation();resetCvars();};
   const se=cvEl.querySelector('#cvSearch');
   se.oninput=()=>{cvMsg='';cvarMenuRender();};
   // keep the focus in the filter box while rows are clicked (a row's mousedown would take
@@ -5361,7 +5381,7 @@ function cvarMenuRender(){
     d.innerHTML='<span class="arw">'+(box?'#':(on?'✓':''))+'</span><span class="lbl">'+cvEsc(r.n+(box?'':' '+r.v))+'</span>'+
       (box?'<input type="number" min="'+r.num[0]+'" max="'+r.num[1]+'" step="'+(r.step||1)+'" data-cvar="'+r.n+'" value="'+cvEsc(CVARS[r.n])+'">':'')+
       '<span class="cnt">'+cvEsc(r.d)+'</span>';
-    d.title=r.t+(why?'\n\n'+why:'')+(box?'':'\n\nClick to '+(on?'set it back to '+CVAR_DEFAULTS[r.n]:'set it')+'.');
+    d.title=r.t+(r.ng?'\n\n'+r.ng:'')+(why?'\n\n'+why:'')+(box?'':'\n\nClick to '+(on?'set it back to '+CVAR_DEFAULTS[r.n]:'set it')+'.');
     d.onclick=ev=>{if(ev.target.tagName==='INPUT')return;ev.stopPropagation();cvarRowClick(r);};
     if(box){const i=d.querySelector('input');i.onchange=()=>setCvar(r.n,i.value);}
     bd.appendChild(d);
@@ -5370,6 +5390,7 @@ function cvarMenuRender(){
     d.textContent='No cvar in this list matches that. Enter tries it as a command.';bd.appendChild(d);}
   const on=cvarsSet();
   cvEl.querySelector('#cvHeadCnt').textContent=on.length?on.length+' set':'all at default';
+  cvEl.querySelector('#cvReset').disabled=!on.length;
   cvarWhereRender();
   bd.scrollTop=sv;
 }
@@ -7256,9 +7277,10 @@ animMenu.onclick=(ev)=>{if(!amEl||!amEl.contains(ev.target))amClose();};
 window.addEventListener('resize',()=>{amClose();
   try{if(attBrowseEl)attBrowseClose();}catch(e){}
   try{if(attBoneEl)attBoneClose();}catch(e){}
-  // The surfaces list is meant to stay open, so a resize re-anchors it instead of closing it
-  // (mnFit re-clamps the height).
-  try{if(surfEl)surfMenuPlace();}catch(e){}});
+  // every popup closes when the window changes size (maximize, restore, a drag of its
+  // edge), so none is left stranded away from its button
+  try{if(surfEl)surfMenuClose();}catch(e){}
+  try{if(cvEl)cvarMenuClose();}catch(e){}});
 // Scroll doesn't bubble, so listen in the capture phase to catch the right-hand panel
 // scrolling: menus are positioned against their button and would otherwise be stranded.
 // The containment test keeps a menu's own list scrolling from closing it. ev.target is the

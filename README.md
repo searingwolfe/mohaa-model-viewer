@@ -9,7 +9,7 @@ self-contained HTML pages that open in the launcher's embedded 3D pane or in any
   and Milkshape 3D can't show.
 * **MOHAA Map Viewer**, the `.bsp` viewer, opens any compiled `.bsp`, turns it back into
   `.map` source and shows the whole map textured and lit like the game, or opens a `.map`
-  directly: a modern, view-only stand-in for MOHRadiant.
+  (or MOHRadiant's `.bak` backup) directly: a modern, view-only stand-in for MOHRadiant.
 
 <img src="screenshots/src1.png" alt="Model Viewer" width="49%"> <img src="screenshots/map1.jpg" alt="Map Viewer" width="49%">
 
@@ -49,7 +49,7 @@ Extract the `mohaa-model-viewer-main` folder anywhere on your PC.
 * Start a viewer with its RUN `.bat`, or drag a file onto the `.bat` to open that file
 straight away:
   * **`RUN -- Medal of Honor Model Viewer.bat`** for models (`.skd` / `.tik`);
-  * **`RUN -- Medal of Honor Map Viewer.bat`** for maps (`.bsp` / `.map`).
+  * **`RUN -- Medal of Honor Map Viewer.bat`** for maps (`.bsp` / `.map` / `.bak`).
 
   Before opening its launcher, each one:
   1. looks for **Python 3.8 or newer with tkinter**. If there isn't one, it asks whether
@@ -207,9 +207,9 @@ opened in a plain browser shows everything already built into it.
 A `.map` source opens directly. It's a modern, view-only stand-in for MOHRadiant: nothing
 is ever written back to a map.
 
-Start it with **`RUN -- Medal of Honor Map Viewer.bat`** (or drag a `.bsp` / `.map`
+Start it with **`RUN -- Medal of Honor Map Viewer.bat`** (or drag a `.bsp` / `.map` / `.bak`
 onto it), add your `.pk3` paks, and open any map from the `maps/` tree (`dm`, `obj`, the
-single-player levels), or a loose `.bsp` / `.map` from disk with File → `Open File...`.
+single-player levels), or a loose `.bsp` / `.map` / `.bak` from disk with File → `Open File...`.
 
 ## Why this exists
 
@@ -228,9 +228,13 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
   actually draws, curved patches, terrain (with its cut-away holes), entities and static
   models. The `.map` is saved next to the page; a `.map` of your own next to a `.bsp` is
   never overwritten.
+* **`.bak`** (MOHRadiant's previous save) opens like the `.map` or `.bsp` it holds; what it
+  writes has `_bak` in its name, so it never replaces the real map's page or decompile.
 * Right-click a `.bsp` → **Decompile to .map only**, or decompile and open the `.map` in
   your text editor. A map's `.scr` scripts are in the tree too: double-click one to open
   it in your text editor.
+* A page is rebuilt by itself when a loose file it was built from changes: the map
+  opened from disk, or its `.scr`, `.dcl`, `.lin` or `.pth`.
 * Select several maps, or right-click a folder, to build them in one batch.
 
 **Seeing the map**
@@ -239,10 +243,34 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
   models, and every entity, with point entities drawn the way MOHRadiant draws them
   (path nodes coloured by their targetname and spawnflags, facing arrows, stand-in cubes).
 * **Lit like the game:** a `.bsp` opens with its own lightmaps, vertex light, baked
-  static-prop light, light-grid model colours and sky box, so you see what a player
-  sees. **Full Brightness** (`B`) switches to MOHRadiant's flat, fully bright look.
-  The sky is drawn behind everything, as in game; **Simple Sky** (`K`) shows
-  MOHRadiant's solid, tiled sky brushes instead.
+  static-prop light, light-grid model colours and sky box (with its moving cloud
+  layers), so you see what a player sees. **Full Brightness** (`B`) switches to
+  MOHRadiant's flat, fully bright look. The sky is drawn behind everything, as in game;
+  **Simple Sky** (`K`) shows MOHRadiant's solid, tiled sky brushes instead, and the
+  **Sun flare** (`J`) is drawn the way the game draws it.
+* **Lights off** (`0`) turns every light off, or just the selected ones, and **Sun
+  light** (`-`) takes the sun and sky out of the baked light, so you can see what each
+  light gives the map.
+* **Weather** (`Y`): the map's rain and snow, made the way the game makes it in its Rain
+  (`func_rain`) brushes, beam limit and all, with every setting in the game cvars (speed,
+  size, slant, density, shader, the client's frame rate, Allied Assault 1.11 or OpenMoHAA
+  behaviour) and presets (`cg_weather snow`, `rain`, `blizzard` ...). `cg_thunder` adds the
+  lightning flashes of the game's weather script, and the trees' leaves sway as in game
+  (`r_static_shadermultiplier1` for how far).
+* **Decals** (`=`): the map's permanent `.dcl` decals (signs, cracks, numbers), lit as
+  the game draws them.
+* **Leak trail** (`P`): when a map leaks, the compiler's `.lin` trail is drawn through
+  walls from the hole to the entity the void reaches, and its card takes you to both.
+* **Level script entities** (Show → Script ents, `Ctrl+E`): what the map's `.scr` (and
+  the map scripts it runs) spawns: waypoints and their `target` paths (set in loops
+  too), script models and origins, actors, placed where its lines say, with the threads it
+  runs read for the entity they run on (a bipod spawned under each gun). The map's stats line opens the list, with
+  its `setcvar` and `$world` lines. Scripts are found as the game finds them: a loose
+  `main/maps/<map>.scr` before the paks.
+* **Open door** (`O`) opens and closes doors as the game does.
+* **Game cvars** (`` ` ``): the game's debugging cvars, working in the page:
+  `r_showtris`, `r_farplane`, `ai_showroutes` (from the map's `.pth`), `sv_showentnums`,
+  `sv_showbboxes`, `g_entinfo`, `r_lightmap` and more; Reset at the top of the list sets them all back.
 * **MOHRadiant-style filters** (`Alt+1` … `Alt+0`, `Ctrl+D / H / M / R / T / P / K`) for
   caulk, clips, triggers, hints, AI nodes, lights, details, terrain, sky and more, with
   **In-game look** and **Editor look** presets, plus setsize boxes, target arrows,
@@ -263,14 +291,13 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
   (a node's `target` chain, before and after it), and `Ctrl+Shift+click` shows a face's
   texture.
 * **Find** any class, targetname, key or texture (`Ctrl+F`), or browse every class and
-  texture the map uses.
+  texture the map uses; Shift+click a green (selected) row to deselect just that row.
 
 It uses the same Python and packages as the Model Viewer, and both can be open at once.
 Press `H` in the viewer or `F1` in the launcher for every shortcut.
 
-**Planned:** reading a map's other files too: its `.pth` (AI path data) and `.min` files,
-and its `.scr` level scripts, so the models and changes a script adds at run time can be
-shown in the map.
+**Planned:** following more of what a level script does as it runs (moving and removing
+the map's own entities).
 
 ## Map Viewer screenshots
 
@@ -357,7 +384,9 @@ the [development workflow](docs/changelog/development-workflow.md),
 [engine notes](docs/changelog/engine-notes.md), a reference of every
 [emitter command](docs/changelog/emitter-commands.md) the Model Viewer supports, and
 the [Map Viewer notes](docs/changelog/map-viewer.md): the decompiler, the page, the
-game's lighting, the cameras and known limits. The source code cites the exact
+game's lighting, the cameras and known limits, with notes on
+[doors](docs/changelog/doors-notes.md) and the
+[game cvars](docs/changelog/game-cvars-candidates.md). The source code cites the exact
 OpenMoHAA files and lines it follows.
 
 # Contact & Credits

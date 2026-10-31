@@ -1,6 +1,7 @@
 # Map Viewer
 
-MOHAA Map Viewer opens a compiled `.bsp` or a `.map` source and shows the whole map:
+MOHAA Map Viewer opens a compiled `.bsp`, a `.map` source or MOHRadiant's `.bak` backup
+and shows the whole map:
 textured brushes, curved patches, LOD terrain, placed and static models, and every
 entity, with MOHRadiant's filters and camera keys. It is a viewer only; nothing is ever
 written back to a map. Its purpose is finding things: any entity, trigger, node or brush,
@@ -14,9 +15,9 @@ run at once.
 
 | Path | Role |
 |---|---|
-| `RUN -- Medal of Honor Map Viewer.bat` | Windows entry point. Same checks as the Model Viewer's `.bat` (Python 3.8+ with tkinter, Pillow, the embedded-pane packages, WebView2) and the same installer, plus the map viewer's own scripts. A `.bsp` / `.map` dropped on it is opened directly. |
+| `RUN -- Medal of Honor Map Viewer.bat` | Windows entry point. Same checks as the Model Viewer's `.bat` (Python 3.8+ with tkinter, Pillow, the embedded-pane packages, WebView2) and the same installer, plus the map viewer's own scripts. A `.bsp` / `.map` / `.bak` dropped on it is opened directly. |
 | `bin/mohaa_map_launcher.py` | The launcher. `MapApp` subclasses `mohaa_launcher.App` and changes only what differs for maps: the `maps/` tree, opening and building, the map details panel, the map options in the menus, the privacy notice's wording (`_PRIVACY_SWAPS`), and its config / log / output names. What both programs share (the updater, the WebView2 folder, `PRIVACY_TEXT`, `VERSION`) stays in `mohaa_launcher.py`. |
-| `bin/mohaa_map_view.py` | Map builder. Decompiles a `.bsp`, scans the `.map`, resolves textures through the shaders, builds the placed models, collects the entity definitions and writes `<stem>_bsp_view.html` / `<stem>_map_view.html`. |
+| `bin/mohaa_map_view.py` | Map builder. Decompiles a `.bsp`, scans the `.map`, resolves textures through the shaders, builds the placed models, collects the entity definitions and writes `<stem>_bsp_view.html` / `<stem>_map_view.html` (`<stem>_bak_view.html` for a `.bak`). |
 | `bin/mohaa_map_page.py` | The viewer page template (`HTML_TEMPLATE`): HTML, CSS and the WebGL2 viewer. |
 | `bin/mohaa_bsp.py` | `.bsp` reader and decompiler; also reads the BSP tree and vis data, tessellates curved patches as the renderer does, and reads the game's `.pth` AI path files (for the game cvars). It also runs on its own, `python mohaa_bsp.py <map.bsp> [out.map]`, but without the paks it can't read texture sizes and assumes 256 x 256, so textures of other sizes get the wrong scale; the launcher's decompile uses the real sizes. |
 | `bin/mohaa_entdefs.py` | Entity definitions: editor colour, box, spawnflag names and description per class, read from the `/*QUAKED*/` headers in the paks, with a built-in table generated from OpenMoHAA's game code as the fallback. |
@@ -42,7 +43,19 @@ run at once.
    every brush entity, the game's lighting (below) and what `r_showtris` and
    `r_shownormals` need (the BSP tree, leafs, vis lump, the lines of every surface the
    game draws and the normal at each of its points, and each model's vertex normals), and
-   the map's `.pth` path file when there is one (Game cvars, below).
+   the map's `.pth` path file when there is one (Game cvars, below), its `.dcl`
+   decals, its `.lin` leak trail (Decals and leak trail, below) and what its level
+   script spawns and sets (Level script, below).
+   - The page lists the loose files it was built from with their times (`deps` in its
+     summary block: the map opened from disk, the `.scr`, `.dcl`, `.lin` and `.pth` beside
+     it, the loose scripts read and where the map's script could appear in the paks'
+     folder). The launcher rebuilds it instead of reusing it when one of them changed,
+     appeared or went.
+   - A `.bak` (MOHRadiant's previous save of the `.map`, or a backed-up `.bsp`) opens
+     as what its first bytes say it holds. What it writes has `_bak` in its name:
+     `<stem>_bak_view.html`, and for a `.bsp` backup `<stem>_bak.map`, so it never
+     takes the place of the real map's page or decompile. Its side files (`.dcl`,
+     `.lin`, `.pth`) are the map's own: `maps/<stem>.*` in the paks, else beside it.
 5. **Show.** Same as the Model Viewer: the embedded pane with `#embed&theme=...`, or the
    default browser. The page sends `mohaa-close` when Esc closes the map.
 
@@ -111,7 +124,11 @@ run at once.
   MOHRadiant's look goes by them as written too (`edKey`); so does the decompiler, which
   reads what the map compiler wrote.
 - **Drawing.** WebGL2. One index buffer holds every face, grouped per material and
-  rebuilt when the filters change. Models are instanced; point entities without a model
+  rebuilt when the filters change. Models are instanced, each posed at frame 0 of its
+  `idle` animation (else its first), found in any of the `.tik`'s animations sections,
+  the ones its `$include`s bring too (a character's idle is in new_generic_human.tik);
+  heads and hands are drawn as the game draws them (MOHRadiant draws only the body).
+  Point entities without a model
   are boxes coloured as MOHRadiant colours them (below). With Full Brightness on (and
   always for a `.map`), Radiant-style shading darkens faces by their facing (0.9 x^2 +
   0.8 y^2 + 1.0 z^2 on the normal); with it off, a `.bsp` is drawn with the game's
@@ -210,7 +227,8 @@ run at once.
 - **Picking** renders face / entity ids into a 1-pixel target around the cursor, then
   finds the exact point on the plane or triangle under it. What the mouse is over gets an
   outline in the accent colour: a brush's edges (all of a brush entity's brushes), or
-  for a model or marker its box, as the selection draws it in red. The game's sky is
+  for a model or marker its box, as the selection draws it in red; both are drawn after
+  the Wire edges, so with Wire on the hovered edges show green. The game's sky is
   picked only where nothing else is under the cursor, as it is seen; a second pass then
   finds the nearest sky brush there.
 - **Hide** (Backspace or the Hide button) and **Show all** (Shift+H) go on a stack that
@@ -227,7 +245,9 @@ run at once.
   or texture with some of its users hidden yellow with the hidden count. Shift+click a
   row's coloured square to hide that entity or the whole class (again: show them; on the
   Hide stack, so Ctrl+Z undoes it); a Show button's hiding stays, and the message names
-  the button.
+  the button. Shift+click a green row (in any of the four tabs) to deselect just that
+  entity, class or texture and keep the rest selected (`deselectRow`); Shift+click a row
+  that isn't green adds it to the selection.
   - **Textures**: a click selects everything shown that uses the texture (`texUse`): each
     world brush with a face in it, each brush entity, and each entity whose model draws it,
     such as a static prop's (`armchairposh` on mohdm1 is only on its nine armchairs).
@@ -239,7 +259,10 @@ run at once.
     targetname, else `entity` and its number, with the number on the right when the name
     doesn't give it. The world (1022) isn't listed, nor an entity that removes itself as it
     spawns (misc_model, func_remove), whose number stays unused. A click selects the entity
-    and flies there; the tooltip has its class, numbers and origin.
+    and flies there; the tooltip has its class, numbers and origin. Above them, greyed and
+    not clickable, are the client slots `entity 0` to `sv_maxclients - 1`: entity 0's
+    tooltip says "reserved for $player, or $player[1] in multiplayer", the others
+    "reserved for $player[N] in multiplayer".
 - **Entity counts.** Under the map's stats: how many entities are real (the game spawns
   them as entities, each with an entity number; MOHAA has 1024 slots), simple (path
   nodes, player starts, waypoints, vehicle points, grenade hints, AI spawn points, which
@@ -338,15 +361,17 @@ run at once.
   `KeyMapWindow` in mohaa_launcher.py.
 - **Game cvars** (Display > "game cvars", below backdrop, or `` ` ``): the game's
   debugging cvars that a map can show, doing in the page what they do in game, in groups
-  (What the renderer draws, Lighting, Entities, AI paths, The game the entities spawn
-  for). A click on a row sets it (again: back to the game's default); the filter box is
+  (Render distance: farplane fog and culling, What the renderer draws, Lighting,
+  Entities, AI paths, The game the entities spawn for). A click on a row sets it (again: back to the game's default); the filter box is
   also the console (`r_showtris 2` then Enter, `r_farplane_color 1 .5 0` for a colour; a
   name alone tells its value and default). A row the map can't use is greyed out with the
   reason. The list's foot shows the camera's cluster and area, what is drawn from there
   (counted in every direction: the game also drops what is outside the view), and what
   each cvar that is set found; the cvars set are named beside the button and remembered
-  (`r_lockpvs` aside: it locks where the camera is). `CVAR_DEFAULTS` / `CVAR_ROWS` in the
-  page hold them.
+  (`r_lockpvs` aside: it locks where the camera is). The list's head counts them ("N set",
+  or "all at default") beside a Reset button that sets every one back to its default
+  (`resetCvars`, cg_weather first; the Model Viewer's list has the same button).
+  `CVAR_DEFAULTS` / `CVAR_ROWS` in the page hold them.
   - `r_showtris 1 / 2 / 3` (`.bsp` only) outlines what the renderer draws from the camera
     (`DrawTris`, `tr_shade.c`): 1 behind walls, 2 through them with axis crosses, 3 the
     crosses alone. The page walks the `.bsp`'s tree the way `tr_world.c` does: the
@@ -499,8 +524,222 @@ while lights are turned off (Lights off, below).
   - Not kept: a page always opens with every light on.
   - Greyed out on a `.map` page, which has no baked light (the tooltip says why), and on
     a `.bsp` without lightmaps or light entities.
+- **Sun light** (Display, `-`, on at first) takes the sun's and the sky's light out of the
+  same baked light when turned off, so open ground falls to what the lights and
+  `ambientlight` give it; rooms the sun doesn't reach stay as they are.
+  - The share left at a texel is the lights' still on, over all lights and the sun.
+  - What none of the traced light explains (sky light under eaves, in deep trenches) goes
+    with the sun. A texel keeps no more than twice what the lights still on could give
+    there without shadows.
+  - With every light off as well, only the ambient floor is left.
+  - It works with Lights off and Turn off / Turn on in any order. The first time costs
+    what the first Lights off does; after that it is only the relight.
+  - The sun flare (`J`) is separate. Not kept: a page always opens with the sun on.
+  - Greyed out where Lights off is, and on a map without sky faces or a sun colour in its
+    worldspawn (m6l3c, m6l3d).
 - **Sky** polygons are the `.bsp`'s own, drawn with the sky box as described under The
   page.
+
+## Decals and leak trail
+
+- **Decals** (Display, `=`, on at first) draws the map's permanent decals: signs,
+  cracks and numbers placed in MOHRadiant and saved in `maps/<stem>.dcl`, which the game
+  loads with the map (`R_LoadPermanentMarks`, renderergl1/tr_marks_permanent.c).
+  - The file is `dclHeader_t` ("DCL ", version 1 or 2, checksum, decal and fragment
+    counts; version 2 then the `.bsp`'s 32-byte map time), the decals (124 bytes each:
+    shader, origin, projection, radius, scales, rotation, colour, lighting), then the
+    fragments they were cut into (76 bytes: shader, fog number, decal, vertex count; then
+    24-byte `polyVert_t`s: xyz, st and the lit colour). The per-model and per-leaf
+    fragment lists after them aren't read.
+  - Each fragment is drawn as the game draws it: a fan of its vertices, its shader's
+    picture times the colour the file keeps (the decal shaders use `rgbGen vertex` and
+    `alphaGen vertex`), blended, pushed toward the camera (`polygonOffset`) and without
+    writing depth. With Full Brightness, or on a `.map` page, the colour is white and
+    only the alpha is kept. Lights off and Sun light don't change them.
+  - Not pickable: a click goes to the wall under the decal.
+  - The game skips a version 2 file whose map time isn't the `.bsp`'s (outside edit
+    mode); the viewer draws them anyway, as retail maps (version 1, no map time) have
+    them.
+  - Greyed out, with the reason in the tooltip, when there is no `.dcl` in the paks or
+    beside the file. m2l1: 22 decals in 25 fragments.
+- **Leak** (Display, `P`, on at first) draws the leak trail the compiler writes when the
+  map isn't sealed: `<stem>.lin`, one point a line. q3map's `LeakFile` starts at the
+  outside node and writes the middle of each portal on the shortest way in, then the
+  origin of the entity it reached. So the first point is at the opening the void comes
+  in through, and the last one is the entity.
+  - Drawn on the 2D overlay, so it shows through walls: a red line with a dark edge,
+    yellow dots at its points, a red ring at the hole ("leak: the hole is here") and a
+    yellow one at the entity (its class and number).
+  - Turning it on opens its card: the file, the point count and length, what a leak
+    means and how to fix it (patches, terrain and detail brushes never seal a map), the
+    hole and the entity (a link that selects it) with Go and Copy, and every point (up
+    to 200 listed; Copy all has them all). Go flies to a point looking along the trail
+    from the next point's side, so the camera isn't put inside a wall.
+  - Beside a `.map`, a `.lin` older than the `.map` is flagged: the map was saved after
+    the compile that leaked, so the hole may be sealed already. (Beside a `.bsp` the
+    dates say nothing: a leaking compile writes the `.bsp` after the `.lin`.)
+  - A leaking `.bsp` has no vis data, which the card notes when it applies.
+  - Greyed out when there is no `.lin`. NormandyBridge_V1: 3 points, from below the
+    terrain up to a `light`.
+- `.min` (the loading bar's resource list, written by `UI_EndLoad`) and `.vis` aren't
+  used.
+
+## Weather
+
+**Weather** (Display, `Y`; the game's `cg_rain`) makes the map's rain or snow as the
+client makes it (cgame/cg_nature.cpp `CG_Rain`, cg_beam.cpp), with the settings in the game
+cvars' Weather group (`drawWeather`, `wxRain`, `wxFrame` in the page).
+
+- **Where.** Only in the map's `func_rain` boxes (the editor's Rain brushes), and only those
+  the client has: a box in a cluster the camera's PVS sees (`gvSent`; every box on a `.map`
+  page). The box is its brush model's bounds. `cg_rain_wholemap 1` (not a game cvar) adds
+  the whole map's box, so a map without rain can be tried.
+- **Each client frame** (`com_maxfps` a second, the game's default 85, run on the page's
+  clock), each box cut to the square `rain_min_dist` round the viewer starts
+  `sqrt(width x depth) x density / 200` drops (at most 4096), at random places in that
+  square (those outside the circle skipped).
+  - Allied Assault 1.11 (`com_target_game 0`, the default): at the top of the box, living
+    as long as they take to fall to its bottom.
+  - Spearhead / Breakthrough 2.0 and OpenMoHAA (`com_target_game 1` / `2`): anywhere in the
+    box's height, at most 10 s.
+- **A drop** is a beam from its start to a point at the bottom of the box a random 0 to
+  `slant` over in x and in y (the same way, so the rain leans toward +x +y) plus the wind
+  (`vss_wind_x` 8, `vss_wind_y` 4), at `speed` plus a random 0 to `speed_vary`. It is drawn
+  as a streak `length` long and `2 x width` wide facing the camera sideways
+  (`CG_BuildRendererBeam_Fast`); the snow shaders turn it into a square facing the camera
+  (`deformVertexes autoSprite`). Drops go through roofs: nothing stops one before the
+  bottom of its box, as in game.
+- **MAX_BEAMS.** All of them share the client's 4096 beams; with none free a drop isn't
+  started. Slow snow from a high box fills them before the first flakes land, which gives
+  the clumps and gaps of the game. The list's foot counts the beams falling, the drops
+  started in the last second and those not started for want of a beam.
+- **Random numbers** are the game's: `rand()` (MSVC's) once a box a frame, then the
+  client's own `214013 x + 2531011` step on the 15-bit value, so the patterns it makes
+  are the game's too.
+- **Shaders.** One per box per frame: `cg_rain_shader`, or with `cg_rain_numshaders` N its
+  name (a digit it ends with dropped, as OpenMoHAA does) with a random 0 to N - 1 after it.
+  The game has `textures/rain` (a streak, added at .2) and `textures/snow0` to `snow11`
+  (flakes, added at .5; scripts/effects.shader); the build puts all of them in every page,
+  with each shader's `rgbGen constant`. An added shader fades to black in the fog.
+- **The map's settings** are the defaults of the cvars: what its script sets as
+  `level.rain_*` or with `setcvar "cg_rain_*"` (`LevelScript`: m6l1a's snow, m6l2a's), else
+  the client's (density 0, speed 2048, speed_vary 512, slant 50, length 90, min_dist 512,
+  width 1, textures/rain). A map that runs global/weather.scr (m5l1a, m5l1b) changes its
+  density as it plays (a storm cycle): the viewer starts at that script's middle setting
+  (width .4, min_dist 512, density 3, slant 50). They aren't kept for next time.
+- **cg_weather** sets all of them at once from weather.scr's presets: snow, snow_fast,
+  blizzard, hail, snow_original (the game's m6l1a snow), rain, drizzle, monsoon,
+  rain_original (the client's defaults), off, and `map` for the map's own. The game's own
+  console has no `cg_rain_*` cvars (OpenMoHAA reads only the level's settings); in the
+  viewer they stand for those settings, as weather.scr's cvars of these names do.
+  Drops already falling keep the shader, length and width they started with (as the
+  game's beams do); a change to those cvars or to cg_weather only shows on new drops.
+- `cg_rain_drawcoverage` draws the same boxes, cut to `cg_rain_min_dist`.
+- **Thunder** (`cg_thunder`, a game cvars row under `cg_rain`; not a game cvar, off at
+  first) is global/weather.scr's lightning without its sound (`thTick`): every
+  `level.thundertime` + `randomint(level.thundertime x 1.5)` seconds one of its three
+  flickers at the script's timings (flash 0.2 s, off 1 s, flash 0.1 s ...), then
+  1 + `randomfloat(2)` seconds. A flash is `r_fastsky 1`: no sky, the screen cleared to the
+  fog colour where the map has a farplane, else to 0.5 0.5 1 (`RB_BeginDrawingView`), with
+  the farplane colour 0.9 0.9 0.9; the map's `$weatherF` entities (m5l1a's 15 lit windows)
+  are hidden while thunder runs and shown in a flash. `level.thundertime` is 20 at first and
+  follows the storm (20, 8, 6, 4): the viewer takes the map script's, else 6 on a map that
+  runs global/weather.scr (its middle storm), else 20.
+- **Moving leaves.** A model surface whose shader has `deformVertexes wave` or `flap` (the
+  trees' leaves: `flap t 24 sin 0 3.5 0 0.2 1 0`) moves in the model shader by the game's
+  time, along its vertex normals (`RB_CalcDeformVertexes`, `RB_CalcFlapVertexes`, with the
+  engine's wave tables; a flap moves every vertex in step, as the engine does). A static
+  model has no entity, so its wave's base, amplitude, phase and frequency are scaled by
+  `r_static_shadermultiplier0` .. `3` (Weather group of the game cvars; the game's default
+  1); a model with an entity keeps its shader's. global/weather.scr sets
+  `r_static_shadermultiplier1` each second to `(raindensity + 1.5) / 2.5`: the viewer starts
+  it at 1.8 (its middle storm) on those maps. While a moving model is drawn the view is
+  redrawn 30 times a second. The build reads the deform into the texture entry (`dv`;
+  `INDEX_VERSION` 9). `r_static_shaderdata0` .. `3` only stand in for `fromEntity` values,
+  which no deform here uses.
+- No sounds and no splashes (the client's `RainTouch` is for temp models, not these
+  beams).
+
+## Level script
+
+The game runs `maps/<map>.scr` when the level loads. The viewer doesn't run it as the game
+does (no waits, no threads side by side, no events): the build walks it once, top to
+bottom (`LevelScript` in mohaa_map_view.py), keeping what it can work out without the
+game, and the page adds what it spawns.
+
+- **Which files.** As the game finds them: a loose file in the folder the paks are in
+  (`main/maps/<map>.scr`) before the paks. The file beside the one opened comes first
+  (`NormandyBridge_V1.bak` reads `NormandyBridge_V1.scr`). The map scripts it runs
+  (`exec`, `waitexec`, `thread`, `waitthread` with a `.scr` path, not `global/`) are read
+  too, up to 40 files.
+- **Spawned entities.** `spawn <class or model> [key value ...]` (ScriptThread's
+  `SpawnEntity`), with or without `local.x =` / `level.x =` in front. A model path
+  (`models/human/...`, `.tik`) gives the entity that model and the `.tik`'s path as its
+  class. The lines that follow give the same entity its `origin`, `angles`, `angle`,
+  `targetname`, `target`, `model`, `scale`, `setsize` or `spawnflags`, as
+  `<var>.origin = ( x y z )`, as the command form `<var> origin ( x y z )`, or through
+  its `$targetname` or `$( expression )` (`$("fhe" + local.q).target = ...`).
+- **The map's own entities**: a line setting the `target` of one of them (a map node
+  joined to the script's) changes that key in the page; its info card has a "Changed by
+  the level script" section. Other changes to the map's entities aren't followed.
+- **Control flow.** The script is read as a tree (`_parse`): `{ }` blocks, `for`,
+  `while`, `if` / `else`, `switch` (its cases read once), statements ending at a line
+  break, a `;` or a brace.
+  - A `for` or `while` runs as long as its condition can be worked out, up to 4096 turns
+    (`for (local.q = 1700; local.q <= 1715; local.q++)` runs 16 times with `local.q`
+    set), else once with its counter unknown, and what it changes is unknown after it. A
+    `while` whose condition nothing in it changes (`while (1)`, a wait loop) runs once.
+  - An `if` takes its branch when the condition is known; else both are read, and a
+    variable the two leave different is unknown after it. A condition with a call in it
+    (`getcvar(x)`) is unknown.
+  - Lines read inside a loop note the counters in the card (`// local.q = 1703`).
+  - A `while` with a `wait`, `waitframe` or `waittill` in it (respawn waves, watcher
+    threads) runs once: it goes by the game's clock.
+  - At most 400,000 statements are run in all, and one line spawns at most 1024
+    entities; the build log says so if a script hits the first.
+- **Threads.** Each file is split at its labels (`bipod local.exists local.origin
+  local.angles:`). A label run by name (`thread x`, `waitthread x`, `exec file.scr::x`,
+  with or without an entity in front: `$mg42 thread bipod 1`, `local.gun thread bipod`)
+  is read when it is run, with that entity as `self` (else the caller's own) and the
+  arguments in its parameters (`NIL` for those not given), so `self.origin`,
+  `self.angles`, `self != NULL`, `self.origin += ( 0 10 0 )` and `local.entity.origin`
+  work. A label run several times is read each time (a bipod under each gun). Labels
+  nothing runs by name are read once on their own, with `self` and their parameters
+  unknown. A thread doesn't run itself again (recursion), and calls nest at most 24 deep.
+  What a `thread` or `exec` (not `waitthread` / `waitexec`) does to `level.` variables
+  doesn't reach its caller: in game it runs beside it, later (a death thread lowering a
+  wave's counter would otherwise make the wave loop run on).
+- Entities a thread run several times spawns the same, in the same place, are drawn
+  once.
+- **Values** are worked out where they are plain: strings, numbers, vectors, arithmetic
+  (`+ - * / %`), comparisons, `&&`, `||`, `!`, `++`, `--`, `+=` and the like
+  (`"wp" + 1`, `$org.origin + ( 0 0 64 )`), `local.` / `level.` variables (a thread's own
+  `local.`s end at its label; `level.`s carry over), `$name` and `$(...)` as entities
+  (`NULL` when the map and the script have none of that name), and `$name.origin` /
+  `.angles` of a map or script entity. What only the running game knows (a thread's
+  parameters, `self`, `getcvar`, a random number) stays unknown.
+- **In the page** (`scriptEnts`): the entities with an origin are added after the map's
+  own (`MAP.nMap` is where the map's end), marked `C_SCRIPT` on top of their own kind, so
+  they are drawn, labelled, linked (a waypoint's `target` chain), found, listed and
+  selected like the map's. **Show → Script ents** (`Ctrl+E`) hides them all. Their info
+  card has a Level script section with the spawn line and the lines that placed it, and
+  any key it couldn't follow. They have no entity number (the game gives one as the
+  script runs), aren't counted in the map's real / simple / static counts, and aren't
+  `.pth` nodes or static props.
+- **The script card**: the map's stats line ("level script: N entities placed, R real
+  placed, M not, K setcvar", under the map's title; real ones are those the game gives an
+  entity number, not waypoints and other simple classes) opens it: the files read and
+  where, the placed entities by class (links), the ones not placed with their line and
+  why, the map entities whose target it sets, every `setcvar` (name, value, line; Copy
+  gives them as lines) and the `$world` lines (farplane and the like, listed once per
+  line, not applied).
+- Checked on retail m3l1a (70 of its 76 spawns placed, by `$name.origin` of the map's
+  spawn points; its fog lines in `if (getcvar(...) == "1") ... else ...` all listed), on
+  the waypoint chain `$("fhe" + local.q).target = $("fhe" + (local.q + 1))` in a `for`
+  loop (each waypoint gets its target, the last none), on 4000 waypoints in 250 such loops
+  (0.4 s), and a test script with an `info_waypoint` loop, script models, a
+  `script_origin` placed from another one, an actor and a spawn inside a `for` loop
+  (listed as not placed).
 
 ## Cameras
 
@@ -537,11 +776,13 @@ while lights are turned off (Lights off, below).
   copies its own the same way, `( pitch yaw roll )`, pitch and roll in -180..180 and yaw
   in 0..360. The page's own roll turns the other way to the game's (`camAxes` tilts the
   right axis up for a positive roll, `AngleVectors` down), so both swap its sign
-  (`camAngles`, `turnTo`).
+  (`camAngles`, `turnTo`). The camera line at the bottom of the view shows `roll` after
+  pitch only while the camera is tilted.
 - `V` switches cameras, `R` returns to the player start, `B` toggles Full Brightness,
-  `K` Simple Sky, `M` Simple models, `J` Sun flare, `0` Lights off, `L` opens the legend,
-  `` ` `` the game cvars list and `T` switches the theme. The
-  FOV slider runs from 60 to 150. Press `H` in the viewer for all of them (Keyboard
+  `K` Simple Sky, `M` Simple models, `J` Sun flare, `0` Lights off, `-` Sun light, `=`
+  Decals, `Y` Weather, `P` Leak trail, `Ctrl+E` Script ents, `L`
+  opens the legend, `` ` `` the game cvars list and `T` switches the theme. The FOV
+  slider runs from 60 to 150. Press `H` in the viewer for all of them (Keyboard
   shortcuts, above).
 
 ## Versions
@@ -556,7 +797,7 @@ while lights are turned off (Lights off, below).
 
 - Each shader shows one picture (above), sky clouds aside; its other stages (a second
   texture bundle, an added glow or highlight layer), `tcMod scroll` / `rotate` / `turb`,
-  animated maps and `deformVertexes` don't play.
+  animated maps and `deformVertexes` (but a model's `wave` and `flap`, below) don't play.
 - Lighting: dynamic lights (lamps switched by script, muzzle flashes) and the
   `alphaGen distFade` fade-out aren't drawn. Portal skies (`textures/common/skyportal`
   with a `script_skyorigin`) show the plain sky box; no retail Allied Assault map uses one.
@@ -580,14 +821,14 @@ while lights are turned off (Lights off, below).
   that share can take away is capped, so light the page doesn't trace (the sky under
   eaves and in shaded corners) stays. Texels whose light was clipped at full
   brightness (most sunlit ones) can't tell how much each light added, so near a light
-  outdoors turning it off takes away its share of the clipped value. There is no Sun
-  light switch.
+  outdoors turning it off takes away its share of the clipped value. The same goes for
+  Sun light: near a lamp outdoors, the lamp keeps only its share of a clipped texel.
 - Clouds: `tcMod turb` and the entity-driven tcMods, `animMap` frames after the first,
   and a second texture bundle aren't drawn; the noise waveform is a smooth stand-in for
   the engine's.
-- `.min`, `.dcl` and `.vis` files are listed in the tree but not opened yet; `.scr`
-  scripts open in the text editor. A map's `.pth` is read by its page (ai_showroutes),
-  not opened from the tree on its own.
+- `.min` and `.vis` files are listed in the tree but not used; `.scr` scripts open in the
+  text editor. A map's `.pth`, `.dcl` and `.lin` are read by its page (ai_showroutes,
+  Decals, Leak), not opened from the tree on their own.
 - Triangle soups in a `.bsp` (rare in MOHAA maps) are counted but not decompiled.
 - `r_showtris` and `r_shownormals` draw terrain at full detail (the game thins it out with
   distance, `ter_error` / `ter_maxlod`; it has no normals anyway) and models at full
@@ -604,6 +845,13 @@ while lights are turned off (Lights off, below).
   (`Entity::DisconnectPaths`, a cylinder trace), and `ai_showroutes` stops drawing those
   until the door starts closing. Locks, a door's `message` and its sounds aren't
   simulated, and a door that is blocked doesn't stop.
-- **Planned:** reading a map's other files: its `.min` file, and its `.scr` level
-  scripts, to show the models and changes a script adds at run time. More of the game's
+- Level script: entities are placed from its lines, not by running it, so a spawn whose
+  place comes from the running game (a thread's parameter, a loop, `self`) isn't drawn,
+  and what a script does to the map's own entities (moving them, removing them, `hide`)
+  isn't shown. `$world` settings are listed, not applied.
+- Weather: the drops are made at the page's frame rate when it can't keep up with
+  `com_maxfps` (at most a fifth of a second of client frames at once), and from the
+  camera's place rather than the player's feet (1.11 took the player's origin; across, it
+  is the same). Script-spawned `func_rain`s have no brush to give them a box.
+- **Planned:** following more of what a level script does as it runs. More of the game's
   debugging cvars, once checked in game.

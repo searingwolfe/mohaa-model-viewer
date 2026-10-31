@@ -124,10 +124,41 @@ beyond Python 3, Node.js and a headless browser.
        message with the names of the steps in flight and keeps the note. After a reload the first press only
        warns, a second within 6 s runs one step at a time (`LT.batch` 1), and the note is
        gone once it has finished.
+     - Sun light (`-`): off on mohdm1 takes the open ground down to the ambient light while
+       the rooms keep their lamps; on m4l3 the moonlight goes and the lamps' pools stay.
+       With Lights off too, only the floor is left. The sun back on with Lights off on
+       gives the Lights off picture; everything back on gives the page as it opened. The
+       button is greyed out on m6l3d (no sky faces) and on a `.map` page, and the Sky
+       filter doesn't change whether a map has a sun (`ltHasSky`).
      - The cap: with mohdm1's light 108 (200, at ( 1256 232 488 )) off, only a few dozen
        texels more than 512 units away darken by more than 16 levels, and all lights off
        leaves its sunny courtyards without hard black patches in the buildings' shade.
        Read the relit pages back from `LT.lmOut` and compare with `B.lmTex`.
+   - Decals (`=`) on m2l1: `DCL.n` 147 vertices in 8 textures, every texture loaded
+     (`GLT`), the barracks' letters and the eagle poster drawn on their walls, white with
+     Full Brightness, gone with `=`. The button is greyed out (and not on) on a map
+     without a `.dcl`.
+   - Leak (`P`) on NormandyBridge_V1 (`.map` and `.bak`): the red line from below the
+     terrain to the `light` (entity 1), the card's entity link selects it and the hole's
+     Go flies along the trail. A `.bak` holding a `.bsp` (a copy of m2l1.bsp) builds
+     `m2l1_bak.map` and `m2l1_bak_view.html`, with the paks' m2l1.dcl.
+   - Level script: a map with a test `.scr` beside it (spawn lines with literal origins,
+     `local.x.origin = $name.origin + ( 0 64 0 )`, an `exec` of a second map script, a
+     spawn in a `for` loop): the placed ones are drawn with their links, the loop's is
+     listed as not placed, `Ctrl+E` hides them, the stats line opens the Level script card,
+     and an entity's card shows its script lines. Retail m3l1a: 70 of 76 placed, 20 `$world` lines. A `for` loop of `$("name" + local.q).target = $("name" + (local.q + 1))` links every waypoint but the last; a map entity's `.target` set by script shows on its card. A `$gun thread bipod` / `local.g thread bipod 1` / `thread bipod NULL ( x y z ) ( p y r )` test puts a bipod under each gun (`self`) and at the given place (parameters). Reading every retail map script takes about a second with none stopped at the statement limit. Editing
+     the `.scr` and opening the map again in the launcher rebuilds the page.
+   - Weather on m6l1a (snow0 to snow11 at density .2, from 4 of its 30 func_rain boxes at
+     the start) and m5l1a (rain, global/weather.scr's density 3): the list's foot counts
+     the beams; `cg_weather snow` with `cg_rain_wholemap 1` on a map without func_rain
+     reaches 4096 beams and counts the drops not started; beams put in front of the camera
+     draw as flakes (autoSprite) and faint streaks (textures/rain at .2). Screenshots of a
+     page with falling weather need the frame loop stopped first (`wxActive=()=>false`).
+   - Thunder: `cg_thunder 1` on m5l1a hides its 15 `$weatherF` windows; with `THU.next` set
+     to now the flickers follow weather.scr's patterns (a fake clock through `thTick` gives
+     0.1 / 0.1 / 0.2 / 0.5 / 0.1 s for its third), and a flash draws no sky (white with the
+     map's farplane). Leaves: on m6l1a the static trees' shaders carry `dv` and two frames
+     2.5 s apart with `r_static_shadermultiplier1 4` differ.
    - Open door on a double door from both sides (both leaves swing away from the camera),
      an `alwaysaway 0` door (the same way from both sides), a sliding `func_door` and a
      TOGGLE door; it closes itself after `wait`; with `r_showtris 1` the room behind a

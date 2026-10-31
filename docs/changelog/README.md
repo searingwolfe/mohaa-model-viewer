@@ -11,7 +11,9 @@ architecture, and the engine details that took the longest to get right.
 | [engine-notes.md](engine-notes.md) | Format, skeleton, level of detail and hit location, TikiScript, shader and WebView2 findings |
 | [emitter-commands.md](emitter-commands.md) | Every `.tik` emitter keyword the Model Viewer understands and what it does |
 | [sprite-roll-rules.md](sprite-roll-rules.md) | When sprites roll in the engine, how `randomroll` behaves, and how that was verified |
-| [map-viewer.md](map-viewer.md) | The Map Viewer: files, how a map is built, the `.bsp` decompiler, the page, the game's lighting, cameras, versions and known limits |
+| [map-viewer.md](map-viewer.md) | The Map Viewer: files, how a map is built, the `.bsp` decompiler, the page, the game's lighting, decals and the leak trail, the level script, cameras, versions and known limits |
+| [doors-notes.md](doors-notes.md) | How the Map Viewer's Open door follows the game's doors: keys, rotating and sliding doors, linking, areas |
+| [game-cvars-candidates.md](game-cvars-candidates.md) | The game's debugging cvars: which both viewers show, what each does in game, and the ones still open |
 
 The source files carry the exact OpenMOHAA file and line references beside the code that
 depends on them; these notes summarise and link the bigger picture.

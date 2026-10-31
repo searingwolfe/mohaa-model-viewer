@@ -19,12 +19,16 @@
 #      editor pictures the legend shows
 #    - for a .bsp, the exact bounding box the game uses for each brush entity, and
 #      the game's lighting: lightmaps, vertex light, static-prop light, light grid
+#    - the map's permanent decals (.dcl) and the compiler's leak trail (.lin)
+#
+#  A .bak (MOHRadiant's previous save) opens as the .map or .bsp it holds; what it
+#  writes has "_bak" in its name.
 #
 #  Everything is packed into one self-contained .html file (see mohaa_map_page.py
 #  for the page itself).
 #
 #  Command line:
-#    python mohaa_map_view.py <map.bsp|map.map> [--pak=<file.pk3> ...] [--paks=<list.txt>]
+#    python mohaa_map_view.py <map.bsp|map.map|map.bak> [--pak=<file.pk3> ...] [--paks=<list.txt>]
 #           [--vfs=<path inside the paks>] [--outdir=<folder>] [--cache=<folder>]
 #           [--texsize=256] [--theme=light|dark] [--no-models] [--decompile-only] [--no-open]
 # ==============================================================================
@@ -48,10 +52,10 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 32
+MAP_VIEWER_REV = 48
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
-INDEX_VERSION = 8
+INDEX_VERSION = 9
 
 # Default longest side of the textures embedded in the page. 256 keeps a large map's
 # page around 10-20 MB; the launcher can ask for 128 or 512.
@@ -65,7 +69,7 @@ MODELS_MAX_TOTAL_VERTS = 2500000   # all models together
 # Part of every texture cache key; raise it when encode_image's output changes.
 TEX_CACHE_FORMAT = 2
 
-USAGE = ("usage: python mohaa_map_view.py <map.bsp|map.map> [--pak=<file.pk3> ...] [--paks=<list.txt>]\n"
+USAGE = ("usage: python mohaa_map_view.py <map.bsp|map.map|map.bak> [--pak=<file.pk3> ...] [--paks=<list.txt>]\n"
          "         [--vfs=<path inside the paks>] [--outdir=<folder>] [--cache=<folder>]\n"
          "         [--texsize=256] [--theme=light|dark] [--no-models] [--decompile-only] [--no-open]")
 
@@ -410,6 +414,29 @@ def _atof(word):
     return float(m.group(0)) if m else 0.0
 
 
+# waveform names (tr_shader.c NameToGenFunc), numbered as the page's model shader takes them
+_DEFORM_FUNCS = {"sin": 0, "triangle": 1, "square": 2, "sawtooth": 3, "inversesawtooth": 4}
+
+
+def _deform(words):
+    """A shader's deformVertexes wave or flap (tr_shader.c ParseDeform) as the page draws it:
+    [kind (1 wave, 2 flap s, 3 flap t), 1 / spread, wave function, base, amplitude, phase,
+    frequency, flap min, flap max], or None for the others (the page doesn't move them)."""
+    w = [x.lower() for x in words]
+    try:
+        if w[0] == "wave" and len(w) >= 7:
+            div = float(w[1])
+            return [1, 1.0 / div if div else 100.0, _DEFORM_FUNCS.get(w[2], 0)] + [float(x) for x in w[3:7]] + [0.0, 1.0]
+        if w[0] == "flap" and len(w) >= 8 and w[1][:1] in ("s", "t"):
+            div = float(w[2])
+            mn, mx = (float(w[8]), float(w[9])) if len(w) >= 10 else (0.0, 1.0)
+            return [2 if w[1][0] == "s" else 3, 1.0 / div if div else 100.0, _DEFORM_FUNCS.get(w[3], 0)] + \
+                [float(x) for x in w[4:8]] + [mn, mx]
+    except (ValueError, IndexError):
+        return None
+    return None
+
+
 def parse_shaders(txt, out):
     """Every shader block in one .shader script, as the map viewer needs it:
     {name_lower: {"name", "editor", "light", "map", "parms", "trans", "keywords",
@@ -501,6 +528,10 @@ def parse_shaders(txt, out):
             elif (kw == "deformvertexes" and len(tok) > 1 and tok[1].lower().startswith("autosprite")) \
                     or kw == "spritegen":
                 info["sprite"] = True
+            elif kw == "deformvertexes" and len(tok) > 1 and "dv" not in info:
+                dv = _deform(tok[1:])
+                if dv:
+                    info["dv"] = dv
         info["nst"] = len(stages)
         sts = [_parse_stage(st) for st in stages]
         info["lmr"] = _lightmap_replaces(stages)
@@ -917,6 +948,8 @@ MAP_VIEWER_KEYS = {
                 ("Ctrl+O", "Nodraw", "show / hide nodraw, ladders, patharea and tree-shadow cards"),
                 ("Ctrl+I", "Rain", "show / hide the rain volumes (hidden at first)"),
                 ("Ctrl+G", "Foliage", "show / hide the foliage clips")),
+            _kx("Ctrl+E", "Script ents: show / hide the entities the level script spawns (waypoints, script "
+                "models, actors... placed where its lines say)", ("Ctrl+E", "Script", "show / hide the level script's entities")),
             _kx("Ctrl+A", "show every group (All)", ("Ctrl+A", "All")),
             _kx("G", "In-game look: hide what the game never draws, with the game's light, sky and sun flare",
                 ("G", "in-game")),
@@ -942,6 +975,16 @@ MAP_VIEWER_KEYS = {
             _kx("0", "Lights off: every light of the map off / on, from the game's baked light (lightmaps, "
                 "vertex light, props, models); single lights from Selection's Turn off / Turn on",
                 ("0", "lights off", "Lights off: every light off / on")),
+            _kx("-", "Sun light on / off: the sun's and the sky's light in the game's baked light (off: the "
+                "map lit by its lights and the ambient light alone)",
+                ("-", "sun light", "Sun light: the sun's and the sky's light on / off")),
+            _kx("=", "Decals on / off: the map's permanent decals (its .dcl), as the game draws them",
+                ("=", "decals", "Decals: the map's .dcl decals on / off")),
+            _kx("Y", "Weather on / off (cg_rain): the map's rain or snow, made as the game makes it; every setting "
+                "is in the game cvars (`)", ("Y", "weather", "Weather: the game's rain and snow on / off")),
+            _kx("P", "Leak trail on / off: the line the compiler wrote (the map's .lin) from the hole in the "
+                "map to the entity that reaches the void, seen through walls; on, its card shows where",
+                ("P", "leak", "Leak: the compiler's leak trail (.lin) on / off")),
             _kx("`", "the game cvars list: r_showtris, ai_showroutes ... (type a cvar and its value, then "
                 "Enter, as in the game's console)", ("`", "cvars", "open / close the game cvars list")),
         ]},
@@ -1326,6 +1369,8 @@ class TextureTable:
                 ent["ag"] = info["pag"]
             if info.get("pdw"):
                 ent["dw"] = 1
+            if info.get("dv"):
+                ent["dv"] = info["dv"]         # deformVertexes wave / flap (a tree's leaves)
         else:
             ent["noshader"] = 1
         want_alpha = bool(bits & (TF_ALPHATEST | TF_BLEND | TF_ADD))
@@ -1619,7 +1664,7 @@ class ModelBuilder:
         r_showstaticbboxes use), or None with no "idle" animation (the game then uses
         -4..4)."""
         try:
-            anims = MV.parse_tik_animations(txt)
+            anims = MV.parse_tik_animations(txt, every=True)
         except Exception:
             anims = []
         if not anims:
@@ -2391,6 +2436,76 @@ def rain_payload(vfs, vpath):
     return {"min": found if found is not None else 512.0, "src": k, "set": found is not None}
 
 
+# The weather pictures the game has (scripts/effects.shader): the rain streak and twelve
+# snowflakes, the shaders cg.rain names (cg_rain_shader, cg_rain_numshaders).
+_WEATHER_SHADERS = ["textures/rain"] + ["textures/snow%d" % i for i in range(12)]
+
+
+def _shader_rgb_consts(vfs, names):
+    """{shader: [r, g, b]}: the "rgbGen constant" of each shader's first stage (the
+    weather shaders are added with it: textures/rain .2, the snow .5), else white."""
+    want = {n.lower() for n in names}
+    out = {}
+    if vfs is None:
+        return out
+    for k in sorted(vfs.index):
+        if not (k.startswith("scripts/") and k.endswith(".shader")):
+            continue
+        try:
+            txt = _strip_comments(vfs.read(k).decode("latin-1", "replace"))
+        except Exception:
+            continue
+        for m in re.finditer(r"(?m)^\s*(\S+)\s*\{", txt):
+            name = m.group(1).lower()
+            if name not in want or name in out:
+                continue
+            body = txt[m.end():m.end() + 2000]
+            st = re.search(r"\{(.*?)\}", body, re.S)
+            c = re.search(r"(?i)\brgbgen\s+const(?:ant)?\s+\(?\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)", st.group(1)) if st else None
+            out[name] = [float(c.group(1)), float(c.group(2)), float(c.group(3))] if c else [1.0, 1.0, 1.0]
+    return out
+
+
+def weather_shader_names(shader, num):
+    """The shaders the client takes the rain from (cg_main.c, CS_RAIN_SHADER /
+    CS_RAIN_NUMSHADERS): with numshaders, shader + 0 .. numshaders - 1 (a digit at the end
+    of the name dropped first, as OpenMoHAA does: "textures/snow0" and 12 give snow0 to
+    snow11), else the shader itself."""
+    shader = (shader or "").strip()
+    try:
+        num = int(float(num or 0))
+    except ValueError:
+        num = 0
+    if num > 0:
+        if shader[-1:].isdigit():
+            shader = shader[:-1]
+        return ["%s%d" % (shader, i) for i in range(min(num, 32))]
+    return [shader] if shader else []
+
+
+def weather_payload(vfs, texs, scr, say=log):
+    """The weather (cg_rain_* in the page): the pictures of the rain and snow shaders,
+    and the rain settings the map's script makes (level.rain_* or setcvar cg_rain_*:
+    LevelScript), so the page starts with the map's own. {"tex": {shader: [texture,
+    [r, g, b]]}, "set": {setting: [value, file, line, text]}, "varies": [...],
+    "wscr": the script runs global/weather.scr}."""
+    rain = dict((scr or {}).get("rain") or {})
+    names = list(_WEATHER_SHADERS)
+    sh = (rain.get("shader") or [None])[0]
+    if sh:
+        for n in weather_shader_names(sh, (rain.get("numshaders") or [0])[0]):
+            if n.lower() not in names:
+                names.append(n.lower())
+    rgb = _shader_rgb_consts(vfs, names)
+    tex = {n: [texs.add(n, model=True), rgb.get(n.lower(), [1.0, 1.0, 1.0])] for n in names}
+    wscr = "global/weather.scr" in ((scr or {}).get("glob") or ())
+    if rain or wscr:
+        say("weather: the script sets %s%s" % (", ".join("%s %s" % (k, v[0] if v[0] is not None else "(varies)")
+                                                         for k, v in sorted(rain.items())) or "nothing",
+                                               "; it runs global/weather.scr" if wscr else ""))
+    return {"tex": tex, "set": rain, "varies": (scr or {}).get("rainv") or [], "wscr": int(wscr)}
+
+
 def vis_payload(bsp, stats, texs, blobs, say=log):
     """The page's data for r_showtris, or None when the .bsp has no tree to walk."""
     from array import array
@@ -2596,6 +2711,1256 @@ def paths_payload(vfs, vpath, src, blobs, say=log):
             "o": blobs.add(O.tobytes()), "f": blobs.add(F.tobytes()), "c": blobs.add(C.tobytes())}
 
 
+def _map_side_file(vfs, vpath, src, ext):
+    """(bytes, where it was found, its time or None) of maps/<map><ext> in the paks, else
+    the file of that name beside the source on disk (NormandyBridge_V1.bak finds
+    NormandyBridge_V1.lin), or (None, None, None)."""
+    stem = os.path.splitext(vpath.replace("\\", "/"))[0]
+    if not stem.lower().startswith("maps/"):
+        stem = "maps/" + os.path.basename(stem)
+    if vfs is not None:
+        k = (stem + ext).lower()
+        if k in vfs.index:
+            zi, real = vfs.index[k]
+            return vfs.read(k), "%s (%s)" % (real, os.path.basename(vfs.zips[zi].filename)), None
+    side = os.path.splitext(src)[0] + ext
+    if os.path.isfile(side):
+        with open(side, "rb") as f:
+            return f.read(), side, os.path.getmtime(side)
+    return None, None, None
+
+
+def read_dcl(data):
+    """A .dcl, the permanent decals MOHRadiant places and the game loads with the map
+    (renderergl1/tr_marks_permanent.c, R_LoadPermanentMarks): dclHeader_t ("DCL ",
+    version 1 or 2, checksum, decal count, fragment count; version 2 then the 32-byte
+    map_time of the .bsp they were made for), the decals (dclSavedMarkDef_t, 124 bytes:
+    shader, origin, projection, radius, height / width scale, rotation, colour, lighting)
+    and the fragments the decals were cut into (dclSavedMarkPoly_t, 76 bytes: shader, fog
+    number, decal, vertex count; then that many polyVert_t of 24 bytes: xyz, st and the
+    lit colour as 4 bytes). The lists of fragments per brush model and leaf after them
+    aren't needed here. Returns {"ver", "time", "decals": [(shader, origin, radius)],
+    "frags": [(shader, decal, [(x, y, z, s, t, r, g, b, a)])]}."""
+    if len(data) < 20 or data[:4] != b"DCL ":
+        raise ValueError("not a .dcl file")
+    ver, _check, nd, nf = struct.unpack_from("<4i", data, 4)
+    if ver not in (1, 2):
+        raise ValueError("unknown .dcl version %d" % ver)
+    if not (0 <= nd < 1 << 20 and 0 <= nf < 1 << 20):
+        raise ValueError("bad decal counts")
+    o = 20
+    tm = ""
+    if ver == 2:
+        tm = data[o:o + 32].split(b"\0", 1)[0].decode("latin-1", "replace")
+        o += 32
+    decals, frags = [], []
+    for _ in range(nd):
+        if o + 124 > len(data):
+            raise ValueError("the file ends inside its decals")
+        sh = data[o:o + 64].split(b"\0", 1)[0].decode("latin-1", "replace")
+        v = struct.unpack_from("<3f3f4f4fi", data, o + 64)
+        decals.append((sh, v[0:3], v[6]))
+        o += 124
+    for _ in range(nf):
+        if o + 76 > len(data):
+            raise ValueError("the file ends inside its fragments")
+        sh = data[o:o + 64].split(b"\0", 1)[0].decode("latin-1", "replace")
+        _fog, di, nv = struct.unpack_from("<3i", data, o + 64)
+        o += 76
+        if nv < 0 or nv > 64 or o + 24 * nv > len(data):
+            raise ValueError("a fragment with %d vertices" % nv)
+        frags.append((sh, di, [struct.unpack_from("<5f4B", data, o + 24 * k) for k in range(nv)]))
+        o += 24 * nv
+    return {"ver": ver, "time": tm, "decals": decals, "frags": frags}
+
+
+def dcl_payload(vfs, vpath, src, texs, blobs, say=log):
+    """The map's permanent decals from maps/<map>.dcl (read_dcl), drawn as the game draws
+    them: each fragment a fan of its vertices with its shader's picture times the lit
+    colour the file keeps. {"src", "ver", "time", "n": decals, "nf": fragments,
+    "d": per decal [texture, x, y, z, radius], "t": per fragment its texture, "k": its
+    vertex count, "p" / "s" / "c": the vertices' xyz, st and colour bytes}, or {"src",
+    "err"}, or None when there is no .dcl."""
+    from array import array
+    data, where, _mt = _map_side_file(vfs, vpath, src, ".dcl")
+    if data is None:
+        return None
+    try:
+        dc = read_dcl(data)
+    except (ValueError, struct.error) as e:
+        say("! decals %s can't be read: %s" % (where, e))
+        return {"src": where, "err": str(e)}
+    T, K, P, S = array("i"), array("i"), array("f"), array("f")
+    Cb = bytearray()
+    for sh, _di, verts in dc["frags"]:
+        if len(verts) < 3:
+            continue
+        T.append(texs.add(sh, model=True))
+        K.append(len(verts))
+        for v in verts:
+            P.extend(v[0:3])
+            S.extend(v[3:5])
+            Cb.extend(v[5:9])
+    dl = [[texs.add(sh, model=True), round(o[0], 2), round(o[1], 2), round(o[2], 2), round(r, 2)]
+          for sh, o, r in dc["decals"]]
+    say("decals: %d (%d fragments) from %s%s" % (len(dc["decals"]), len(T), where,
+                                                  ", made for the .bsp of %s" % dc["time"] if dc["time"] else ""))
+    return {"src": where, "ver": dc["ver"], "time": dc["time"], "n": len(dc["decals"]), "nf": len(T), "d": dl,
+            "t": blobs.add(T.tobytes()), "k": blobs.add(K.tobytes()), "p": blobs.add(P.tobytes()),
+            "s": blobs.add(S.tobytes()), "c": blobs.add(bytes(Cb))}
+
+
+def leak_payload(vfs, vpath, src, src_time, say=log):
+    """The leak trail q3map writes when the map isn't sealed: maps/<map>.lin, one point a
+    line (LeakFile: the middle of each portal on the shortest way from the void to the
+    entity that reaches it, then that entity's origin, so the first point is at the hole).
+    {"src", "p": [[x, y, z], ...], "old": the .lin is older than the map it is beside},
+    or None."""
+    data, where, mt = _map_side_file(vfs, vpath, src, ".lin")
+    if data is None:
+        return None
+    pts = []
+    for ln in data.decode("latin-1", "replace").splitlines():
+        w = ln.replace(",", " ").split()
+        if len(w) < 3:
+            continue
+        try:
+            p = [float(w[0]), float(w[1]), float(w[2])]
+        except ValueError:
+            continue
+        if all(abs(x) < 1e6 for x in p):
+            pts.append([round(x, 3) for x in p])
+        if len(pts) >= 20000:
+            break
+    if not pts:
+        say("! leak trail %s has no points" % where)
+        return {"src": where, "p": [], "err": "no points in the file"}
+    old = bool(mt is not None and src_time is not None and mt + 1 < src_time)
+    say("leak trail: %d points (%s)%s" % (len(pts), where, " - older than the map beside it" if old else ""))
+    return {"src": where, "p": pts, "old": int(old)}
+
+
+# ==============================================================================
+#  Level scripts: what the map's .scr spawns and sets
+# ==============================================================================
+# The game runs maps/<map>.scr when the level loads (Level::SpawnEntities). The viewer
+# doesn't run it as the game does (no waits, no threads in parallel, no events): it walks
+# the script (and the map's own scripts it execs or threads into, not global/) once, top
+# to bottom, keeping what it can work out without the game, for
+#   - "spawn <class or model> [key value ...]" (ScriptThread::SpawnEntity), with the
+#     properties the following lines give the same entity: "<ent>.origin = ( x y z )",
+#     "<ent> origin ( x y z )", angles, angle, targetname, target, model, scale, setsize,
+#     the entity named as "local.x", "level.x", "$targetname" or "$(expression)";
+#   - "<map entity>.target = ..." on an entity of the map (a map node joined to the
+#     script's own);
+#   - "setcvar <name> <value>" and the "$world" lines (farplane and the like).
+# Values are worked out where they are plain: strings, numbers, vectors, arithmetic,
+# comparisons, local / level variables, "$name" and "$(expression)" as entities (NULL
+# when there is none), and "$name.origin" / ".angles" of a map or script entity.
+# Control flow: "for" and "while" loops run as long as their condition can be worked out
+# (so "for (local.q = 1700; local.q <= 1715; local.q++)" runs 16 times with local.q set),
+# else once with the counter unknown; "if" takes its branch when the condition is known,
+# else both. What depends on the game running (a thread's parameters, self, a random
+# number, waittill) stays unknown; an entity whose place is unknown is listed, not drawn.
+_SCR_TOKEN = re.compile(r'"((?:[^"\\]|\\.)*)"|(-?(?:\d+\.?\d*|\.\d+)(?![\w.]))|([A-Za-z_$#@](?:[\w./\\$#:]|-(?=\w))*)'
+                        r'|(==|!=|<=|>=|&&|\|\||\+\+|--|[-+*/=(){}\[\];,<>!%&|.])')
+_SCR_LABEL = re.compile(r'^\s*([A-Za-z_][\w]*)((?:\s+(?:local|group)\.[\w]+)*)\s*:\s*$')
+_SCR_PROPS = {"origin", "angles", "angle", "targetname", "target", "model", "scale", "setsize", "spawnflags",
+              "classname"}
+_SCR_NOT_SPAWN = {"waittill", "waittilltrigger", "thread", "waitthread", "exec", "waitexec", "goto", "end"}
+_SCR_NULL = ("null",)
+# the level's rain settings (Level::SetRain*: CS_RAIN_* configstrings, cg.rain in the client)
+_RAIN_KEYS = ("density", "speed", "speed_vary", "slant", "length", "min_dist", "width", "shader", "numshaders",
+              "thundertime")      # (level.thundertime: global/weather.scr's time between lightning)
+
+
+def _scr_strip(text):
+    """The script with its // and /* */ comments blanked (line breaks kept, so line
+    numbers stay right); text in quotes is left alone."""
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            j = i + 1
+            while j < n and text[j] != '"' and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append("\n" * text.count("\n", i, j))
+            i = j
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _scr_num(x):
+    """A number as the game prints it in a string: whole numbers without a point."""
+    return ("%d" % x) if float(x).is_integer() and abs(x) < 1e15 else ("%g" % x)
+
+
+def _scr_str(v):
+    """A value as a key's text: a vector as "x y z", an entity as its targetname."""
+    if isinstance(v, list):
+        return " ".join(_scr_num(x) for x in v)
+    if isinstance(v, float):
+        return _scr_num(v)
+    if isinstance(v, tuple):
+        return v[1] if v[0] == "$" else ""
+    return v
+
+
+class _ScrStop(Exception):
+    """The walk took too many steps (a script that loops a very long way)."""
+
+
+class LevelScript:
+    """Reads a map's level scripts (see above). find(path) returns (text, where) for a
+    script path such as "maps/m3l1b.scr", or (None, None)."""
+
+    MAX_FILES = 40
+    MAX_LOOP = 4096               # turns of one loop
+    MAX_STEPS = 400000            # statements run in all
+
+    def __init__(self, find, ents):
+        self.find = find
+        self.files = []           # [path, where it was found]
+        self.ents = []            # {"kv": [[k, v]], "f", "l", "s": the spawn line, "x": [[file, line, text]]}
+        self.mods = []            # [map entity, key, value, file, line, text]: map entities the script changes
+        self.cvars = []           # [name, value, file, line]
+        self.world = []           # [text, file, line]
+        self.missing = []         # script files named but not found
+        self.level = {}           # level.x variables (shared by every file)
+        self.local = {}           # local.x variables of the thread (label) being read
+        self.vars = {}            # variable name -> index in self.ents
+        self.tn = {}              # targetname -> index in self.ents (the last spawned)
+        self.map_tn = {}          # targetname -> map entity index
+        self.map_ents = ents
+        for i, e in enumerate(ents):
+            if i == 0:
+                continue
+            t = e["kvd"].get("targetname")
+            if t and t not in self.map_tn:
+                self.map_tn[t] = i
+        self.fi = 0
+        self.line = 0
+        self.lines = []
+        self.loops = []           # [name, value] of the loops being run, for the notes
+        self.steps = 0
+        self.stopped = False
+        self._world_seen = set()
+        self._cvar_seen = set()
+        self._per_line = {}
+        self.rain = {}            # rain setting -> [value, file, line, text] (level.rain_* / cg_rain_*)
+        self.rain_varies = set()  # the settings the script changes in ways only the game knows
+        self.globals = set()      # the global/ scripts it runs
+        self.selfref = None       # the thread's self: ("ent", i) / ("map", i), NULL or None
+        self.fdata = []
+
+    # ---- tokens and structure ----------------------------------------------------------
+    def _parse(self, text):
+        """The script as trees of ("s", tokens, line), ("b", [nodes]), ("for", init, cond,
+        step, body, line), ("if", cond, then, else, line), ("while", cond, body, line):
+        (the nodes before its first label, {label: (parameters, nodes)}, the labels in
+        order)."""
+        raw = _scr_strip(text).split("\n")
+        self.lines = raw
+        toks = []
+        for ln, s in enumerate(raw, 1):
+            m = _SCR_LABEL.match(s)
+            if m:
+                toks.append(("L", (m.group(1).lower(), m.group(2).lower().split()), ln))
+                continue
+            for m in _SCR_TOKEN.finditer(s):
+                q, num, word, op = m.groups()
+                if q is not None:
+                    toks.append(("s", q, ln))
+                elif num is not None:
+                    toks.append(("n", num, ln))
+                elif word is not None:
+                    toks.append(("w", word, ln))
+                else:
+                    toks.append(("o", op, ln))
+            toks.append(("NL", "", ln))
+        self._t = toks
+        self._p = 0
+        top = cur = []
+        labels, order = {}, []
+        while self._p < len(toks):
+            n = self._node()
+            if n is None:
+                continue
+            if n[0] == "label":
+                cur = []
+                if n[1] not in labels:           # the first of two labels of one name wins
+                    labels[n[1]] = (n[2], cur)
+                    order.append(n[1])
+            else:
+                cur.append(n)
+        return top, labels, order
+
+    def _skip_nl(self):
+        while self._p < len(self._t) and self._t[self._p][0] == "NL":
+            self._p += 1
+
+    def _group(self):
+        """The tokens inside a ( ... ) starting at the cursor (which is on the "(")."""
+        t = self._t
+        depth = 0
+        out = []
+        while self._p < len(t):
+            k, s, _ln = t[self._p]
+            self._p += 1
+            if k == "NL":
+                continue
+            if k == "o" and s == "(":
+                depth += 1
+                if depth == 1:
+                    continue
+            elif k == "o" and s == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            out.append((k, s))
+        return out
+
+    def _body(self):
+        self._skip_nl()
+        if self._p >= len(self._t):
+            return ("b", [])
+        return self._node()
+
+    def _node(self):
+        t = self._t
+        if self._p >= len(t):
+            return None
+        k, s, ln = t[self._p]
+        if k == "NL":
+            self._p += 1
+            return None
+        if k == "L":
+            self._p += 1
+            return ("label", s[0], s[1])
+        if k == "o" and s == "{":
+            self._p += 1
+            nodes = []
+            # (a label inside braces means they don't close: the block ends there)
+            while self._p < len(t) and t[self._p][:2] != ("o", "}") and t[self._p][0] != "L":
+                n = self._node()
+                if n is not None:
+                    nodes.append(n)
+            if self._p < len(t) and t[self._p][0] != "L":
+                self._p += 1
+            return ("b", nodes)
+        if k == "o" and s in ("}", ";"):
+            self._p += 1
+            return None
+        low = s.lower() if k == "w" else ""
+        nxt = t[self._p + 1] if self._p + 1 < len(t) else None
+        if low in ("for", "while", "if", "switch") and nxt and nxt[:2] == ("o", "("):
+            self._p += 1
+            head = self._group()
+            if low == "for":
+                parts = [[]]
+                for tk in head:
+                    if tk == ("o", ";"):
+                        parts.append([])
+                    else:
+                        parts[-1].append(tk)
+                parts += [[]] * (3 - len(parts))
+                return ("for", parts[0], parts[1], parts[2], self._body(), ln)
+            body = self._body()
+            if low == "if":
+                save = self._p
+                self._skip_nl()
+                if self._p < len(t) and t[self._p][0] == "w" and t[self._p][1].lower() == "else":
+                    self._p += 1
+                    return ("if", head, body, self._body(), ln)
+                self._p = save
+                return ("if", head, body, None, ln)
+            if low == "while":
+                return ("while", head, body, ln)
+            return body                        # switch: its cases, read once
+        if low == "else":                      # an else without its if: read its body
+            self._p += 1
+            return self._body()
+        # a statement: to the end of the line, a ";" or a brace (outside brackets)
+        out = []
+        depth = 0
+        while self._p < len(t):
+            k2, s2, _l = t[self._p]
+            if k2 in ("NL", "L") and depth == 0:
+                break
+            if k2 == "o" and depth == 0 and s2 in (";", "{", "}"):
+                if s2 == ";":
+                    self._p += 1
+                break
+            if k2 == "o" and s2 in ("(", "["):
+                depth += 1
+            elif k2 == "o" and s2 in (")", "]"):
+                depth = max(0, depth - 1)
+            if k2 != "NL":
+                out.append((k2, s2))
+            self._p += 1
+        return ("s", out, ln) if out else None
+
+    # ---- running it ------------------------------------------------------------------
+    def _run(self, nodes, queue):
+        for n in nodes:
+            self._exec(n, queue)
+
+    def _exec(self, n, queue):
+        kind = n[0]
+        if kind == "s":
+            self.steps += 1
+            if self.steps > self.MAX_STEPS:
+                raise _ScrStop()
+            self.line = n[2]
+            self._statement(n[1], queue)
+        elif kind == "b":
+            self._run(n[1], queue)
+        elif kind == "if":
+            self.line = n[4]
+            c = self._truth(self._eval(n[1]))
+            if c is True:
+                self._exec(n[2], queue)
+            elif c is False:
+                if n[3] is not None:
+                    self._exec(n[3], queue)
+            else:
+                # either way: both branches read, and a variable they leave different unknown
+                snap = self._snap()
+                self._exec(n[2], queue)
+                a = self._snap()
+                self.level, self.local = dict(snap[0]), dict(snap[1])
+                if n[3] is not None:
+                    self._exec(n[3], queue)
+                self._merge(a)
+        elif kind == "for":
+            _k, init, cond, step, body, ln = n
+            self.line = ln
+            if init:
+                self._statement(init, queue)
+            var = init[0][1].lower() if init and init[0][0] == "w" else None
+            turns = 0
+            while True:
+                c = self._truth(self._eval(cond)) if cond else None
+                if c is None:
+                    if turns == 0:
+                        # a loop the viewer can't count: once, its counter unknown, and
+                        # what it changes unknown after it
+                        if var:
+                            self._setvar(var, None)
+                        snap = self._snap()
+                        self._exec(body, queue)
+                        self._merge(snap)
+                    break
+                if not c or turns >= self.MAX_LOOP:
+                    break
+                self.loops.append([var, self._getvar(var) if var else None])
+                try:
+                    self._exec(body, queue)
+                finally:
+                    self.loops.pop()
+                self.line = ln
+                if step:
+                    self._statement(step, queue)
+                turns += 1
+        elif kind == "while":
+            _k, cond, body, ln = n
+            turns = 0
+            # a loop that waits (respawning waves, a thread that watches something) runs
+            # with the game's clock: once is all the viewer can tell
+            timed = self._waits(body)
+            while turns < self.MAX_LOOP:
+                self.line = ln
+                c = self._truth(self._eval(cond))
+                if c is False:
+                    break
+                names = {s.lower() for k, s in cond if k == "w"}
+                before = [(x, self._getvar(x)) for x in sorted(names)]
+                snap = self._snap() if c is None else None
+                self._exec(body, queue)
+                if snap is not None:
+                    self._merge(snap)
+                turns += 1
+                # a loop whose condition nothing in it changes (while (1), a wait loop):
+                # once is all the viewer can tell
+                if c is None or timed or before == [(x, self._getvar(x)) for x in sorted(names)]:
+                    break
+
+    def _waits(self, n):
+        """Does this node (or anything in it) wait for the game: wait, waitframe,
+        waittill?"""
+        k = n[0]
+        if k == "s":
+            return any(t[0] == "w" and t[1].lower() in ("wait", "waitframe", "waittill", "waittillframeend")
+                       for t in n[1])
+        if k == "b":
+            return any(self._waits(x) for x in n[1])
+        if k == "for":
+            return self._waits(n[4])
+        if k == "if":
+            return self._waits(n[2]) or (n[3] is not None and self._waits(n[3]))
+        if k == "while":
+            return self._waits(n[2])
+        return False
+
+    def _snap(self):
+        return dict(self.level), dict(self.local)
+
+    def _merge(self, other):
+        """Keep a variable only where it is the same as in other (the state of the
+        branch not taken, or before a loop run once); else it is unknown."""
+        for cur, o in ((self.level, other[0]), (self.local, other[1])):
+            for k in set(cur) | set(o):
+                if cur.get(k) != o.get(k):
+                    cur[k] = None
+
+    def _getvar(self, name):
+        name = name.lower()
+        if name.startswith("level."):
+            return self.level.get(name)
+        if name.startswith("local."):
+            return self.local.get(name)
+        return None
+
+    def _rainset(self, key, val):
+        """A rain setting the script makes (level.rain_<key> or setcvar cg_rain_<key>):
+        the last one read wins; one only the game knows marks the setting as varying."""
+        if key not in _RAIN_KEYS:
+            return
+        if val is None or isinstance(val, tuple) or isinstance(val, list):
+            if key not in self.rain:
+                self.rain[key] = [None, self.fi, self.line, self._text()]
+            self.rain_varies.add(key)
+            return
+        self.rain[key] = [_scr_str(val), self.fi, self.line, self._text()]
+
+    def _setvar(self, name, val):
+        name = name.lower()
+        if name.startswith("level."):
+            self.level[name] = val
+            if name.startswith("level.rain_"):
+                self._rainset(name[11:], val)
+            elif name == "level.thundertime":
+                self._rainset("thundertime", val)
+        elif name.startswith("local."):
+            self.local[name] = val
+        self.vars.pop(name, None)
+
+    # ---- values ---------------------------------------------------------------
+    def _eval(self, T):
+        if not T:
+            return None
+        try:
+            v, i = self._or(T, 0)
+        except (IndexError, ValueError, TypeError, OverflowError, ZeroDivisionError):
+            return None
+        # all of it, or it is something the viewer doesn't follow (a call: getcvar(x))
+        return v if i >= len(T) else None
+
+    @staticmethod
+    def _truth(v):
+        if v is None:
+            return None
+        if v == _SCR_NULL:
+            return False
+        if isinstance(v, tuple):
+            return True
+        if isinstance(v, float):
+            return v != 0
+        if isinstance(v, list):
+            return True
+        return v != ""
+
+    def _or(self, T, i):
+        v, i = self._and(T, i)
+        while i < len(T) and T[i] == ("o", "||"):
+            w, i = self._and(T, i + 1)
+            a, b = self._truth(v), self._truth(w)
+            v = 1.0 if (a or b) else (None if a is None or b is None else 0.0)
+        return v, i
+
+    def _and(self, T, i):
+        v, i = self._eq(T, i)
+        while i < len(T) and T[i] == ("o", "&&"):
+            w, i = self._eq(T, i + 1)
+            a, b = self._truth(v), self._truth(w)
+            v = 0.0 if (a is False or b is False) else (None if a is None or b is None else 1.0)
+        return v, i
+
+    def _eq(self, T, i):
+        v, i = self._rel(T, i)
+        while i < len(T) and T[i][0] == "o" and T[i][1] in ("==", "!="):
+            op = T[i][1]
+            w, i = self._rel(T, i + 1)
+            if v is None or w is None:
+                v = None
+                continue
+            if _SCR_NULL in (v, w):
+                o = w if v == _SCR_NULL else v
+                same = (o == _SCR_NULL) or (isinstance(o, tuple) and o[0] == "$" and not self._exists(o[1]))
+            elif isinstance(v, tuple) or isinstance(w, tuple):
+                same = v == w
+            elif isinstance(v, float) and isinstance(w, float):
+                same = v == w
+            else:
+                same = _scr_str(v) == _scr_str(w)
+            v = 1.0 if same == (op == "==") else 0.0
+        return v, i
+
+    def _rel(self, T, i):
+        v, i = self._add(T, i)
+        while i < len(T) and T[i][0] == "o" and T[i][1] in ("<", "<=", ">", ">="):
+            op = T[i][1]
+            w, i = self._add(T, i + 1)
+            if isinstance(v, float) and isinstance(w, float):
+                v = 1.0 if {"<": v < w, "<=": v <= w, ">": v > w, ">=": v >= w}[op] else 0.0
+            else:
+                v = None
+        return v, i
+
+    def _add(self, T, i):
+        v, i = self._mul(T, i)
+        while i < len(T) and T[i][0] == "o" and T[i][1] in ("+", "-") and i + 1 < len(T) and T[i + 1] != ("o", "="):
+            op = T[i][1]
+            w, i = self._mul(T, i + 1)
+            v = self._binop(v, op, w)
+        return v, i
+
+    def _mul(self, T, i):
+        v, i = self._unary(T, i)
+        while i < len(T) and T[i][0] == "o" and T[i][1] in ("*", "/", "%") and i + 1 < len(T) and T[i + 1] != ("o", "="):
+            op = T[i][1]
+            w, i = self._unary(T, i + 1)
+            if isinstance(v, float) and isinstance(w, float):
+                v = v * w if op == "*" else (v / w if op == "/" else v % w)
+            elif op == "*" and isinstance(v, list) and isinstance(w, float):
+                v = [x * w for x in v]
+            elif op == "*" and isinstance(w, list) and isinstance(v, float):
+                v = [x * v for x in w]
+            else:
+                v = None
+        return v, i
+
+    def _unary(self, T, i):
+        if i < len(T) and T[i] == ("o", "-"):
+            v, i = self._unary(T, i + 1)
+            return (-v if isinstance(v, float) else [-x for x in v] if isinstance(v, list) else None), i
+        if i < len(T) and T[i] == ("o", "!"):
+            v, i = self._unary(T, i + 1)
+            t = self._truth(v)
+            return (None if t is None else (0.0 if t else 1.0)), i
+        return self._term(T, i)
+
+    def _term(self, T, i):
+        """(value, next index): a string, a float, a list of 3 floats, ("$", name) for an
+        entity, NULL, or None (unknown)."""
+        if i >= len(T):
+            return None, i
+        kind, s = T[i]
+        if kind == "s":
+            return s, i + 1
+        if kind == "n":
+            return float(s), i + 1
+        if kind == "o" and s == "(":
+            vals = []
+            j = i + 1
+            while j < len(T) and T[j] != ("o", ")"):
+                v, j2 = self._or(T, j)
+                if j2 == j:
+                    j += 1
+                    vals.append(None)
+                else:
+                    j = j2
+                    vals.append(v)
+            j += 1
+            if len(vals) == 3:
+                if all(isinstance(v, float) for v in vals):
+                    return [vals[0], vals[1], vals[2]], j
+                return None, j
+            return (vals[0] if len(vals) == 1 else None), j
+        if kind == "w":
+            if s == "$" and i + 1 < len(T) and T[i + 1] == ("o", "("):
+                # $( expression ): the entity of that targetname
+                name, j = self._term(T, i + 1)
+                ref = ("$", _scr_str(name)) if isinstance(name, (str, float)) else None
+                if j + 1 < len(T) and T[j] == ("o", ".") and T[j + 1][0] == "w":
+                    return (self._entprop(ref[1], T[j + 1][1].lower()) if ref else None), j + 2
+                return ref, j
+            return self._word(s), i + 1
+        return None, i
+
+    @staticmethod
+    def _binop(a, op, b):
+        if a is None or b is None or isinstance(a, tuple) or isinstance(b, tuple):
+            return None
+        if isinstance(a, float) and isinstance(b, float):
+            return a + b if op == "+" else a - b
+        if isinstance(a, list) and isinstance(b, list):
+            return [x + (y if op == "+" else -y) for x, y in zip(a, b)]
+        if op == "+" and not isinstance(a, list) and not isinstance(b, list):
+            return _scr_str(a) + _scr_str(b)
+        return None
+
+    def _exists(self, name):
+        return name in self.tn or name in self.map_tn
+
+    def _entprop(self, name, prop):
+        """A property of the entity of that targetname (the script's, else the map's)."""
+        return self._refprop(self._named(name), prop)
+
+    def _refprop(self, ref, prop):
+        """A property of ("ent", script entity) or ("map", map entity)."""
+        if ref is None:
+            return None
+        if ref[0] == "ent":
+            return self._prop(self.ents[ref[1]], prop)
+        if ref[0] == "map":
+            k = self.map_ents[ref[1]]["kvd"]
+            if prop == "origin":
+                o = MB.parse_vec(k.get("origin", ""))
+                return list(o) if o else None
+            if prop == "angles":
+                a = MB.parse_vec(k.get("angles", "")) or ([0.0, float(k["angle"]), 0.0] if k.get("angle") else None)
+                return list(a) if a else [0.0, 0.0, 0.0]
+            if prop in ("targetname", "target", "model"):
+                return k.get(prop)
+        return None
+
+    def _refval(self, ref):
+        """An entity as a value: ("@", script entity), ("$", targetname) for a map entity
+        with one, ("m", map entity) for one without, NULL for none."""
+        if ref is None:
+            return None
+        if ref == _SCR_NULL:
+            return _SCR_NULL
+        if ref[0] == "ent":
+            return ("@", ref[1])
+        t = self.map_ents[ref[1]]["kvd"].get("targetname")
+        return ("$", t) if t else ("m", ref[1])
+
+    def _valref(self, v):
+        """The entity a value stands for (see _refval), or None."""
+        if not isinstance(v, tuple):
+            return None
+        if v[0] == "@":
+            return ("ent", v[1])
+        if v[0] == "m":
+            return ("map", v[1])
+        if v[0] == "$":
+            return self._named(v[1])
+        return None
+
+    def _var_ref(self, name):
+        """The entity a variable (local.x, level.x, self) holds, or None."""
+        if name == "self":
+            return self.selfref if self.selfref != _SCR_NULL else None
+        if name in self.vars:
+            return ("ent", self.vars[name])
+        return self._valref(self._getvar(name))
+
+    def _word(self, w):
+        lw = w.lower()
+        if lw == "null" or lw == "nil":
+            return _SCR_NULL
+        if lw == "self":
+            return self._refval(self.selfref)
+        if lw.startswith(("local.", "level.", "game.", "self.", "group.", "parm.", "owner.")):
+            if lw in self.vars:
+                return ("@", self.vars[lw])
+            base, _, prop = lw.rpartition(".")
+            ref = self._var_ref(base)
+            if ref is not None:
+                return self._refprop(ref, prop)
+            if lw.startswith(("level.", "local.")):
+                return self._getvar(lw)
+            return None
+        if w.startswith("$"):
+            name, _, prop = w[1:].partition(".")
+            if not name:
+                return None
+            return self._entprop(name, prop.lower()) if prop else ("$", name)
+        return w                  # a bare word is a string ("targetname foo")
+
+    @staticmethod
+    def _prop(E, prop):
+        for k, v in E["kv"]:
+            if k == prop:
+                if prop in ("origin", "angles"):
+                    p = MB.parse_vec(v)
+                    return list(p) if p else None
+                return v
+        return [0.0, 0.0, 0.0] if prop == "angles" else None
+
+    # ---- one entity's keys ---------------------------------------------------------
+    @staticmethod
+    def _set(E, key, val):
+        key = key.lower()
+        if key == "angle":
+            E["kv"] = [kv for kv in E["kv"] if kv[0] not in ("angle", "angles")]
+            E["kv"].append(["angles", "0 %s 0" % _scr_str(val)])
+            return
+        E["kv"] = [kv for kv in E["kv"] if kv[0] != key]
+        E["kv"].append([key, val])
+
+    def _text(self):
+        """The line being read, with the loop counters it was read with."""
+        s = self.lines[self.line - 1].strip() if 0 < self.line <= len(self.lines) else ""
+        ctx = ", ".join("%s = %s" % (n, _scr_str(v) if v is not None else "?") for n, v in self.loops if n)
+        return (s[:200] + ("   // " + ctx if ctx else ""))
+
+    def _ref_of(self, T, i):
+        """The entity a statement starts with: (("ent", index) / ("map", index) / None,
+        property or None, next index)."""
+        k, s = T[i]
+        if k != "w":
+            return None, None, i
+        if s == "$" and i + 1 < len(T) and T[i + 1] == ("o", "("):
+            name, j = self._term(T, i + 1)
+            name = _scr_str(name) if isinstance(name, (str, float)) else None
+            prop = None
+            if j + 1 < len(T) and T[j] == ("o", ".") and T[j + 1][0] == "w":
+                prop, j = T[j + 1][1], j + 2
+            return self._named(name), prop, j
+        if s.startswith("$"):
+            name, _, prop = s[1:].partition(".")
+            return self._named(name), (prop or None), i + 1
+        ls = s.lower()
+        ref = self._var_ref(ls)
+        if ref is not None:
+            return ref, None, i + 1
+        base, _, prop = ls.rpartition(".")
+        ref = self._var_ref(base) if base else None
+        if ref is not None:
+            return ref, prop, i + 1
+        return None, None, i
+
+    def _named(self, name):
+        if not name:
+            return None
+        if name in self.tn:
+            return ("ent", self.tn[name])
+        if name in self.map_tn:
+            return ("map", self.map_tn[name])
+        return None
+
+    def _apply(self, ref, prop, T, i, assign, op=None):
+        """A property line for an entity: ".prop = value", ".prop += value" (op) or
+        " prop value ..."."""
+        prop = prop.lower()
+        if prop not in _SCR_PROPS:
+            return
+        if prop == "setsize" and not assign:
+            a, i = self._add(T, i)
+            b, i = self._add(T, i)
+            val = (_scr_str(a) + " " + _scr_str(b)) if isinstance(a, list) and isinstance(b, list) else None
+        else:
+            val, i = self._or(T, i)
+            if op:
+                val = self._binop(self._refprop(ref, prop), op, val)
+            if isinstance(val, tuple) and val[0] in ("@", "m"):
+                # an entity in a variable: by its targetname
+                tn = self._refprop(self._valref(val), "targetname")
+                val = ("$", tn) if tn else None
+            if prop in ("origin", "angles") and not isinstance(val, list):
+                val = None
+            elif val == _SCR_NULL or (isinstance(val, tuple) and val[0] != "$"):
+                val = None
+            elif val is not None:
+                val = _scr_str(val)
+        text = self._text()
+        if ref[0] == "map":
+            # the map's own entity: only its target is followed (a map node joined to the
+            # script's), as the last line sets it
+            if prop == "target" and val is not None:
+                self.mods.append([ref[1], "target", val, self.fi, self.line, text])
+            return
+        E = self.ents[ref[1]]
+        if val is None:
+            E.setdefault("unk", {})[prop] = text[:160]
+            if prop in ("origin", "angles", "targetname"):
+                E["kv"] = [kv for kv in E["kv"] if kv[0] != prop]
+        else:
+            self._set(E, prop, val)
+            E.get("unk", {}).pop(prop, None)
+            if prop == "targetname":
+                self.tn[val] = ref[1]
+        E["x"].append([self.fi, self.line, text])
+
+    # ---- statements ------------------------------------------------------------
+    def _spawn(self, T, i, var):
+        """ "spawn <class> [key value ...]" from token i (the class)."""
+        text = self._text()
+        if i >= len(T):
+            return
+        # one line spawning thousands (a loop the viewer counted that the game runs with
+        # waits in between): the first 1024 are enough
+        key = (self.fi, self.line)
+        self._per_line[key] = self._per_line.get(key, 0) + 1
+        if self._per_line[key] > 1024:
+            if var:
+                self.vars.pop(var.lower(), None)
+            return
+        cls, i = self._term(T, i)
+        if not isinstance(cls, str) or not cls:
+            self.ents.append({"kv": [], "f": self.fi, "l": self.line, "s": text, "x": [],
+                              "unk": {"class": text[:160]}})
+            return
+        kv = []
+        low = cls.replace("\\", "/").lower()
+        if "/" in low or low.endswith(".tik"):
+            # a model: the game spawns the .tik's class with that model (G_SpawnEntity)
+            m = low[7:] if low.startswith("models/") else low
+            m = m if m.endswith(".tik") else m + ".tik"
+            kv += [["classname", m[:-4]], ["model", m]]
+        else:
+            kv.append(["classname", cls])
+        E = {"kv": kv, "f": self.fi, "l": self.line, "s": text, "x": []}
+        idx = len(self.ents)
+        self.ents.append(E)
+        while i < len(T):
+            k, i2 = self._term(T, i)
+            if i2 == i:
+                break
+            v, i = self._add(T, i2)
+            if not isinstance(k, str):
+                continue
+            kl = k.lower()
+            if v is None or v == _SCR_NULL or (isinstance(v, tuple) and v[0] != "$"):
+                E.setdefault("unk", {})[kl] = text[:160]
+                continue
+            if kl in ("origin", "angles") and isinstance(v, str):
+                p = MB.parse_vec(v)
+                v = list(p) if p else None
+                if v is None:
+                    continue
+            self._set(E, kl, _scr_str(v))
+            if kl == "targetname":
+                self.tn[_scr_str(v)] = idx
+        if var:
+            self.vars[var.lower()] = idx
+
+    def _statement(self, T, queue):
+        if not T:
+            return
+        words = [s.lower() if k == "w" else None for k, s in T]
+        # spawn, anywhere in the line ("local.x = spawn ...")
+        for i, w in enumerate(words):
+            if w == "spawn" and not (i > 0 and words[i - 1] in _SCR_NOT_SPAWN):
+                var = None
+                if i >= 2 and T[i - 1] == ("o", "=") and T[i - 2][0] == "w" and not T[i - 2][1].startswith("$"):
+                    var = T[i - 2][1]
+                    self._setvar(var, None)
+                self._spawn(T, i + 1, var)
+                return
+        k0, s0 = T[0]
+        l0 = s0.lower() if k0 == "w" else ""
+        # a thread or script run: "[<ent>] thread label [args]", "local.r = waitthread
+        # file.scr::label [args]", "exec file.scr"; the entity is the thread's self
+        for i, w in enumerate(words):
+            if w in ("exec", "waitexec", "thread", "waitthread") and i + 1 < len(T) and T[i + 1][0] == "w":
+                if i == 0 or (i >= 2 and T[i - 1] == ("o", "=")):
+                    who = self.selfref
+                else:
+                    ref, prop, j = self._ref_of(T, 0)
+                    who = ref if (ref is not None and not prop and j == i) else None
+                self._call(T[i + 1][1], who, T, i + 2, queue, w in ("thread", "exec"))
+                return
+        if l0 == "setcvar" and len(T) >= 2:
+            name, i = self._term(T, 1)
+            val, _ = self._add(T, i)
+            if (self.fi, self.line) in self._cvar_seen:
+                return
+            self._cvar_seen.add((self.fi, self.line))
+            if isinstance(name, str) and name.lower().startswith("cg_rain_"):
+                self._rainset(name.lower()[8:], val if isinstance(val, (str, float)) else None)
+            self.cvars.append([_scr_str(name) if isinstance(name, (str, float)) else self._text(),
+                               _scr_str(val) if isinstance(val, (str, float, list)) else None, self.fi, self.line])
+            return
+        if l0 == "$world" and len(T) >= 2:
+            # once per line (a loop that fades the fog runs it many times)
+            if (self.fi, self.line) not in self._world_seen:
+                self._world_seen.add((self.fi, self.line))
+                self.world.append([self._text(), self.fi, self.line])
+            return
+        if k0 != "w":
+            return
+        # an entity's property: <ent>.<prop> = value, or <ent> <prop> value ...
+        ref, prop, j = self._ref_of(T, 0)
+        if ref is not None:
+            if prop and j < len(T) and T[j] == ("o", "="):
+                self._apply(ref, prop, T, j + 1, True)
+            elif prop and j + 1 < len(T) and T[j][0] == "o" and T[j][1] in ("+", "-") and T[j + 1] == ("o", "="):
+                self._apply(ref, prop, T, j + 2, True, T[j][1])
+            elif not prop and j < len(T) and T[j][0] == "w":
+                self._apply(ref, T[j][1], T, j + 1, False)
+            return
+        # a variable: local.x / level.x = value, ++, --, += and -=
+        ls = s0.lower()
+        if ls.startswith(("local.", "level.")) and len(T) >= 2:
+            if T[1] == ("o", "="):
+                v, j = self._or(T, 2)
+                if j < len(T):
+                    v = None
+                if isinstance(v, tuple) and v[0] == "@":
+                    self.vars[ls] = v[1]        # local.a = local.b: the same entity
+                    return
+                self._setvar(ls, v)
+            elif T[1] in (("o", "++"), ("o", "--")):
+                v = self._getvar(ls)
+                self._setvar(ls, v + (1.0 if T[1][1] == "++" else -1.0) if isinstance(v, float) else None)
+            elif len(T) >= 3 and T[1][0] == "o" and T[1][1] in ("+", "-", "*", "/") and T[2] == ("o", "="):
+                w, _ = self._or(T, 3)
+                v = self._getvar(ls)
+                if T[1][1] in ("+", "-"):
+                    r = self._binop(v, T[1][1], w)
+                elif isinstance(v, float) and isinstance(w, float) and (T[1][1] == "*" or w):
+                    r = v * w if T[1][1] == "*" else v / w
+                else:
+                    r = None
+                self._setvar(ls, r)
+
+    # ---- files and threads ----------------------------------------------------------
+    def _load(self, path):
+        """The index of a script file, read and parsed once, or None."""
+        key = path.replace("\\", "/").lower().lstrip("/")
+        if key in self._fkey:
+            return self._fkey[key]
+        if len(self.files) >= self.MAX_FILES:
+            return None
+        text, where = self.find(path)
+        if text is None:
+            self._fkey[key] = None
+            if self.files:
+                self.missing.append(path)
+            return None
+        fi = len(self.files)
+        self._fkey[key] = fi
+        self.files.append([path, where])
+        save = self.lines
+        top, labels, order = self._parse(text)
+        self.fdata.append({"lines": self.lines, "top": top, "labels": labels, "order": order})
+        self.lines = save
+        # the labels something runs by name ("thread x", "file.scr::x"): they are read
+        # when they are run, with their self and parameters, not on their own
+        for m in re.finditer(r"\b(?:thread|waitthread|exec|waitexec)\s+([\w./\\:-]+)", _scr_strip(text), re.I):
+            tgt = m.group(1).lower().replace("\\", "/")
+            if "::" in tgt:
+                f, _, lab = tgt.partition("::")
+                self._called.add((f, lab))
+            elif not tgt.endswith(".scr"):
+                self._called.add((key, tgt))
+        return fi
+
+    def _scope(self, fi, selfref, params, args):
+        """Enter a thread: its file, self and parameters (NIL where not given). Returns
+        what to give _unscope."""
+        save = (self.fi, self.lines, self.local, self.vars, self.selfref, self.line)
+        self.fi = fi
+        self.lines = self.fdata[fi]["lines"]
+        self.selfref = selfref
+        self.local = {}
+        self.vars = {k: v for k, v in self.vars.items() if not k.startswith("local.")}
+        for n, p in enumerate(params):
+            v = args[n] if args is not None and n < len(args) else (_SCR_NULL if args is not None else None)
+            if isinstance(v, tuple) and v[0] == "@":
+                self.vars[p] = v[1]
+            else:
+                self.local[p] = v
+        return save
+
+    def _unscope(self, save):
+        self.fi, self.lines, self.local, vars_, self.selfref, self.line = save
+        # level variables set in the thread stay; the caller's locals come back
+        self.vars = {k: v for k, v in self.vars.items() if not k.startswith("local.")}
+        self.vars.update({k: v for k, v in vars_.items() if k.startswith("local.")})
+
+    def _run_label(self, fi, label, selfref, args, queue):
+        lab = self.fdata[fi]["labels"].get(label)
+        if lab is None or (fi, label) in self._stack or len(self._stack) > 24:
+            return
+        self._ran.add((fi, label))
+        self._stack.append((fi, label))
+        save = self._scope(fi, selfref, lab[0], args)
+        try:
+            self._run(lab[1], queue)
+        finally:
+            self._unscope(save)
+            self._stack.pop()
+
+    def _call(self, target, who, T, i, queue, side=False):
+        """ "thread label", "waitthread file.scr::label", "exec file.scr" with the
+        arguments from token i: the label is read with that self and those parameters.
+        A thread started with thread or exec (side) runs beside its caller in game: what
+        it does to level variables happens later (a death thread lowering a counter), so
+        its caller doesn't see it."""
+        target = target.replace("\\", "/")
+        path, _, label = target.partition("::")
+        if not label and not path.lower().endswith(".scr"):
+            path, label = "", path
+        if path.lower().startswith("global/"):
+            self.globals.add(path.lower())
+            return
+        args = []
+        while i < len(T) and len(args) < 16:
+            v, j = self._add(T, i)
+            if j == i:
+                break
+            args.append(v)
+            i = j
+        if path:
+            fi = self._load(path)
+            if fi is None:
+                return
+            if not label:
+                queue.append(fi)                   # a whole script: read after this one
+                return
+        else:
+            fi = self.fi
+        keep = dict(self.level) if side else None
+        self._run_label(fi, label.lower(), who, args, queue)
+        if keep is not None:
+            self.level = keep
+
+    def _run_file(self, fi, queue):
+        """A file as it is read on its own: what comes before its labels, then each label
+        nothing runs by name (unknown self and parameters)."""
+        if fi in self._file_ran:
+            return
+        self._file_ran.add(fi)
+        save = self._scope(fi, None, [], None)
+        try:
+            self._run(self.fdata[fi]["top"], queue)
+        finally:
+            self._unscope(save)
+        key = self.files[fi][0].replace("\\", "/").lower().lstrip("/")
+        for lab in self.fdata[fi]["order"]:
+            if (fi, lab) in self._ran or (key, lab) in self._called:
+                continue
+            self._run_label(fi, lab, None, None, queue)
+
+    def read(self, path):
+        """Read a script and the map scripts it runs, as the game would find them."""
+        self.fdata, self._fkey, self._called = [], {}, set()
+        self._ran, self._stack, self._file_ran = set(), [], set()
+        first = self._load(path)
+        if first is None:
+            return False
+        queue = [first]
+        try:
+            while queue:
+                fi = queue.pop(0)
+                self._run_file(fi, queue)
+            # labels run by name somewhere the walk never reached: on their own
+            for fi in range(len(self.files)):
+                for lab in self.fdata[fi]["order"]:
+                    if (fi, lab) not in self._ran:
+                        self._run_label(fi, lab, None, None, queue)
+                while queue:
+                    self._run_file(queue.pop(0), queue)
+        except _ScrStop:
+            self.stopped = True
+        except RecursionError:
+            pass
+        return True
+
+    def payload(self, base):
+        """For the page: the placed entities (an origin known) and the rest, and the map
+        entities the script changes."""
+        placed, unplaced = [], []
+        same = set()
+        for E in self.ents:
+            # a thread run several times that spawns the same thing in the same place (a
+            # wave of the same actors): one of them is enough to see
+            sig = (E["f"], E["l"], tuple(sorted(tuple(kv) for kv in E["kv"])))
+            if sig in same:
+                continue
+            same.add(sig)
+            keys = {k for k, _ in E["kv"]}
+            rec = {"kv": E["kv"], "f": E["f"], "l": E["l"], "s": E["s"], "x": E["x"][-40:]}
+            if E.get("unk"):
+                rec["u"] = E["unk"]
+            if "origin" in keys and "classname" in keys:
+                placed.append(rec)
+            else:
+                rec["why"] = ("its class isn't known: " + E["unk"]["class"]) if "class" in E.get("unk", {}) else \
+                    ("its origin comes from " + E["unk"]["origin"]) if "origin" in E.get("unk", {}) else \
+                    "the script gives it no origin it can be followed to"
+                unplaced.append(rec)
+        # each map entity's target as the script last sets it
+        last = {}
+        for m in self.mods:
+            last[(m[0], m[1])] = m
+        return {"files": self.files, "base": base, "ents": placed, "un": unplaced[:500], "nun": len(unplaced),
+                "rain": self.rain, "rainv": sorted(self.rain_varies), "glob": sorted(self.globals),
+                "mods": list(last.values())[:5000], "stop": int(self.stopped),
+                "cvars": self.cvars[:2000], "world": self.world[:200], "miss": self.missing[:50]}
+
+
+def script_payload(vfs, vpath, src, paks, ents, say=log):
+    """The level script's spawned entities and settings (LevelScript), or None when the
+    map has no .scr. A script is looked for as the game looks for it, a loose file in the
+    folder the paks are in (main/maps/x.scr) before the paks, and for the map's own
+    script also beside the file opened."""
+    roots = []
+    for p in paks or ():
+        d = os.path.dirname(os.path.abspath(p))
+        if d not in roots:
+            roots.append(d)
+    src_dir = os.path.dirname(os.path.abspath(src))
+
+    def find(path):
+        rel = path.replace("\\", "/").lstrip("/")
+        cands = [os.path.join(src_dir, os.path.basename(rel))]
+        cands += [os.path.join(r, *rel.split("/")) for r in roots]
+        for c in cands:
+            if os.path.isfile(c):
+                try:
+                    with open(c, "rb") as f:
+                        return f.read().decode("latin-1", "replace"), c
+                except OSError:
+                    pass
+        if vfs is not None and rel.lower() in vfs.index:
+            zi, real = vfs.index[rel.lower()]
+            return vfs.read(rel.lower()).decode("latin-1", "replace"), "%s (%s)" % (real, os.path.basename(vfs.zips[zi].filename))
+        return None, None
+
+    stem = os.path.splitext(vpath.replace("\\", "/"))[0]
+    if not stem.lower().startswith("maps/"):
+        stem = "maps/" + os.path.basename(stem)
+    ls = LevelScript(find, ents)
+    # (the file beside the one opened comes first: NormandyBridge_V1.bak's script is
+    # NormandyBridge_V1.scr beside it)
+    if not ls.read(stem + ".scr"):
+        return {"_deps": [os.path.join(r, *(stem + ".scr").split("/")) for r in roots], "none": 1}
+    out = ls.payload(len(ents))
+    # the loose files read, and where the map's own script could appear, so the launcher
+    # rebuilds the page when one changes (or appears)
+    rel = stem + ".scr"
+    deps = [os.path.join(r, *rel.split("/")) for r in roots]
+    deps += [w for _p, w in ls.files if os.path.isabs(w) and os.path.isfile(w)]
+    out["_deps"] = deps
+    say("level script: %s%s - %d entities spawned (%d placed), %d target%s of the map's entities set, "
+        "%d setcvar, %d $world line%s"
+        % (ls.files[0][1], " and %d more" % (len(ls.files) - 1) if len(ls.files) > 1 else "",
+           len(ls.ents), len(out["ents"]), len(out["mods"]), "" if len(out["mods"]) == 1 else "s",
+           len(ls.cvars), len(ls.world), "" if len(ls.world) == 1 else "s"))
+    if ls.stopped:
+        say("! level script: stopped after %d statements (loops that run a very long way)" % ls.MAX_STEPS)
+    if ls.missing:
+        say("  scripts it runs that weren't found: %s" % ", ".join(ls.missing[:8]))
+    return out
+
+
 # ==============================================================================
 #  HTML
 # ==============================================================================
@@ -2658,7 +4023,8 @@ def write_html(path, title, b64, info, theme=None):
 
 
 def page_name(src_name):
-    """mohdm6.bsp -> mohdm6_bsp_view.html, obj_team2.map -> obj_team2_map_view.html."""
+    """mohdm6.bsp -> mohdm6_bsp_view.html, obj_team2.map -> obj_team2_map_view.html,
+    obj_team2.bak -> obj_team2_bak_view.html."""
     stem, ext = os.path.splitext(os.path.basename(src_name))
     return "%s_%s_view.html" % (stem, (ext[1:] or "map").lower())
 
@@ -2701,14 +4067,23 @@ def build(src, args):
     vpath = (args.get("vfs") or os.path.basename(src)).replace("\\", "/")
     name = os.path.basename(vpath)
     stem, ext = os.path.splitext(name)
-    kind = "bsp" if src.lower().endswith(".bsp") else "map"
+    with open(src, "rb") as f:
+        raw = f.read()
+    # A .bak is MOHRadiant's previous save of a .map (or a backed-up .bsp): it opens as
+    # what its first bytes say it is, and what it writes is marked with "_bak" so it can't
+    # be taken for (or overwrite) what the real .map / .bsp writes.
+    bak = src.lower().endswith(".bak") or ext.lower() == ".bak"
+    if bak:
+        kind = "bsp" if raw[:4] in (b"2015", b"EALA") else "map"
+        log("%s is a backup of a %s" % (name, ".bsp" if kind == "bsp" else ".map"))
+    else:
+        kind = "bsp" if src.lower().endswith(".bsp") else "map"
+    ostem = stem + "_bak" if bak else stem
     outdir = args.get("outdir") or os.path.dirname(os.path.abspath(src))
     os.makedirs(outdir, exist_ok=True)
     blobs = Blobs()
     bspinfo = None
     bsp = stats = None
-    with open(src, "rb") as f:
-        raw = f.read()
     if kind == "bsp":
         bsp = MB.Bsp(raw, name)
         log("decompiling %s (.bsp version %d) ..." % (name, bsp.version))
@@ -2732,9 +4107,9 @@ def build(src, args):
         t0 = time.time()
         text, stats = MB.decompile(bsp, tex_size=tex_size, static_classname=entdefs.static_classname, log=log)
         log("decompiled in %.1f s" % (time.time() - t0))
-        map_out = MB.output_map_path(outdir, stem)
-        if os.path.basename(map_out) != stem + ".map":
-            log("(%s.map in that folder isn't one this program wrote, so it's left alone)" % stem)
+        map_out = MB.output_map_path(outdir, ostem)
+        if os.path.basename(map_out) != ostem + ".map":
+            log("(%s.map in that folder isn't one this program wrote, so it's left alone)" % ostem)
         with open(map_out, "w", encoding="latin-1", errors="replace", newline="\n") as f:
             f.write(text)
         log("wrote %s" % map_out)
@@ -2759,6 +4134,19 @@ def build(src, args):
         % (len(ents), kinds["real"], kinds["simple"], kinds["static"], nbrush, npatch, nterr, len(used)))
     if kinds["real"] > 1024:
         log("! %d real entities: more than the game's 1024 entity slots" % kinds["real"])
+    # ---- the level script's spawned entities (drawn after the map's own) -----------------
+    try:
+        scr = script_payload(vfs, vpath, src, paks, ents)
+    except Exception as e:
+        log("! level script left out: %s" % e)
+        scr = None
+    scr_deps = (scr or {}).pop("_deps", [])
+    if scr and scr.get("none"):
+        scr = None
+    scr_ents = []
+    for r in (scr or {}).get("ents", ()):
+        kv = [tuple(x) for x in r["kv"]]
+        scr_ents.append({"kv": kv, "kvd": MB.kv_dict(kv), "brushes": 0, "patches": 0, "terrain": 0})
     # ---- textures -------------------------------------------------------------
     t0 = time.time()
     tcache = TextureCache(os.path.join(cache_dir, "tex") if cache_dir else None)
@@ -2779,7 +4167,7 @@ def build(src, args):
     mb = ModelBuilder(vfs, texs, blobs) if vfs is not None else None
     if mb is not None and not args.get("no_models"):
         t0 = time.time()
-        for ei, e in enumerate(ents):
+        for ei, e in enumerate(ents + scr_ents):
             if ei == 0:
                 continue
             mp = entity_model_path(e["kvd"], entdefs)
@@ -2800,10 +4188,11 @@ def build(src, args):
     # ---- entity definitions for the classes in this map --------------------------
     defs = {}
     counts = {}
-    for e in ents:
+    for i, e in enumerate(ents + scr_ents):
         cls = e["kvd"].get("classname", "")
         cl = cls.lower()
-        counts[cls] = counts.get(cls, 0) + 1
+        if i < len(ents):
+            counts[cls] = counts.get(cls, 0) + 1
         if cl and cl not in defs:
             d = entdefs.get(cl)
             if d:
@@ -2839,6 +4228,19 @@ def build(src, args):
     except Exception as e:
         log("! AI paths left out: %s" % e)
         paths = None
+    # the permanent decals (.dcl) and the leak trail (.lin) beside the map
+    try:
+        dcl = dcl_payload(vfs, vpath, src, texs, blobs)
+    except Exception as e:
+        log("! decals left out: %s" % e)
+        dcl = None
+    try:
+        # the .lin's age says something only beside a .map: a leaking compile writes
+        # its .bsp after the .lin (and the light stage much later)
+        leak = leak_payload(vfs, vpath, src, os.path.getmtime(src) if kind == "map" else None)
+    except Exception as e:
+        log("! leak trail left out: %s" % e)
+        leak = None
     # the light grid (r_light_showgrid) and the rain's reach (cg_rain_drawcoverage)
     lgrid = None
     if bsp is not None:
@@ -2850,6 +4252,11 @@ def build(src, args):
         rain = rain_payload(vfs, vpath)
     except Exception:
         rain = None
+    try:
+        weather = weather_payload(vfs, texs, scr)
+    except Exception as e:
+        log("! weather left out: %s" % e)
+        weather = None
     # the sun flare: the worldspawn's keys as the renderer reads them (a .bsp's entity
     # lump, else the .map's), and for a .bsp which leafs see the sun
     try:
@@ -2880,7 +4287,7 @@ def build(src, args):
               "tex": texs.entries, "models": mb.models if mb else [], "modelOf": model_of,
               "defs": defs, "editorFlags": {str(k): v for k, v in ME.EDITOR_FLAGS.items()},
               "bsp": bspinfo, "lit": lit, "sky": skies, "clouds": clouds, "legend": legend,
-              "vis": vis, "paths": paths, "lg": lgrid, "rain": rain, "sun": sun,
+              "vis": vis, "paths": paths, "lg": lgrid, "rain": rain, "sun": sun, "dcl": dcl, "leak": leak, "scr": scr, "weather": weather,
               "ek": {"simple": sorted(ME.SIMPLE_CLASSES), "dropped": sorted(ME.DROPPED_CLASSES)},
               # the keys a "$" or "#" in front of a key can set (MB.SETTER_KEYS)
               "sk": sorted(MB.SETTER_KEYS)}
@@ -2891,8 +4298,19 @@ def build(src, args):
             "patches": npatch, "terrain": nterr, "textures": len(used), "models": len(model_of),
             "message": world.get("message", ""), "classes": sorted(counts.items(), key=lambda kv: kv[0].lower()),
             "missing": texs.missing[:200], "bsp": bool(bspinfo), "bspVersion": bspinfo["version"] if bspinfo else None,
-            "mapFile": bspinfo["mapFile"] if bspinfo else None,
+            "mapFile": bspinfo["mapFile"] if bspinfo else (os.path.abspath(src) if bak else None),
+            "bak": bak, "decals": (dcl or {}).get("n", 0), "scriptEnts": len(scr_ents), "leak": len((leak or {}).get("p") or ()),
             "netBrushes": ents[0]["brushes"] if ents else 0}
+    # the loose files this page was built from, with their times (0: not there), so the
+    # launcher rebuilds it when one of them changes or appears
+    deps = {}
+    if not args.get("vfs"):
+        deps[os.path.abspath(src)] = None
+    for x in (".scr", ".dcl", ".lin", ".pth"):
+        deps[os.path.splitext(os.path.abspath(src))[0] + x] = None
+    for d in scr_deps:
+        deps[os.path.abspath(d)] = None
+    info["deps"] = [[p, round(os.path.getmtime(p), 3) if os.path.isfile(p) else 0] for p in deps]
     out_html = os.path.join(outdir, page_name(name))
     write_html(out_html, title, b64, info, args.get("theme"))
     log("page data: %.1f MB (%.1f MB before compression) packed in %.1f s"

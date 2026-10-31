@@ -82,6 +82,8 @@ ascending order, so add new ones at the end of their section.
 - rev 74: stopping the camera, as in the Map Viewer. `X` stops it (the CAMERA panel's Free-look lines have `X stop camera` under `R reset camera`, and the shortcut lists, `H` and `F1` in the launcher, have it under Both cameras). It also stops by itself when the page loses the keyboard or the window (`blur`, or the tab hidden), each frame while the page doesn't have the focus, and in the launcher's pane on any click on the launcher, since a key or mouse button let go outside the page never reaches it and the camera kept flying or turning. A drag ends when its button turns out to have been let go outside the page (the next mouse move comes with that button up). Opening the shortcuts window stops it too. `stopCamera()` clears the keys held and ends the drag.
 - rev 75: the camera stays stopped. An auto-repeat of a key the camera has let go of (`e.repeat`) no longer takes the key up again; only a new press does. When the camera was stopped with the key still held (X, a click on the launcher, the page losing the keyboard), the repeats still arriving started it again, and the key's release then went to the launcher, so it flew on. A held key is kept by its lower-case letter (`heldKey`), so a key let go with Shift down (key-up `W` for a `w` pressed before Shift) is let go. `releaseCameraKeys()` lets go of the keys only, and a drag goes on; the launcher calls it when the keyboard went elsewhere (see Launcher). X shows "Camera stopped" in the accent colour beside `H hotkeys` for a moment, as the Map Viewer does (`flash`; `#hint` holds two chips). Pages draw pixel for pixel as before.
 - rev 76: a right-click that opens the browser's own menu stops the camera (a `contextmenu` the page doesn't cancel). The page cancels none, so that is any right-click on it. The menu takes the keyboard while it is open, so a key let go then never reached the page and the camera flew on; in the launcher's pane only the key watch (rev 75) let go of it, once the key came up. In the pane the menu is Edge's (Back, Refresh, Inspect...), which tkwebview2 turns on. Pages draw pixel for pixel as before.
+- rev 77: a Reset button in the game cvars list's head, at its right, after the "N set" / "all at default" count: it sets every cvar that is set back to its default (`resetCvars`), so the count beside the game cvars button reads "none set" again. Greyed while none is set.
+- rev 78: every popup list closes when the window changes size (maximize, restore, a drag of its edge): the surfaces list, which was moved back beside its button, and the game cvars list, which was left where it was (far from its button once the window grew), now close like the animations and attach-to-bone lists.
 
 ## Launcher cache floor (VIEWER_REV_REQUIRED)
 
@@ -110,6 +112,8 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - rev 74: pages built before this have no `stopCamera()` for the launcher to call, and no X.
 - rev 75: pages built before this have no `releaseCameraKeys()` for the launcher to call, a key's auto-repeats start the camera again after it stopped, and X shows no message.
 - rev 76: pages built before this keep flying while a right-click's browser menu is open.
+- rev 77: pages built before this have no Reset button in the game cvars list.
+- rev 78: pages built before this leave the surfaces and game cvars lists open when the window changes size.
 
 ## Launcher (mohaa_launcher.py)
 
@@ -143,6 +147,16 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
   - A click with any mouse button on a launcher widget stops it (`<ButtonPress-1>` to `-3`, `_stop_view_camera`).
   - A key pressed or let go while the launcher has the keyboard makes the page let go of its keys (`<KeyPress>`, `<KeyRelease>`, `_release_view_keys` calling the page's `releaseCameraKeys()`); a drag or a fly-to in the page goes on. The launcher's own shortcuts still work: Tk runs the most specific binding of the `all` tag, so F1 runs F1's.
   - On Windows the keyboard itself is read every 100 ms while a viewer is open (`GetAsyncKeyState` through `KEY_IS_DOWN`, over the camera keys `CAMERA_VKS`). When the last camera key comes up, wherever its key-up went, the page lets go of its keys (`_poll_camera_keys`). Only that change acts, so a key held in the page is never let go of early.
+
+- The Model Viewer and the Map Viewer share their loaded paks through one list,
+  `mohaa_paks.json` beside their settings (`PAKS_SHARED`, `read_shared_paks`,
+  `write_shared_paks`).
+  - Each program writes the list whenever it adds, removes or clears paks
+    (`_paks_changed`).
+  - Each starts with that list (its own `pk3s` when there is none yet) if "Remember
+    loaded paks" is on.
+  - When its window gets the focus, it takes up a list the other changed meanwhile
+    (`_paks_watch`, `_paks_follow`), with a line in its output.
 
 ## Notable fixes (mohaa_view.py)
 
@@ -991,3 +1005,186 @@ Changes to `python_installer_updater.bat` unless noted.
   - The relit pages and probes are byte for byte as rev 31 on mohdm1, all lights off and
     light 108 off, in SwiftShader and llvmpipe. With no light turned off the page is pixel
     for pixel as rev 30.
+- Map Viewer page rev 33 (`MAP_VIEWER_REV` 33, `MAP_VIEWER_REV_REQUIRED` 33): Sun light.
+  - Display has **Sun light** (`-`), on at first, after Lights off. Off takes the sun's and
+    the sky's light (the `ltSun` share: `suncolor` toward `sundirection`, and
+    `sundiffuse` x `sundiffusecolor` from 16 sky directions) out of the baked light.
+  - In the relight (`uSunOn` 0), the share left is the lights still on over all lights and
+    the sun, and a texel nothing traced explains is taken out (it was the sky's).
+  - The light left is no more than twice what the lights still on could give there
+    without shadows: `uCap` x (TOT - OFF), the bound Lights off uses the other way round.
+    Without it, shaded open ground near a light's reach would keep its sky light.
+  - With every light off too, only the ambient floor is left (`ltDark`).
+  - It works with Lights off and Turn off / Turn on in any order. The first time costs
+    what the first Lights off does; after that it is one relight. Nothing is kept: a page
+    opens with the sun on.
+  - Greyed out, with the reason as the tooltip (`-` says the same):
+    - where Lights off is (a `.map` page, no lightmaps, no light entities, no float
+      targets);
+    - on a map without sky faces or a sun colour (m6l3c, m6l3d).
+  - The keys table has a `-` row.
+  - Fix: whether the map has sky came from `LIT.sky`. That list holds only the sky polygons
+    shown, so it was empty when the panel was built. With the Sky filter (`Ctrl+K`) hiding
+    the sky before the first Lights off, the sun's share was left out. The page now looks
+    at the `.bsp`'s polygons themselves (`ltHasSky`).
+  - Checked on mohdm1 (open ground goes dark, the rooms keep their lamps) and m4l3 (the
+    moonlight goes and the lamps' pools stay).
+  - Lights off alone is byte for byte as rev 32. With the sun and every light back on, the
+    page is as it opened; with nothing turned off, pixel for pixel as rev 30.
+- Map Viewer page rev 34 (`MAP_VIEWER_REV` 34, `MAP_VIEWER_REV_REQUIRED` 34):
+  - The game cvars list starts with its own group, "Render distance: farplane fog and
+    culling" (`r_farplane`, `r_farplane_color`, `r_farplane_nocull`, `r_farplane_nofog`),
+    above What the renderer draws.
+  - The camera line at the bottom of the view adds `roll` after pitch while the camera
+    is tilted (Q / E, or angles typed with a roll), the game's way round as Copy ang
+    gives it.
+- Map Viewer page rev 35 (`MAP_VIEWER_REV` 35, `MAP_VIEWER_REV_REQUIRED` 35): actors stand
+  in their idle pose.
+  - A placed model is posed at frame 0 of its `idle` animation. `parse_tik_animations`
+    read only the first animations{} section of the `.tik` with its `$include`s spliced
+    in, but every section counts (TIKI_ParseFile), and a character's idle is in
+    new_generic_human.tik's.
+  - Where an include came first with an animations section of its own (the dialogue
+    .tiks, as in german_waffenss_shutze.tik), no idle was found. The model then had no
+    animation and was drawn in its bind pose: lying flat and half under the floor. That
+    happened to m4l1's Waffen-SS actors.
+  - Where new_generic_human.tik came first, its first section (the balcony scene) gave
+    the first animation in place of idle (m4l1's gestapo officers stood in
+    death_balcony_intro's first frame).
+  - The map builder now reads every section (`every=True`); the Model Viewer's own uses
+    of the parser are unchanged.
+- Map Viewer page rev 36 (`MAP_VIEWER_REV` 36, `MAP_VIEWER_REV_REQUIRED` 36): decals,
+  the leak trail and `.bak` files.
+  - **Decals** (Display, `=`): the map's permanent decals from `maps/<stem>.dcl`
+    (`read_dcl`, `dcl_payload`; tr_marks_permanent.c's format, versions 1 and 2), drawn
+    as fans with their shader times the lit colour the file keeps (white with Full
+    Brightness), blended, polygon-offset, no depth writes. Checked on m2l1 (22 decals:
+    the barracks' letters and numbers, the eagle poster, cracks).
+  - **Leak** (Display, `P`): the compiler's leak trail from `<stem>.lin` (`leak_payload`),
+    drawn through walls with the hole and the entity marked. Turning it on opens a card
+    with the hole, the entity (selectable), every point with Go / Copy, what to fix, and
+    a note when the `.lin` is older than the `.map` beside it. Checked on
+    NormandyBridge_V1.
+  - **.bak** opens like a `.bsp` or `.map` (by its first bytes). Its page is
+    `<stem>_bak_view.html` and a `.bsp` backup's decompile `<stem>_bak.map`. The
+    launcher takes `.bak` in Browse, drag-and-drop, the command line and the tree, and
+    File -> Clear built maps knows its pages. The tree's tooltip on a `.pth`, `.dcl` or
+    `.lin` says the viewer shows it with its map.
+  - Display buttons that are greyed out no longer show as on.
+  - Keys table: `=` and `P` rows.
+- Map Viewer page rev 37 (`MAP_VIEWER_REV` 37, `MAP_VIEWER_REV_REQUIRED` 37): the level
+  script's entities.
+  - The build reads the map's `.scr` and the map scripts it runs (`LevelScript`,
+    `script_payload`): `spawn` lines and the lines that give the same entity its origin,
+    angles, targetname, target, model, scale or setsize, plus `setcvar` and `$world`
+    lines. Scripts are found as the game finds them: a loose `main/maps/<map>.scr` before
+    the paks, the file beside the one opened first.
+  - The page adds the entities it could place after the map's own (`scriptEnts`), so
+    waypoints and their `target` paths, script models, origins and actors are drawn,
+    labelled, linked and selectable. Show -> Script ents (`Ctrl+E`) hides them. Their info
+    card shows the script lines that placed them; the stats line opens a Level script
+    card with the files, the placed and unplaced spawns, the setcvars and the `$world`
+    lines.
+  - They have no entity number, aren't counted with the map's entities, and aren't `.pth`
+    nodes or static props (`pnEnts`, `isStaticProp`, `entityKinds`, `gameEnts`,
+    `dlStaticBoxes` skip them).
+  - Launcher: a page is rebuilt instead of reused when a loose file it was built from
+    changed, appeared or went (`deps` in the page's summary: the map opened from disk,
+    its `.scr`, `.dcl`, `.lin`, `.pth`, and the loose scripts read). Before, editing a
+    loose `.map` and opening it again showed the old page.
+  - Keys table: `Ctrl+E`.
+  - `RUN -- Medal of Honor Map Viewer.bat` opens a `.bak` dropped on it (rev 36 missed it).
+- Docs: the README's Map Viewer section brought up to date (lighting, Lights off, Sun
+  light, decals, leak trail, `.bak`, level script, doors, game cvars); `doors-notes.md`
+  and `game-cvars-candidates.md` added to these notes.
+- Map Viewer page rev 38 (`MAP_VIEWER_REV` 38, `MAP_VIEWER_REV_REQUIRED` 38): the level
+  script is walked, not just read line by line.
+  - `LevelScript` reads the script as a tree (blocks, `for`, `while`, `if` / `else`,
+    `switch`) and runs it once with what it can work out: loops with a known condition run
+    turn by turn with their counter set (up to 4096 turns), `if` takes its known branch or
+    both, and a variable the branches or an uncounted loop leave different is unknown.
+  - `$( expression )` names an entity, `NULL` and `!= NULL` work, and so do comparisons,
+    `&&` / `||` / `!`, `* / %`, `++`, `--` and `+=`. Conditions with a call in them
+    (`getcvar(x)`) are unknown: before, `getcvar` read as a word and counted as true.
+  - So `$("fhe" + local.q).target = $("fhe" + (local.q + 1))` in a `for` loop gives each
+    waypoint its target, and the waypoint chains of a remastered m3l1b are linked.
+  - A line setting the `target` of one of the map's own entities is applied in the page
+    (`mods`), with a "Changed by the level script" section on its card and a list in the
+    script card.
+  - `setcvar` and `$world` lines run in a loop are listed once.
+  - The map's title (its worldspawn message) is under the stats, above the level script's
+    line, which now reads "N entities placed, R real placed, M not, K setcvar".
+- Map Viewer page rev 39 (`MAP_VIEWER_REV` 39, `MAP_VIEWER_REV_REQUIRED` 39): the level
+  script's threads run with their `self` and parameters.
+  - Each script is split at its labels. `thread`, `waitthread`, `exec file.scr::label`
+    (with an entity in front or not) read the label then, with that entity as `self` and
+    the arguments in its parameters (`NIL` where none is given). A thread run for each
+    MG42 gun (`bipod local.exists local.origin local.angles:`, `self.origin + ( -1.4 0 1 )`)
+    now puts a bipod under each gun.
+  - `self`, `self.<prop>`, `local.x.<prop>` for an entity passed in, and `<ent>.origin +=`
+    are followed. Labels nothing runs by name are still read once on their own.
+  - Guards: no recursion, 24 calls deep at most; a `while` that waits runs once; a
+    `thread` / `exec`'s changes to `level.` variables don't reach its caller (m6l3a's
+    respawn loop ran 4096 times through its death thread); one line spawns at most 1024;
+    identical spawns of one line are drawn once. All 54 retail map scripts read in 0.9 s.
+- Map Viewer page rev 40 (`MAP_VIEWER_REV` 40, `MAP_VIEWER_REV_REQUIRED` 40): weather.
+  - **Weather** (Display, `Y`; `cg_rain`): rain and snow in the map's `func_rain` boxes the
+    client has, made as `CG_Rain` makes them each client frame (`com_maxfps`, 85): drops
+    per box from its area and the density, cut to `rain_min_dist` round the viewer, the
+    game's random numbers, beams that fall to the bottom of the box (through roofs, as in
+    game), drawn as streaks or, for the snow shaders, camera-facing flakes, additive.
+    All drops share MAX_BEAMS (4096), so slow snow from high boxes clumps and gaps as in
+    game. 1.11 (drops from the top of the box) or 2.0 / OpenMoHAA (anywhere in its height,
+    10 s at most) with `com_target_game`.
+  - Game cvars, Weather group: `cg_rain`, `cg_weather` (weather.scr's presets, or `map`),
+    `cg_rain_density`, `_speed`, `_speed_vary`, `_slant`, `_length`, `_width`,
+    `_min_dist`, `_shader`, `_numshaders`, `vss_wind_x` / `_y`, `com_maxfps`,
+    `com_target_game`, `cg_rain_wholemap` (viewer only: the whole map one rain box) and
+    `cg_rain_drawcoverage` (moved here; it now uses `cg_rain_min_dist`). The list's foot
+    counts the beams falling and the drops not started for want of a beam.
+  - Their defaults are the map's: the build reads `level.rain_*` and `setcvar "cg_rain_*"`
+    from its script (m6l1a's snow, m6l2a's), and global/weather.scr's middle setting for
+    m5l1a / m5l1b. The pictures of textures/rain and textures/snow0 to snow11 and their
+    `rgbGen constant` come with every page (`weather_payload`).
+  - Keys table: `Y`.
+- Map Viewer page rev 41 (`MAP_VIEWER_REV` 41, `MAP_VIEWER_REV_REQUIRED` 41,
+  `INDEX_VERSION` 9): thunder and moving leaves.
+  - `cg_thunder` (game cvars, under `cg_rain`; not a game cvar): global/weather.scr's
+    lightning at its own timings, without sound. A flash clears the screen without the sky
+    (`r_fastsky 1`) to the farplane colour 0.9 0.9 0.9 (or 0.5 0.5 1 without a farplane)
+    and shows the `$weatherF` windows, which are hidden between flashes. The time between
+    strikes is the map script's `level.thundertime`, else 6 on weather.scr maps, else 20.
+  - Models move by their shader's `deformVertexes wave` / `flap` (the trees' leaves), with
+    the vertex normals and a per-instance static flag; static models' waves are scaled by
+    `r_static_shadermultiplier0` .. `3` (new rows in the Weather group, default 1; 1.8 for
+    multiplier 1 on weather.scr maps, its `(raindensity + 1.5) / 2.5` at the middle storm).
+    The build reads each shader's first wave or flap deform (`_deform`).
+  - LevelScript also keeps `level.thundertime`.
+- Map Viewer page rev 42 (`MAP_VIEWER_REV` 42, `MAP_VIEWER_REV_REQUIRED` 42): Shift+click a
+  green (selected) row in the Find, Classes, Textures or Entities list to deselect that
+  entity, every entity of the class, or everything using the texture (`deselectRow`), with
+  a "Shift-click any green text to deselect it" hint under each tab's counts. Shift+click
+  an entity row that isn't green adds it to the selection instead of replacing it.
+- Map Viewer page rev 43 (`MAP_VIEWER_REV` 43, `MAP_VIEWER_REV_REQUIRED` 43): the Find
+  section's Entities tab starts with the client slots, `entity 0` to `sv_maxclients - 1`,
+  greyed out and not clickable. Entity 0's tooltip is "reserved for $player, or $player[1]
+  in multiplayer", each other slot's "reserved for $player[N] in multiplayer".
+- Map Viewer page rev 44 (`MAP_VIEWER_REV` 44, `MAP_VIEWER_REV_REQUIRED` 44): the
+  `cg_weather` and `cg_rain_shader` tooltips start their list of choices on a new line.
+- Map Viewer page rev 45 (`MAP_VIEWER_REV` 45, `MAP_VIEWER_REV_REQUIRED` 45): each weather
+  beam keeps the shader, length and width it started with (`WX.sh` is now a number in
+  `WX.shTab`, with `WX.len` / `WX.wid`), as CG_CreateBeam stores them. Before, changing
+  cg_weather redrew the drops already falling with the new settings: map snow's
+  snow0..snow11 drops became white squares (their shader number pointed past the new list)
+  and snow_original's flakes grew at once to blizzard's width.
+- Map Viewer page rev 46 (`MAP_VIEWER_REV` 46, `MAP_VIEWER_REV_REQUIRED` 46): a Reset
+  button at the right of the game cvars list's head, after the "N set" / "all at default"
+  count, sets every cvar that is set back to its default (`resetCvars`; cg_weather first,
+  whose `map` puts the cg_rain_ cvars back to the map's own). Greyed while none is set.
+- Map Viewer page rev 47 (`MAP_VIEWER_REV` 47, `MAP_VIEWER_REV_REQUIRED` 47): the
+  mouse-over's green outline and the selection's outline are drawn after the lines
+  (`drawOutlines`), so with Wire on the hovered brush's edges turn green instead of staying
+  under Wire's white edges.
+- Map Viewer page rev 48 (`MAP_VIEWER_REV` 48, `MAP_VIEWER_REV_REQUIRED` 48): the game cvars
+  list closes when the window changes size (maximize, restore...); it used to stay where it
+  was, far from its button once the window grew.
