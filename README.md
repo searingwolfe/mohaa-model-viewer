@@ -268,6 +268,9 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
   its `setcvar` and `$world` lines. Scripts are found as the game finds them: a loose
   `main/maps/<map>.scr` before the paks.
 * **Open door** (`O`) opens and closes doors as the game does.
+* **Run exploder** sets off an exploder's `#set` as `global/exploder.scr` does: the
+  building goes and its chunks fly toward their targets, land and sink away. **Reset
+  exploder** puts it back.
 * **Game cvars** (`` ` ``): the game's debugging cvars, working in the page:
   `r_showtris`, `r_farplane`, `ai_showroutes` (from the map's `.pth`), `sv_showentnums`,
   `sv_showbboxes`, `g_entinfo`, `r_lightmap` and more; Reset at the top of the list sets them all back.
@@ -290,7 +293,8 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
   lines. `Alt+click` selects everything of the same kind, `Ctrl+Alt+click` a whole path
   (a node's `target` chain, before and after it), and `Ctrl+Shift+click` shows a face's
   texture.
-* **Find** any class, targetname, key or texture (`Ctrl+F`), or browse every class and
+* **Find** any class, targetname, key or texture (`Ctrl+F`), with `"exact"`, `$targetname`,
+  `key: value`, `entity 25`, `( x y z )` and `-term` searches, or browse every class and
   texture the map uses; Shift+click a green (selected) row to deselect just that row.
 
 It uses the same Python and packages as the Model Viewer, and both can be open at once.

@@ -234,6 +234,24 @@ run at once.
 - **Hide** (Backspace or the Hide button) and **Show all** (Shift+H) go on a stack that
   `Ctrl+Z` (or the Undo button beside Show all) unwinds one step at a time: a Hide shows
   those things again, a Show all hides again what it showed.
+- **The search box** (Find, `Ctrl+F`) matches entities and textures (`runFind`,
+  `findTerms`). Its terms all have to match, and a term with `-` in front leaves out what
+  it matches instead.
+
+  | You type | It matches |
+  |---|---|
+  | `word` | any key or value containing it (or a texture name) |
+  | `"exact"` | a key's value that is exactly that (or a texture name, whole or its last part) |
+  | `$name` | targetname exactly `name` |
+  | `key: value` | that key exactly that value, with `*` for any letters: `classname: info_*`, `#set: 2`, `texture: caulk`, `entity: 25` (the viewer's number), `entnum: 104` (the game's) |
+  | `key:` | an entity that has that key at all |
+  | `entity 25` | the viewer's entity 25 |
+  | `( x y z )` or `origin: x y z` | an entity whose origin is exactly there |
+
+  Textures are listed only when every term can apply to one (words, `"exact"`,
+  `texture:`). An entity row in Results shows its targetname before its class, and its
+  tooltip has the whole row (targetname, class, entity number, origin, hidden). A texture
+  row's tooltip has its name, its uses and how many of them are hidden.
 - **Results, Classes, Textures, Entities** (the tabs under Find): each tab's counts and
   hints sit above a line, and the list is a section of its own under it. A class row
   selects the class and opens (or closes) the list of its entities; a double-click leaves
@@ -335,6 +353,41 @@ run at once.
   (`doorsAdvance`), so a page left in the background catches up in order. The info card
   has a Door section. A `script_door` moves only for its map script, so its button is
   greyed out.
+- **Exploders** (`global/exploder.scr`): with an `exploder`, `explodersmashed`,
+  `exploderchunk`, `exploderfire` or `explodertrigger` selected, Selection shows **Run
+  exploder** and **Reset exploder**. Run plays the script's `explode` for the selection's
+  `#set` (every set selected): each `$exploder` hides after its `#pause`, each
+  `$explodersmashed` turns solid, and each `$exploderchunk` is thrown toward the
+  script_origin it targets (`explodechunk`). Run greys out until Reset puts the set back
+  as the level starts.
+  - **Nothing is hidden at the start.** In game exploder.scr hides the smashed brushes and
+    the chunks as the level loads; the viewer draws the map as the `.bsp` has it, so
+    obj_team2's chunks are seen. The smashed brushes usually sit inside their exploder.
+    Only the `$exploder` (a brush or a model, such as obj_team2's radio) and the chunks
+    once they are done are hidden, apart from Hide (`EXP.hid`).
+  - **A chunk** gets the way from its origin to its target as its velocity, the up part
+    times 1.5. For 0.2 s it moves through anything (`MOVETYPE_PUSH`). Then `physics_on`
+    makes it bounce (`G_Physics_Toss`): gravity 800, a box trace from its origin with its
+    `mins` / `maxs` (`expTrace`, `CM_TraceThroughBrush`), overbounce 1.4, its sideways speed
+    cut on each bounce, stopped on a floor below 40 units a second. It spins on its own
+    axes: by random amounts, with its biggest spin about the way it is thrown, dying away
+    over 10 to 24 frames from 0.5 s on. The first touch starts `moveitout`, which lowers
+    it by its fall speed / 15 a frame for 48 frames, so it sinks into the ground and,
+    below the floor brush, falls on through the void, as in game. It hides 10 s after its
+    spin stops (the game deletes it), and Reset shows it again even if Hide had hidden it.
+  - **What a chunk can hit:** the world's solid brushes (`CONTENTS_SOLID` and
+    `CONTENTS_FENCE`, no clips), patches and terrain (thin prisms of their triangles), the
+    `func_` brush entities, every `$exploder` still standing and each `$explodersmashed`
+    its set has shown. Other `script_object`s are left out, because their scripts often
+    make them notsolid. Doors are where the `.map` has them.
+  - **Keys:** `#set` and `#pause` are script variables and the game reads them as whole
+    numbers (`SpawnArgs::SpawnInternal` uses atoi), so m5l2a's `#pause .1` is 0. A plain
+    `anglex` / `angley` key isn't a variable, so the spin stays random.
+  - **Not shown:** the emitters (`$exploderfire`), sounds, `radiusdamage`, and a set going
+    off again (`level.exploderrepeat`).
+  - A chunk moves through `entPose` (shared with the doors), and `doorXf` / `movObj` give
+    its current place to the selection, setsize box, label and r_showtris. The info card
+    has an Exploder section.
 - **The legend** (`L`, the "L legend" chip, or the Legend button in a node's card; Help >
   Legend / `F2` in the launcher) explains the node colours and borders, the entity
   markers (setsize boxes included) and every editor surface the retail maps use, rain

@@ -271,6 +271,8 @@ __KEYS_CSS__
        <button class="sm" id="bDoor" style="display:none" title="Open or close the selected door as in game (O)">Open door</button>
        <button class="sm" id="bHide" title="Hide the selection (Backspace). Shift+H shows everything again.">Hide</button>
        <button class="sm" id="bClear" title="Clear the selection (Esc)">Clear</button>
+       <button class="sm" id="bExpRun" style="display:none">Run exploder</button>
+       <button class="sm" id="bExpReset" style="display:none">Reset exploder</button>
        <button class="sm" id="bLightOff" style="display:none" title="Turn the selected lights off, as if they had never been there: the light they gave the map (its lightmaps, vertex light, props and models) goes, the rest stays. Display's Lights off turns every light off">Turn off</button>
        <button class="sm" id="bLightOn" style="display:none" title="Turn the selected lights back on">Turn on</button>
      </div>
@@ -343,7 +345,7 @@ __KEYS_CSS__
    </div>
    <div class="sect">
      <h2>Find</h2>
-     <input type="search" id="findIn" placeholder="class, targetname, key, value, texture..." title="Type to search every entity's keys and values and every texture name. Enter selects all matches; click a result to select it and fly there. (Ctrl+F or /)">
+     <input type="search" id="findIn" placeholder="class, targetname, key, value, texture..." title="Type to search every entity's keys and values and every texture name. Enter selects all matches; click a result to select it and fly there. (Ctrl+F or /)&#10;&#10;&quot;exact value&quot; · $targetname · key: value (classname:, targetname:, texture:, #set:, entity:, entnum:; * for any letters; key: alone for any value) · entity 25 · ( x y z ) for an origin · -term leaves out what it matches">
      <div class="tabs" style="margin-top:7px">
        <button id="tabFind" class="on" title="Search results">Results</button>
        <button id="tabCls" title="Every entity class in the map, like MOHRadiant's Map Info and Entities windows">Classes</button>
@@ -1575,11 +1577,12 @@ let faceVis=null;
 function faceShown(f){
   if(SC.faceCat[f]&hiddenMask)return false;
   if(THU.hid&&THU.ents&&THU.ents.has(SC.faceEnt[f]))return false;
+  if(EXP.hid.size&&EXP.hid.has(SC.faceEnt[f]))return false;
   if(hidEnt.size&&hidEnt.has(SC.faceEnt[f]))return false;
   if(hidPrim.size&&hidPrim.has(SC.facePrim[f]))return false;
   return true;
 }
-function entShown(ei){const X=ENTS[ei];return !(X.cat&hiddenMask)&&!hidEnt.has(ei);}
+function entShown(ei){const X=ENTS[ei];return !(X.cat&hiddenMask)&&!hidEnt.has(ei)&&!EXP.hid.has(ei);}
 // A brush entity whose every face is filtered out (a trigger with Triggers off) loses its
 // label, box and links too.
 let ENTVIS=null;
@@ -3657,7 +3660,7 @@ function rebuildLines(){
     if(!sel&&!X.hasGeo&&!X.marker&&X.model<0)continue;
     const b=X.box,dx=X.hasGeo?doorXf(X.ei):null,o=dx?xfP(dx,b.origin):b.origin;
     const c=sel?[sc[0],sc[1],sc[2],1]:[X.col[0],X.col[1],X.col[2],0.85];
-    if(dx)boxLinesC(sel?H:L,doorCorners(DOORS.get(X.ei),dx),c);      // a door that has moved: its box moved with it
+    if(dx)boxLinesC(sel?H:L,doorCorners(movObj(X.ei),dx),c);         // a door (or a flying exploder chunk) that has moved: its box moved with it
     else boxLines(sel?H:L,[o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]],c);
     if(sel){const r=6;H.push(o[0]-r,o[1],o[2],1,1,1,1,o[0]+r,o[1],o[2],1,1,1,1, o[0],o[1]-r,o[2],1,1,1,1,o[0],o[1]+r,o[2],1,1,1,1, o[0],o[1],o[2]-r,1,1,1,1,o[0],o[1],o[2]+r,1,1,1,1);}
   }
@@ -4078,7 +4081,7 @@ function gvUpdate(){
     for(let r=0;r<ranges.length;r+=2)for(let s=ranges[r];s<ranges[r]+ranges[r+1]&&s<G.ns;s++)if(add(s))any=true;
     // a door that has moved: its origin where it is now, its axes turned with it
     if(any){const dx=doorXf(ei),o=ENTS[ei].origin||[0,0,0];
-      cross(dx?xfP(dx,o):o,dx&&dx.yaw?anglesAxis([0,dx.yaw,0]):I3,1);nbm++;sig=(Math.imul(sig,31)+ei*5+2)|0;}
+      cross(dx?xfP(dx,o):o,dx&&dx.ang?anglesAxis(dx.ang):dx&&dx.yaw?anglesAxis([0,dx.yaw,0]):I3,1);nbm++;sig=(Math.imul(sig,31)+ei*5+2)|0;}
   }
   // models: entities the server sends, static props their leafs list
   const fs=D.bsp&&D.bsp.firstStatic!=null?D.bsp.firstStatic:MAP.ents.length;
@@ -4534,6 +4537,7 @@ function doorsAdvance(now){
 // A turn about its origin by yaw degrees (func_rotatingdoor) or a shift along its "angle"
 // (func_door); null for a door where the .map has it.
 function doorXf(ei){
+  if(EXP.mov.size){const c=EXP.mov.get(ei);if(c)return c.xf;}
   const d=DOORS&&DOORS.get(ei);if(!d||!d.a)return null;
   if(d.kind==='rot'){const r=d.a*Math.PI/180,c=Math.cos(r),s=Math.sin(r);return{R:[c,-s,0,s,c,0,0,0,1],o:d.o,t:[0,0,0],yaw:d.a};}
   return{R:[1,0,0,0,1,0,0,0,1],o:d.o,t:[d.move[0]*d.a,d.move[1]*d.a,d.move[2]*d.a],yaw:0};
@@ -4586,9 +4590,13 @@ function doorGeom(d){
 // Put a door where it is now (d.a): its faces, with the planes and boxes that picking and
 // the see-through test read, the game's polygons and r_showtris's surfaces; its box,
 // label and links follow on the next frame.
-function doorPose(d){
+function doorPose(d){entPose(d,doorXf(d.ei));}
+// Put a brush entity's geometry where transform X has it (null: where the .map has it): a
+// door (doorPose) or a flying exploder chunk (expPose); d has the entity (ei), its origin
+// and box (o, mins, maxs) and a cache for its geometry (gm).
+function entPose(d,X){
   if(!gl)return;
-  const X=doorXf(d.ei),g=doorGeom(d);
+  const g=doorGeom(d);
   if(g.sc){const s=g.sc;xfSpan(X,s.P,SC.pos,s.v0*3);
     gl.bindBuffer(gl.ARRAY_BUFFER,B.pos);gl.bufferSubData(gl.ARRAY_BUFFER,s.v0*12,SC.pos.subarray(s.v0*3,s.v1*3));}
   g.faces.forEach((f,i)=>{const p=g.pl[i];if(!p)return;
@@ -4696,6 +4704,302 @@ function doorInfo(ei){
   const a=GV&&GV.doorArea.get(m.ei);
   if(a&&a[0]>=0&&a[1]>=0)rows.push(['area portal',esc('joins areas '+a[0]+' and '+a[1]+' while it is open (r_showtris)')]);
   return h+kvTable(rows)+'<div class="note">Open door (O) under Selection opens it the way the use key does in game, from where the camera is.</div>';
+}
+
+// ============================================================================
+//  Exploders: Run exploder plays global/exploder.scr's "explode" for a #set
+// ============================================================================
+// global/exploder.scr (Mackey McCandlish's chunk system) as the game runs it, without its
+// sounds and emitters. Every $exploder, $explodersmashed, $exploderchunk, $exploderfire and
+// $explodertrigger has a "#set"; "explode #set" (an explodertrigger, or the map script)
+// sets off every entity of that set, each after its own "#pause":
+//  - an $exploder hides and goes notsolid (exploderOFF);
+//  - an $explodersmashed shows and goes solid (explodersmashedON): here it is drawn all
+//    the time (it usually sits inside its $exploder), so it is only solid from then on
+//    for the chunks to land on;
+//  - an $exploderchunk is thrown toward the script_origin it targets (explodechunk): its
+//    velocity is the way from its origin to the target, the up part times 1.5, at first
+//    as a mover (MOVETYPE_PUSH, through anything) and after 0.2 s with physics_on
+//    (MOVETYPE_BOUNCE, G_Physics_Toss: gravity 800, a box trace against the solid world,
+//    bouncing off at 1.4 with its sideways speed cut, stopping on a floor below 40 units a
+//    second). It spins on its own axes (rotatex/y/z, degrees a second) by its keys or
+//    else by random amounts about its longest way across, the spin dying away over 10 to
+//    24 frames from 0.5 s on. The first thing it touches starts moveitout, which lowers
+//    it by its fall speed / 15 a frame for 48 frames (into the ground). 10 s after the
+//    spin stops it hides (the game deletes it).
+//  - an $exploderfire would play its emitter: not shown here.
+// The game's level.exploderrepeat is 0, so a set explodes once; Reset exploder puts it all
+// back as the level starts. Nothing is hidden or shown at the start here: in game
+// exploder.scr hides the smashed and the chunks as the level loads, but the viewer draws
+// the map as the .bsp has it (obj_team2's chunks are seen, Hide hides any of them).
+// "#" keys are script variables read as whole numbers (atoi in SpawnArgs::SpawnInternal):
+// "#pause" ".1" is 0. Plain keys such as "anglex" "80" are not variables (an unknown
+// command), so the spin is the random one.
+const EXP_TN={exploder:'exploder',explodersmashed:'smashed',exploderchunk:'chunk',exploderfire:'fire',explodertrigger:'trigger'};
+const EXP_FRAME=50;                          // ms: a server frame (sv_fps 20)
+const EXP={sets:null,runs:new Map(),hid:new Set(),mov:new Map(),busy:new Set(),solid:null,grid:null};
+function expKey(ei,k){                        // a "#" key as the game reads it: atoi, else NIL
+  for(const[k0,v]of MAP.ents[ei].kv)if(k0.toLowerCase()==='#'+k){const n=parseInt(v,10);return isFinite(n)?n:0;}
+  return null;}
+function expRole(ei){const t=MAP.ents[ei]&&MAP.ents[ei].kvl.targetname;return t&&EXP_TN[t]||'';}
+function expInit(){
+  EXP.sets=new Map();EXP.runs.clear();EXP.hid.clear();EXP.mov.clear();EXP.busy.clear();EXP.solid=null;EXP.grid=null;
+  for(let ei=1;ei<MAP.ents.length;ei++){const r=expRole(ei);if(!r)continue;
+    const set=expKey(ei,'set');if(set==null)continue;
+    let S=EXP.sets.get(set);if(!S){S={set:set,exploder:[],smashed:[],chunk:[],fire:[],trigger:[]};EXP.sets.set(set,S);}
+    S[r].push(ei);}
+}
+// the sets the selection belongs to
+function expSelSets(){const out=new Set();if(!EXP.sets)return out;
+  for(const ei of selectedEnts()){if(!expRole(ei))continue;const s=expKey(ei,'set');if(s!=null&&EXP.sets.has(s))out.add(s);}
+  return out;}
+function rnd(n){return Math.random()*n;}                 // randomfloat
+function rndi(n){return Math.floor(Math.random()*n);}     // randomint
+// ---- running a set ----------------------------------------------------------------------
+function expRun(set,now){
+  const S=EXP.sets.get(set);if(!S||EXP.runs.has(set))return;
+  const R={set:set,t0:now,k:0,exps:[],sm:[],chunks:[],done:false};
+  const frames=ei=>{const p=expKey(ei,'pause');return p>0?Math.round(p*1000/EXP_FRAME):0;};
+  for(const ei of S.exploder)R.exps.push({ei:ei,at:frames(ei),done:false});
+  for(const ei of S.smashed)R.sm.push({ei:ei,at:frames(ei),on:false});
+  for(const ei of S.chunk){const X=ENTS[ei];if(!X.hasGeo||!X.box)continue;
+    R.chunks.push({ei:ei,at:frames(ei),st:'wait',o0:X.box.origin.slice(),o:X.box.origin.slice(),ang:[0,0,0],vel:[0,0,0],avel:[0,0,0],
+      mins:X.box.mins.slice(),maxs:X.box.maxs.slice(),ground:false,touched:false,sink:0,sinkN:0,ks:0,inc:0,dec:null,hideAt:-1,
+      d:{ei:ei,o:X.box.origin.slice(),mins:X.box.mins.slice(),maxs:X.box.maxs.slice(),gm:null}});}
+  EXP.runs.set(set,R);EXP.busy.add(R);EXP.solid=null;
+}
+// The world's solid brushes, patches and terrain, and the solid brush entities, each a set
+// of planes a box is traced through (CM_TraceThroughBrush); MASK_SOLID: CONTENTS_SOLID and
+// CONTENTS_FENCE (no clips). A patch or terrain triangle is a thin prism. Bucketed on a
+// 512-unit grid across x and y.
+const EXP_CELL=512;
+function expSolids(){
+  if(EXP.grid)return EXP.grid;
+  const L=[];
+  const solidC=(cont,te)=>{let c=(cont|0)&~CONTENTS_DETAIL;if(!c)c=(te.cf|0)|((te.p||[]).some(x=>CLEARS_SOLID.has(x))?0:1);return (c&(1|0x2000))!==0;};
+  const bevel=(pl,mn,mx)=>{pl.push([1,0,0,mx[0]],[-1,0,0,-mn[0]],[0,1,0,mx[1]],[0,-1,0,-mn[1]],[0,0,1,mx[2]],[0,0,-1,-mn[2]]);};
+  const prism=(ei,a,b,c,two)=>{
+    let n=vnorm(vcross(vsub(b,a),vsub(c,a)));if(!n)return;
+    if(!two&&n[2]<0)n=[-n[0],-n[1],-n[2]];
+    const d=vdot(n,a),T=two?1:16,pl=[];
+    if(two){pl.push([n[0],n[1],n[2],d+T],[-n[0],-n[1],-n[2],-(d-T)]);}
+    else pl.push([n[0],n[1],n[2],d],[-n[0],-n[1],-n[2],-(d-T)]);
+    const P=[a,b,c];
+    for(let i=0;i<3;i++){const p=P[i],q=P[(i+1)%3],r=P[(i+2)%3];let e=vnorm(vcross(vsub(q,p),n));if(!e)continue;
+      if(vdot(e,vsub(r,p))>0)e=[-e[0],-e[1],-e[2]];pl.push([e[0],e[1],e[2],vdot(e,p)]);}
+    const mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+    for(const p of P)for(const s of[-T,T])for(let k=0;k<3;k++){const v=p[k]+n[k]*s;if(v<mn[k])mn[k]=v;if(v>mx[k])mx[k]=v;}
+    bevel(pl,mn,mx);L.push({ei:ei,mn:mn,mx:mx,pl:pl});};
+  const pt=v=>[SC.pos[v*3],SC.pos[v*3+1],SC.pos[v*3+2]];
+  for(const p of SC.prims){
+    const e=MAP.ents[p.ent];if(!isFinite(p.mins[0])||e.cls.startsWith('trigger_'))continue;
+    if(p.ent>0&&!WORLDLIKE[e.cls]&&(expRole(p.ent)==='chunk'||expRole(p.ent)==='trigger'))continue;
+    const pr=e.prims[p.bn];if(!pr||!pr.d)continue;
+    if(p.kind===0){const faces=pr.d.faces;if(!faces.length||!solidC(faces[0].cont,texFor(faces[0].tex)))continue;
+      const pl=[];for(const f of faces){const q=planeOf(f);if(q)pl.push(q);}
+      if(!pl.length)continue;bevel(pl,p.mins,p.maxs);
+      L.push({ei:p.ent,mn:p.mins.slice(),mx:p.maxs.slice(),pl:pl});}
+    else{
+      if(p.kind===1&&!solidC(pr.d.cont,texFor(pr.d.tex)))continue;
+      for(let f=p.f0;f<p.f1;f++){
+        if(p.kind===2&&(TEX[SC.faceTex[f]].p||[]).some(x=>CLEARS_SOLID.has(x)))continue;
+        const i0=SC.faceI0[f],n=SC.faceIN[f]/3;
+        for(let t=0;t<n;t++){if(p.kind===1&&(t%4)>=2)continue;      // a patch's quads are listed both ways round
+          const q=i0+t*3;prism(p.ent,pt(SC.tri[q]),pt(SC.tri[q+1]),pt(SC.tri[q+2]),p.kind===1);}}}
+  }
+  const cells=new Map();
+  L.forEach((B,i)=>{const x0=Math.floor(B.mn[0]/EXP_CELL),x1=Math.floor(B.mx[0]/EXP_CELL),y0=Math.floor(B.mn[1]/EXP_CELL),y1=Math.floor(B.mx[1]/EXP_CELL);
+    for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++){const k=x+','+y;let c=cells.get(k);if(!c){c=[];cells.set(k,c);}c.push(i);}});
+  return EXP.grid={L:L,cells:cells,stamp:new Uint32Array(L.length),sn:0};
+}
+// What a thrown chunk can hit now: the world, the func_ brush entities, every $exploder
+// still standing and each $explodersmashed its set has shown. Not an $exploder that has
+// gone (notsolid), a smashed one before its set goes off (exploder.scr makes them notsolid
+// as the level loads), nor the chunks (physics_on 1 leaves MASK_SCRIPT_SLAVE out, and they
+// are notsolid until then).
+function expCanHit(ei){
+  if(ei===0||WORLDLIKE[MAP.ents[ei].cls])return true;
+  if(!EXP.solid){const sol=new Set(),gone=new Set();
+    for(const R of EXP.runs.values()){for(const s of R.sm)if(s.on)sol.add(s.ei);for(const x of R.exps)if(x.done)gone.add(x.ei);}
+    EXP.solid={sol:sol,gone:gone};}
+  const r=expRole(ei);
+  if(r==='smashed')return EXP.solid.sol.has(ei);
+  if(r==='exploder')return !EXP.solid.gone.has(ei);
+  // other script_objects are left out: map scripts often make them notsolid, hide or move
+  // them (spawn detectors, scripted walls), which the viewer can't know; func_ doors and
+  // walls are solid
+  return r!=='chunk'&&MAP.ents[ei].cls.startsWith('func_');
+}
+// G_Trace of a box (mins, maxs about the origin) from s to e: CM_TraceThroughBrush with
+// each plane moved out by the box's corner (SURFACE_CLIP_EPSILON 0.125). Returns the
+// fraction, the plane met, whether it met the world, and whether it started (all) solid.
+function expTrace(s,e,mins,maxs){
+  const G=expSolids(),EPS=0.125,tr={f:1,n:null,world:false,startsolid:false,allsolid:false};
+  const lo=[Math.min(s[0],e[0])+mins[0]-1,Math.min(s[1],e[1])+mins[1]-1,Math.min(s[2],e[2])+mins[2]-1],
+        hi=[Math.max(s[0],e[0])+maxs[0]+1,Math.max(s[1],e[1])+maxs[1]+1,Math.max(s[2],e[2])+maxs[2]+1];
+  const sn=++G.sn;
+  const x0=Math.floor(lo[0]/EXP_CELL),x1=Math.floor(hi[0]/EXP_CELL),y0=Math.floor(lo[1]/EXP_CELL),y1=Math.floor(hi[1]/EXP_CELL);
+  for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++){const c=G.cells.get(x+','+y);if(!c)continue;
+    for(const i of c){if(G.stamp[i]===sn)continue;G.stamp[i]=sn;const B=G.L[i];
+      if(B.mn[0]>hi[0]||B.mx[0]<lo[0]||B.mn[1]>hi[1]||B.mx[1]<lo[1]||B.mn[2]>hi[2]||B.mx[2]<lo[2])continue;
+      if(!expCanHit(B.ei))continue;
+      let enter=-1,leave=1,clip=null,startout=false,getout=false,miss=false;
+      for(const q of B.pl){
+        const ox=q[0]<0?maxs[0]:mins[0],oy=q[1]<0?maxs[1]:mins[1],oz=q[2]<0?maxs[2]:mins[2];
+        const dist=q[3]-(ox*q[0]+oy*q[1]+oz*q[2]);
+        const d1=s[0]*q[0]+s[1]*q[1]+s[2]*q[2]-dist,d2=e[0]*q[0]+e[1]*q[1]+e[2]*q[2]-dist;
+        if(d2>0)getout=true;
+        if(d1>0)startout=true;
+        if(d1>0&&(d2>=EPS||d2>=d1)){miss=true;break;}
+        if(d1<=0&&d2<=0)continue;
+        if(d1>d2){const f=(d1-EPS)/(d1-d2);if(f>enter){enter=f;clip=q;}}
+        else{const f=(d1+EPS)/(d1-d2);if(f<leave)leave=f;}
+      }
+      if(miss)continue;
+      if(!startout){tr.startsolid=true;if(!getout){tr.allsolid=true;tr.f=0;tr.n=null;tr.world=B.ei===0||!!WORLDLIKE[MAP.ents[B.ei].cls];return tr;}continue;}
+      if(enter<leave&&enter>-1&&enter<tr.f){tr.f=Math.max(0,enter);tr.n=clip;tr.world=B.ei===0||!!WORLDLIKE[MAP.ents[B.ei].cls];}
+    }}
+  return tr;
+}
+// G_PushEntity: the box moved as far as the trace lets it
+function expPush(c,mv){
+  const s=c.o,e=[s[0]+mv[0],s[1]+mv[1],s[2]+mv[2]],t=expTrace(s,e,c.mins,c.maxs);
+  c.o=[s[0]+mv[0]*t.f,s[1]+mv[1]*t.f,s[2]+mv[2]*t.f];
+  if(t.f<1&&!c.touched){c.touched=true;            // explodetouch: moveitout self.velocity[2], its first step at once
+    const num=c.vel[2]/15;c.sink=Math.abs(num);c.sinkN=48;expSink(c);}
+  return t;
+}
+function expSink(c){if(c.sinkN>0){c.sinkN--;c.o[2]-=c.sink;}}
+// one server frame of G_Physics_Toss (MOVETYPE_BOUNCE)
+function expToss(c){
+  const dt=EXP_FRAME/1000;
+  if(c.vel[2]>0)c.ground=false;
+  if(c.ground){for(let k=0;k<3;k++)c.ang[k]+=c.avel[k]*dt;c.vel=[0,0,0];return;}
+  c.vel[2]-=800*dt;                                // G_AddGravity, sv_gravity 800
+  for(let k=0;k<3;k++)c.ang[k]+=c.avel[k]*dt;
+  const mv=[c.vel[0]*dt,c.vel[1]*dt,c.vel[2]*dt];
+  const t=expPush(c,mv);
+  if(t.f===0)expPush(c,[mv[0]*dt*15,mv[1]*dt*15,0]);       // slide
+  if(t.f<1){
+    const n=t.n||[0,0,0],b=(c.vel[0]*n[0]+c.vel[1]*n[1]+c.vel[2]*n[2])*1.4;   // G_ClipVelocity, overbounce 1.4
+    for(let k=0;k<3;k++){c.vel[k]-=n[k]*b;if(c.vel[k]>-0.1&&c.vel[k]<0.1)c.vel[k]=0;}
+    c.vel[0]-=c.vel[0]*dt*1.75;c.vel[1]-=c.vel[1]*dt*1.75;
+    if(n[2]>0.7){c.ground=t.world;                 // a groundentity that doesn't move: the world
+      if(Math.hypot(c.vel[0],c.vel[1],c.vel[2])<40){c.vel=[0,0,0];c.avel=[0,0,0];}}
+  }
+}
+// explodechunk's start: shown, the throw (phyvel) and the spin
+function expThrow(c){
+  const tg=gameKey(c.ei,'target'),t=tg?gameTn(tg)[0]:null,to=t!=null&&ENTS[t]?(ENTS[t].origin||(ENTS[t].box&&ENTS[t].box.origin)):null;
+  if(!to){c.st='dead';return;}                    // no target: the script stops on its error, the chunk stays
+  const o=c.o,v=[o[0]-to[0],o[1]-to[1],o[2]-to[2]],len=Math.hypot(v[0],v[1],v[2]);
+  const n=len>0?[v[0]/len,v[1]/len,v[2]/len]:[0,0,0],sc=-len;
+  c.vec=[n[0]*sc,n[1]*sc,n[2]*sc*1.5];
+  for(let k=0;k<3;k++)c.vel[k]+=c.vec[k];         // physics_velocity, still a mover
+  let ax=rnd(len/3)*(rndi(3)-1),ay=rnd(len/3)*(rndi(3)-1),az=rnd(len/3)*(rndi(3)-1);
+  const xnum=Math.abs(o[0]-to[0]),ynum=Math.abs(o[1]-to[1]);
+  if(xnum>ynum)ax=o[0]>to[0]?len*-0.5-rnd(0.5):len*0.5+rnd(0.5);
+  else az=o[1]>to[1]?len*0.5+rnd(0.5):len*-0.5-rnd(0.5);
+  c.avel=[ax,ay,az];c.spin=[ax,ay,az];
+  c.st='push';
+}
+// One server frame of a running set: the movers and bouncers move (physics), then the
+// script's threads whose wait is over run.
+function expFrame(R){
+  const k=R.k,dt=EXP_FRAME/1000;let vis=false;
+  for(const c of R.chunks){
+    if(c.st==='push'){for(let j=0;j<3;j++){c.o[j]+=c.vel[j]*dt;c.ang[j]+=c.avel[j]*dt;}}
+    else if(c.st==='phys')expToss(c);
+  }
+  for(const x of R.exps)if(!x.done&&k>=x.at){x.done=true;EXP.hid.add(x.ei);EXP.solid=null;vis=true;}
+  for(const s of R.sm)if(!s.on&&k>=s.at){s.on=true;EXP.solid=null;}
+  for(const c of R.chunks){
+    if(c.st==='wait'&&k>=c.at){c.ks=k;expThrow(c);continue;}
+    if(c.st==='dead'||c.st==='wait'||c.st==='gone')continue;
+    if(c.touched&&k>c.tk)expSink(c);
+    const r=k-c.ks;
+    if(r===4){c.st='phys';c.vel=[c.vec[0],c.vec[1],c.vec[2]+1];}    // physics_on 1: velocity (0 0 1), then physics_velocity again
+    if(r===10){c.inc=10+rndi(15);c.dec=c.spin.map(v=>v/c.inc);c.cur=c.spin.slice();}
+    if(c.dec&&r>=10&&r<10+c.inc){for(let j=0;j<3;j++)c.cur[j]-=c.dec[j];c.avel=c.cur.slice();}
+    if(c.dec&&r===10+c.inc+200){c.st='gone';EXP.hid.add(c.ei);vis=true;}   // wait 10, then deleted
+  }
+  for(const c of R.chunks)if(c.touched&&c.tk==null)c.tk=k;
+  R.k++;
+  if(R.chunks.every(c=>c.st==='gone'||c.st==='dead')&&R.exps.every(x=>x.done)&&R.sm.every(s=>s.on))R.done=true;
+  return vis;
+}
+function expXf(c){
+  const ax=anglesAxis(c.ang),o=c.o0;
+  return{R:[ax[0][0],ax[1][0],ax[2][0],ax[0][1],ax[1][1],ax[2][1],ax[0][2],ax[1][2],ax[2][2]],o:o,t:[c.o[0]-o[0],c.o[1]-o[1],c.o[2]-o[2]],ang:c.ang.slice()};
+}
+function expPose(c,home){
+  if(home){EXP.mov.delete(c.ei);entPose(c.d,null);return;}
+  const X=expXf(c);let m=EXP.mov.get(c.ei);if(!m){m={d:c.d,xf:X};EXP.mov.set(c.ei,m);}else m.xf=X;
+  entPose(c.d,X);
+}
+// the brush entity that moves (a door or a flying chunk), for its box
+function movObj(ei){const m=EXP.mov.get(ei);if(m)return m.d;return DOORS&&DOORS.get(ei)||null;}
+// Run the running sets up to now (ms), a server frame at a time (at most 10 s at once);
+// true when anything changed.
+function expAdvance(now){
+  let changed=false,vis=false;
+  for(const R of [...EXP.busy]){
+    let due=Math.floor((now-R.t0)/EXP_FRAME)-R.k;if(due<=0)continue;
+    if(due>200){R.t0+=(due-200)*EXP_FRAME;due=200;}
+    for(let i=0;i<due&&!R.done;i++)if(expFrame(R))vis=true;
+    for(const c of R.chunks)if(c.st==='push'||c.st==='phys'||(c.st==='gone'&&!c.parked)){expPose(c,false);if(c.st==='gone')c.parked=true;}
+    changed=true;
+    if(R.done)EXP.busy.delete(R);
+  }
+  if(vis){rebuildWorld();updateSelPanel();}
+  return changed;
+}
+// ---- the Selection buttons -----------------------------------------------------------------
+function expBtnRender(){
+  const run=$('bExpRun'),rs=$('bExpReset');if(!run)return;
+  const sets=expSelSets();
+  if(!sets.size){run.style.display=rs.style.display='none';return;}
+  run.style.display=rs.style.display='';
+  const L=[...sets].sort((a,b)=>a-b),fresh=L.filter(s=>!EXP.runs.has(s)),ran=L.filter(s=>EXP.runs.has(s));
+  run.disabled=!fresh.length;rs.disabled=!ran.length;
+  const nm=l=>'#set '+l.join(', ');
+  run.title=fresh.length?'Set off exploder '+nm(fresh)+' as global/exploder.scr\'s "explode" does: its $exploder goes, its chunks are thrown toward their targets and land, then vanish (no sounds or emitters). Reset exploder puts it back':
+    'Exploder '+nm(L)+' has gone off: Reset exploder puts it back to set it off again';
+  rs.title=ran.length?'Put exploder '+nm(ran)+' back as the level starts: its $exploder and chunks where the .map has them and shown (a chunk you hid too)':'Exploder '+nm(L)+' hasn\'t gone off';
+}
+function expRunSel(){
+  const sets=[...expSelSets()].filter(s=>!EXP.runs.has(s));
+  if(!sets.length){flash(expSelSets().size?'This exploder has gone off: Reset exploder first':'Select an exploder, explodersmashed, exploderchunk or exploderfire first');return;}
+  const now=performance.now();for(const s of sets)expRun(s,now);
+  const n=sets.reduce((a,s)=>a+EXP.sets.get(s).chunk.length,0);
+  flash('Exploder #set '+sets.join(', ')+' set off'+(n?': '+n+' chunk'+(n>1?'s':'')+' thrown':''));
+  expBtnRender();requestDraw();
+}
+function expReset(sets){
+  sets=sets||[...expSelSets()].filter(s=>EXP.runs.has(s));if(!sets.length)return;
+  for(const s of sets){const R=EXP.runs.get(s);if(!R)continue;
+    EXP.busy.delete(R);EXP.runs.delete(s);
+    for(const x of R.exps)EXP.hid.delete(x.ei);
+    for(const c of R.chunks){EXP.hid.delete(c.ei);hidEnt.delete(c.ei);if(EXP.mov.has(c.ei)||c.st!=='wait')expPose(c,true);}
+    const S=EXP.sets.get(s);if(S)for(const ei of S.chunk){hidEnt.delete(ei);EXP.hid.delete(ei);}}
+  EXP.solid=null;rebuildWorld();selectionChanged();
+  flash('Exploder #set '+sets.join(', ')+' put back');
+}
+// the Exploder part of an info card
+function expInfo(ei){
+  const r=expRole(ei);if(!r||!EXP.sets)return '';
+  const set=expKey(ei,'set');
+  if(set==null)return '<h4>Exploder</h4><div class="note warn">No "#set": global/exploder.scr stops with an error for it.</div>';
+  const S=EXP.sets.get(set),p=expKey(ei,'pause'),rows=[];
+  rows.push(['#set',esc(String(set))+' · '+[['exploder','exploders'],['smashed','smashed'],['chunk','chunks'],['fire','fires'],['trigger','triggers']].map(([k,pl],i)=>S[['exploder','smashed','chunk','fire','trigger'][i]].length+' '+(S[['exploder','smashed','chunk','fire','trigger'][i]].length===1?k:pl)).join(', ')]);
+  const what={exploder:'hides and goes notsolid',smashed:'shows and goes solid (drawn here all the time)',chunk:'is thrown toward its target, lands, and 10 s after it stops spinning is deleted',
+    fire:'plays its emitter (not shown here)',trigger:'sets the exploder off when triggered'}[r];
+  rows.push(['when it goes off',esc('it '+what+(r!=='trigger'?(p>0?', after "#pause" '+p+' s':', at once'):''))]);
+  if(r==='chunk'){const tg=gameKey(ei,'target'),t=tg?gameTn(tg)[0]:null;
+    rows.push(['thrown toward',t!=null?linkEnt(t):'<span class="warn">no target: the script stops with an error</span>']);}
+  const run=EXP.runs.get(set);
+  rows.push(['now',esc(run?(run.done?'gone off':'going off'):'as the level starts')]);
+  return '<h4>Exploder</h4>'+kvTable(rows)+'<div class="note">Run exploder (Selection) sets off its #set as global/exploder.scr does, without sounds or emitters; Reset exploder puts it back. "#pause" is read as a whole number of seconds (atoi), as the game reads a "#" key.</div>';
 }
 
 // ============================================================================
@@ -4890,7 +5194,7 @@ function gameEnts(){
 // setSize(MINS, MAXS), its start coming after its spawn args).
 function gameBox(ei){
   const e=MAP.ents[ei],X=ENTS[ei],b=X.box,k=e.kvl;
-  if(X.hasGeo&&b){const d=DOORS&&DOORS.get(ei)||null;return{o:b.origin,mins:b.mins,maxs:b.maxs,ang:[0,0,0],door:d,dx:d?doorXf(ei):null};}
+  if(X.hasGeo&&b){const d=DOORS&&DOORS.get(ei)||null,m=movObj(ei);return{o:b.origin,mins:b.mins,maxs:b.maxs,ang:[0,0,0],door:d,mv:m,dx:m?doorXf(ei):null};}
   const o=X.origin;if(!o)return null;
   const ang=entAngles(k),ss=parseVec(k.setsize,6);
   if(gameEnts()[ei].g==='actor')return{o:o,mins:[-15,-15,0],maxs:[15,15,94],ang:ang};
@@ -4911,7 +5215,7 @@ function gameTn(name){
   return GAME_TN.get(name)||[];}
 // its corners in G_DebugRotatedBBox's order (doorCorners numbers them the other way round)
 function gameBoxPts(B){
-  if(B.door){const C=doorCorners(B.door,B.dx);return C.map((_,i)=>C[i^7]);}
+  if(B.mv&&B.dx){const C=doorCorners(B.mv,B.dx);return C.map((_,i)=>C[i^7]);}
   return boxPts(B.o,B.mins,B.maxs,anglesAxis(B.ang));}
 function gameOrigin(B){return B.dx?xfP(B.dx,B.o):B.o;}
 function entSolid(ei){
@@ -6026,7 +6330,7 @@ function selBounds(){
   const grow=(a,b)=>{for(let k=0;k<3;k++){mn[k]=Math.min(mn[k],a[k]);mx[k]=Math.max(mx[k],b[k]);}};
   for(const pi of selectedPrims()){const p=SC.prims[pi];if(isFinite(p.mins[0]))grow(p.mins,p.maxs);}
   for(const ei of selectedEnts()){const X=ENTS[ei],b=X.box,dx=X.hasGeo?doorXf(ei):null;
-    if(dx){const q=ptsBounds(doorCorners(DOORS.get(ei),dx));grow(q.mins,q.maxs);}
+    if(dx){const q=ptsBounds(doorCorners(movObj(ei),dx));grow(q.mins,q.maxs);}
     else if(b){const o=b.origin;grow([o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]]);}
     else if(X.anchor)grow(X.anchor,X.anchor);}
   return isFinite(mn[0])?{mins:mn,maxs:mx}:null;
@@ -6109,6 +6413,8 @@ function loop(t){
   }
   // doors on the move, or waiting to close
   const doors=DOORS_BUSY.size?doorsAdvance(performance.now()):false;
+  // exploders going off
+  const exps=EXP.busy.size?expAdvance(performance.now()):false;
   // moving leaves (deformVertexes on models): redrawn 30 times a second while any is seen
   const sway=dvActive()&&performance.now()-DVT.at>=33;if(sway)DVT.at=performance.now();
   // thunder's flashes
@@ -6117,7 +6423,7 @@ function loop(t){
   let wx=false;
   if(wxActive()){wxAdvance(performance.now());wx=true;}else WX.wall=0;
   if(moved){camChanged();draw();}
-  else if(doors||wx||sway)draw();
+  else if(doors||exps||wx||sway)draw();
 }
 // Turn the view dx degrees right and dy degrees down as seen on the screen. With the camera
 // tilted (Q / E), the screen's right and down are tilted too, so the turn is rotated by the
@@ -6431,6 +6737,7 @@ function buildPanel(){
   $('bPath').onclick=()=>{const ei=+$('bPath').dataset.ei;if(ei>0)selectPath({ent:ei,face:-1,prim:-1,point:null},false);};
   $('bTname').onclick=()=>selectSameTargetname(selFocusEnt());
   $('bDoor').onclick=doorUse;
+  $('bExpRun').onclick=expRunSel;$('bExpReset').onclick=()=>expReset();
   $('bLightOff').onclick=()=>setSelLights(false);$('bLightOn').onclick=()=>setSelLights(true);
   $('infoClose').onclick=hideInfo;$('infoCopy').onclick=()=>copyText($('infoBody').innerText);
   $('tabFind').onclick=()=>setTab('find');$('tabCls').onclick=()=>setTab('cls');$('tabTex').onclick=()=>setTab('tex');
@@ -6537,6 +6844,8 @@ function updateSelPanel(){
   if(tl.length>1)$('bTname').title='Select every entity named $'+tn+': '+tl.length+' of them ($, that is Shift+4)';
   // Open door / Close door: when a door is selected
   doorBtnRender();
+  // Run exploder / Reset exploder: when an exploder's entity is selected
+  expBtnRender();
   // Turn off / Turn on: when lights are selected (greyed out where there is no baked light)
   {const lights=ents.filter(ei=>String(MAP.ents[ei].cls).startsWith('light'));
     $('bLightOff').style.display=$('bLightOn').style.display=lights.length?'':'none';
@@ -6563,12 +6872,75 @@ let curTab='find', findRes=[];
 function setTab(t){curTab=t;for(const[id,k]of[['tabFind','find'],['tabCls','cls'],['tabTex','tex'],['tabEnt','ent']])$(id).classList.toggle('on',k===t);renderList();}
 let SEARCH=null;
 function searchText(ei){if(!SEARCH)SEARCH=MAP.ents.map(e=>e.kv.map(kv=>kv[0]+' '+kv[1]).join(' \u0001 ').toLowerCase());return SEARCH[ei];}
+// The search box, a little like a web search. Terms are ANDed; each can start with "-" to
+// leave out what it matches:
+//   word              any key or value (or texture name) that contains it
+//   "a phrase"        a key value (or texture name) that is exactly that
+//   $name             targetname exactly name
+//   key:              an entity that has that key at all ("#set:", "-target:")
+//   key: value        that key exactly that value ("classname: exploder", "#set: 4",
+//                     "texture: x", "entity: 25", "entnum: 104"); * matches any run of letters
+//   entity 25         the viewer's entity 25 (as Selection numbers them)
+//   ( x y z )         an entity whose origin is exactly there
+function findTerms(q){
+  const T=[],re=/(-?)(?:"([^"]*)"?|\(\s*([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s*\)|([^\s:"]+)\s*:\s*(?:"([^"]*)"?|([^\s"]*))|(\S+))/g;
+  let m;
+  while((m=re.exec(q))){
+    const neg=m[1]==='-';
+    if(m[2]!=null){if(m[2].trim())T.push({k:'exact',v:m[2].trim().toLowerCase(),neg:neg});}
+    else if(m[3]!=null)T.push({k:'org',v:[+m[3],+m[4],+m[5]],neg:neg});
+    else if(m[6]!=null){const key=m[6].toLowerCase();let v=(m[7]!=null?m[7]:m[8]||'').trim().toLowerCase();
+      // "origin: 1 2 3" (or "( 1 2 3 )"): the next two numbers belong to it
+      if(key==='origin'){const vx=/^\s*\(?\s*([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s*\)?/.exec(v+q.slice(re.lastIndex));
+        if(vx){re.lastIndex+=vx[0].length-v.length;T.push({k:'org',v:[+vx[1],+vx[2],+vx[3]],neg:neg});continue;}}
+      T.push(v?{k:'kv',key:key,v:v,neg:neg}:{k:'has',key:key,neg:neg});}
+    else{const w=m[9].toLowerCase();
+      // "entity 25": the word entity followed by a number
+      const nx=/^\s+(\d+)(?=\s|$)/.exec(q.slice(re.lastIndex));
+      if((w==='entity'||w==='ent')&&nx){T.push({k:'kv',key:'entity',v:nx[1],neg:neg});re.lastIndex+=nx[0].length;continue;}
+      if(w[0]==='$'&&w.length>1)T.push({k:'kv',key:'targetname',v:w.slice(1),neg:neg});
+      else if(w!=='-')T.push({k:'word',v:w,neg:neg});}
+  }
+  return T;
+}
+function findGlob(pat){
+  if(pat.indexOf('*')<0)return s=>s===pat;
+  const r=new RegExp('^'+pat.split('*').map(x=>x.replace(/[.+?^${}()|[\]\\]/g,'\\$&')).join('.*')+'$');return s=>r.test(s);}
+const FIND_ALIAS={class:'classname',cls:'classname',tn:'targetname',name:'targetname',tex:'texture',shader:'texture',ent:'entity'};
+// does entity ei match term t?
+function findEnt(ei,t){
+  const e=MAP.ents[ei];
+  if(t.k==='word')return searchText(ei).includes(t.v);
+  if(t.k==='exact'){for(const kv of e.kv)if(String(kv[1]).toLowerCase()===t.v)return true;return false;}
+  if(t.k==='has'){const key=FIND_ALIAS[t.key]||t.key;return e.kvl[key]!=null||e.kv.some(kv=>kv[0].toLowerCase()===key);}
+  if(t.k==='org'){const o=ENTS[ei].origin;return !!o&&Math.abs(o[0]-t.v[0])<0.01&&Math.abs(o[1]-t.v[1])<0.01&&Math.abs(o[2]-t.v[2])<0.01;}
+  const key=FIND_ALIAS[t.key]||t.key,ok=findGlob(t.v);
+  if(key==='texture')return false;
+  if(key==='entity')return ok(String(ei));
+  if(key==='entnum'){const R=gameEnts()[ei];return !!R&&R.num>=0&&!R.gone&&ok(String(R.num));}
+  if(key==='origin'){const v=parseVec(t.v,3),o=ENTS[ei].origin;return !!(v&&o)&&v.every((x,i)=>Math.abs(x-o[i])<0.01);}
+  // the key as the game reads it ("$targetname" for targetname), else as written
+  let val=e.kvl[key];if(val==null)for(const kv of e.kv)if(kv[0].toLowerCase()===key){val=kv[1];break;}
+  return val!=null&&ok(String(val).toLowerCase());
+}
+// does texture ti (its name without textures/) match term t? Entity-only terms never do.
+function findTex(nm,t){
+  if(t.k==='word')return nm.includes(t.v);
+  if(t.k==='exact')return nm===t.v||nm.split('/').pop()===t.v;
+  if(t.k==='kv'&&(FIND_ALIAS[t.key]||t.key)==='texture'){const ok=findGlob(t.v);return ok(nm)||ok(nm.split('/').pop());}
+  return false;
+}
 function runFind(q){
-  q=q.trim().toLowerCase();findRes=[];if(!q)return;
-  const words=q.split(/\s+/);
-  for(let ei=0;ei<MAP.ents.length;ei++){const t=searchText(ei);if(words.every(w=>t.includes(w)))findRes.push({e:ei});}
-  const used=texCounts();
-  for(const[ti,c]of used){const nm=TEX[ti].n.replace(/^textures\//,'');if(words.every(w=>nm.includes(w)))findRes.push({t:ti,c:c});}
+  q=q.trim();findRes=[];if(!q)return;
+  const T=findTerms(q);if(!T.length)return;
+  const pos=T.filter(t=>!t.neg),neg=T.filter(t=>t.neg);
+  const texOnly=pos.length&&pos.every(t=>t.k==='kv'&&(FIND_ALIAS[t.key]||t.key)==='texture');
+  if(!texOnly)for(let ei=0;ei<MAP.ents.length;ei++){
+    if(pos.every(t=>findEnt(ei,t))&&!neg.some(t=>findEnt(ei,t)))findRes.push({e:ei});}
+  // textures only when every term can say something of a texture
+  if(pos.some(t=>t.k==='org'||t.k==='has'||(t.k==='kv'&&(FIND_ALIAS[t.key]||t.key)!=='texture')))return;
+  for(const[ti,c]of texCounts()){const nm=TEX[ti].n.replace(/^textures\//,'').toLowerCase();
+    if(pos.every(t=>findTex(nm,t))&&!neg.some(t=>findTex(nm,t)))findRes.push({t:ti,c:c});}
 }
 let _texCounts=null;
 function texCounts(){if(_texCounts)return _texCounts;const m=new Map();for(let f=0;f<SC.nf;f++){const t=SC.faceTex[f];m.set(t,(m.get(t)||0)+1);}
@@ -6610,11 +6982,13 @@ function renderList(){
   // hidden (by Hide or a Show button) in red; a class with only some of its entities
   // hidden in yellow
   const shown=ei=>ei===0||entVisible(ei);
-  const entRow=(ei,sub)=>{const e=MAP.ents[ei],X=ENTS[ei],sel=SEL.has('e'+ei)||(ei===0),hid=!shown(ei);
+  // the targetname first, then the class; the tooltip has all of it (the row cuts it short)
+  const entRow=(ei,sub)=>{const e=MAP.ents[ei],X=ENTS[ei],sel=SEL.has('e'+ei)||(ei===0),hid=!shown(ei),tn=e.kvl.targetname,cls=e.kvl.classname||'?';
     const where=X.anchor?fvec(X.anchor):'';
-    return '<div class="li'+(sub?' sub':'')+(sel?' sel':'')+(hid?' hid':'')+'" data-e="'+ei+'"'+(hid?' title="hidden"':'')+'><span class="sw" style="background:rgb('+X.col.map(v=>Math.round(v*255)).join(',')+')"'+
+    const tip=(tn?'$'+tn+'  ':'')+cls+'\nentity '+ei+(where?'\n'+where:'')+(hid?'\nhidden':'');
+    return '<div class="li'+(sub?' sub':'')+(sel?' sel':'')+(hid?' hid':'')+'" data-e="'+ei+'" title="'+esc(tip)+'"><span class="sw" style="background:rgb('+X.col.map(v=>Math.round(v*255)).join(',')+')"'+
       (ei?' title="Shift+click: '+(hid?'show':'hide')+' this entity"':'')+'></span><span class="nm">'+
-      esc(sub?(e.kvl.targetname?'$'+e.kvl.targetname:'entity '+ei):(e.kvl.classname||'?')+(e.kvl.targetname?'  $'+e.kvl.targetname:''))+'</span><span class="ct">'+esc(where)+'</span></div>';};
+      esc(sub?(tn?'$'+tn:'entity '+ei):(tn?'$'+tn+'  ':'')+cls)+'</span><span class="ct">'+esc(where)+'</span></div>';};
   // the Entities tab: the targetname, else "entity" and its entity number; the number on the
   // right when the name doesn't give it. The tooltip has its class, numbers and origin.
   const numRow=(ei,R)=>{const e=MAP.ents[ei],X=ENTS[ei],tn=e.kvl.targetname,sel=SEL.has('e'+ei),hid=!shown(ei);
@@ -6623,7 +6997,14 @@ function renderList(){
       esc(tn?'$'+tn:'entity '+R.num)+'</span><span class="ct">'+(tn?R.num:'')+'</span></div>';};
   if(curTab==='find'){
     runFind($('findIn').value);
-    if(!$('findIn').value.trim())head.push('<div class="co">Type above to search every key and value (classname, targetname, target, model, spawnflags...) and every texture name. Enter selects everything found.</div>');
+    if(!$('findIn').value.trim())head.push('<div class="co">Type above to search every key and value (classname, targetname, target, model, spawnflags...) and every texture name. Enter selects everything found.</div>'+
+      '<div class="co">· "exact value"</div>'+
+      '<div class="co">· $targetname</div>'+
+      '<div class="co">· key: value (classname:, texture:, #set:, entity:, entnum:, * in a value matches any text, e.g. classname: info_*)</div>'+
+      '<div class="co">· key: (nothing after it) has that key at all</div>'+
+      '<div class="co">· entity 25</div>'+
+      '<div class="co">· ( x y z ) for an origin</div>'+
+      '<div class="co">· -term leaves out what it matches</div>');
     else if(!findRes.length)head.push('<div class="co">Nothing matches.</div>');
     else{
       head.push('<div class="co">'+findRes.length+' found</div>');
@@ -6687,7 +7068,8 @@ function texRow(ti){
   const tip=' title="Shift+click: '+(all?'show':'hide')+' every brush and entity using it"';
   const sq=u?'<img class="tsq" src="'+u+'" alt=""'+tip+'>'
     :'<span class="sw tsq" style="width:18px;height:18px;background:rgb('+(te.c||[.5,.5,.5]).map(v=>Math.round(v*255)).join(',')+')"'+tip+'></span>';
-  return '<div class="li'+(S.sel?' sel':'')+st+'" data-t="'+ti+'"'+(S.nh?' title="'+(all?'all hidden':S.nh+' of '+S.n+' hidden')+'"':'')+'>'+sq+
+  const rt=te.n.replace(/^textures\//,'')+(te.f&TF_MISSING?' (missing)':'')+'\n'+S.n+' face'+(S.n===1?'':'s')+' and model surfaces use it'+(S.nh?'\n'+(all?'all hidden':S.nh+' of '+S.n+' hidden'):'');
+  return '<div class="li'+(S.sel?' sel':'')+st+'" data-t="'+ti+'" title="'+esc(rt)+'">'+sq+
     '<span class="nm">'+esc(te.n.replace(/^textures\//,''))+(te.f&TF_MISSING?' <span style="color:var(--err)">(missing)</span>':'')+'</span><span class="ct">'+(S.nh?S.nh+' / ':'')+S.n+'</span></div>';}
 // The second click of a double-click on a class or texture row. The first click rebuilds the
 // list, so the row under the mouse is a new element by the second one, and the browser may
@@ -6967,6 +7349,7 @@ function infoEntity(ei){
   }
   if(e.cls==='info_pathnode')h+=pathNodeInfo(ei);
   h+=doorInfo(ei);
+  h+=expInfo(ei);
   // textures of a brush entity
   if(X.hasGeo){const cnt=new Map();for(const pi of primsOfEnt(ei)){const p=SC.prims[pi];for(let f=p.f0;f<p.f1;f++){const t=SC.faceTex[f];cnt.set(t,(cnt.get(t)||0)+1);}}
     if(cnt.size){h+='<h4>Textures</h4>'+kvTable([...cnt.entries()].map(([t,c])=>[c+'x','<a data-tex="'+t+'">'+esc(TEX[t].n.replace(/^textures\//,''))+'</a>']));}}
@@ -7166,6 +7549,7 @@ async function main(){
     if(D.lit){setLoad('Lighting the game\'s polygons…',0.6);await tick();LIT=buildLit();}
     gvInit();
     doorsInit();
+    expInit();
     wxInit();
     const wk=MAP.ents[0]?MAP.ents[0].kvl:{};
     FOG.far=parseFloat(wk.farplane)||0;FOG.col=parseVec(wk.farplane_color,3)||[0.5,0.5,0.5];

@@ -1188,3 +1188,22 @@ Changes to `python_installer_updater.bat` unless noted.
 - Map Viewer page rev 48 (`MAP_VIEWER_REV` 48, `MAP_VIEWER_REV_REQUIRED` 48): the game cvars
   list closes when the window changes size (maximize, restore...); it used to stay where it
   was, far from its button once the window grew.
+- Map Viewer page rev 49 (`MAP_VIEWER_REV` 49, `MAP_VIEWER_REV_REQUIRED` 49): exploders.
+  Run exploder and Reset exploder (Selection) appear with an exploder, explodersmashed,
+  exploderchunk, exploderfire or explodertrigger selected. Run plays global/exploder.scr's
+  "explode" for its #set: the $exploder hides after its #pause, the smashed brushes turn
+  solid, and the chunks are thrown toward their targets. A chunk moves as a mover for 0.2 s,
+  then bounces with physics_on (G_Physics_Toss, a box trace through the solid world,
+  func_ entities and the set's brushes), spins, sinks after its first touch (moveitout)
+  and hides 10 s after its spin stops. Reset puts the set back and shows its chunks
+  (Hide's too). Nothing is hidden at the start. There are no emitters or sounds.
+  - `doorPose` is now `entPose`, shared with the chunks; `doorXf` and `movObj` give a
+    flying chunk's place to the boxes, labels and r_showtris.
+  - The info card has an Exploder section.
+- Map Viewer page rev 50 (`MAP_VIEWER_REV` 50, `MAP_VIEWER_REV_REQUIRED` 50): the search
+  box takes `"exact value"`, `$targetname`, `key: value` (`*` for any letters; `texture:`,
+  `entity:`, `entnum:`, `origin:`), `key:` alone, `entity 25`, `( x y z )` for an origin,
+  and `-` before any term to leave out what it matches (`findTerms`). Results show an
+  entity's targetname before its class. Every Results row has a tooltip with the whole row
+  (targetname, class, entity number, origin, and whether it is hidden), where it used to
+  say only "hidden".
