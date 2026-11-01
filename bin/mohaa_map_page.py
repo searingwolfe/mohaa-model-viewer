@@ -2531,6 +2531,12 @@ function wxInit(){
   for(const k in def){const n='cg_rain_'+k;if(k==='shader'||isFinite(def[k])){
     const v=k==='shader'?def[k]:(k==='numshaders'||k==='slant'||k==='speed_vary'?Math.trunc(def[k]):def[k]);
     CVAR_DEFAULTS[n]=v;CVARS[n]=v;WX.mapDef[n]=v;}}
+  // a map whose own settings make nothing fall (no density from its script, as on every map
+  // without func_rain): the viewer starts at the "rain" preset instead, so Weather shows
+  // something (from the sky); cg_weather map still gives the map's own
+  if(!(+CVARS.cg_rain_density>0)){
+    WX_PRESET_KEYS.forEach((k,i)=>{const n='cg_rain_'+k,v=WX_PRESETS.rain[i];CVAR_DEFAULTS[n]=v;CVARS[n]=v;});
+    CVAR_DEFAULTS.cg_weather='rain';CVARS.cg_weather='rain';WX.noMapRain=true;}
   // weather.scr's tree sway at its middle storm: (raindensity 3 + 1.5) / 2.5
   if(W.wscr){CVAR_DEFAULTS.r_static_shadermultiplier1=1.8;CVARS.r_static_shadermultiplier1=1.8;}
   WX.rainEnts=[];for(let ei=1;ei<MAP.ents.length;ei++)if(MAP.ents[ei].cls==='func_rain')WX.rainEnts.push(ei);
@@ -2722,7 +2728,7 @@ function toggleWeather(){
   setCvar('cg_rain',CVARS.cg_rain?0:1);syncButtons();
   if(!CVARS.cg_rain){flash('Weather off (cg_rain 0)');return;}
   if(!WX.rainEnts.length&&!CVARS.cg_rain_wholemap&&!wxSkyBrushes().length){flash('Weather on, but this map has no func_rain and no sky: the game makes none here. cg_rain_wholemap 1 (game cvars, `) lets it fall over the whole map');return;}
-  if(!(+CVARS.cg_rain_density>0)){flash('Weather on, but its density is 0: set cg_rain_density, or cg_weather snow / rain (game cvars, `)');return;}
+  if(!(+CVARS.cg_rain_density>0)){flash('Weather on, but its density is 0'+(WX.noMapRain&&CVARS.cg_weather==='map'?' (this map sets no rain of its own)':'')+': set cg_rain_density, or cg_weather snow / rain (game cvars, `)');return;}
   flash('Weather on: '+(wxNames()[0]||'no shader')+', density '+CVARS.cg_rain_density+(wxSkyMode()?' · from the sky ('+(WX.rainEnts.length?'every func_rain is hidden':'no func_rain in this map')+')':''));
 }
 
@@ -5984,7 +5990,7 @@ const CVAR_ROWS=[
   t:'global/weather.scr\'s lightning, without its sound: every so many seconds one of its three flickers (the sky gone and the screen and fog flashed white, the $weatherF windows lit), at its own timings',
   ng:'This is not a real game cvar. In-game, thunder only runs on a map whose script runs global/weather.scr (m5l1a, m5l1b), every level.thundertime + a random 0 to 1.5 x level.thundertime seconds (level.thundertime = 20 at first, 6 at the middle of its storm); a map script changes it with level.thundertime = 20'},
  {n:'cg_weather',str:1,d:'snow, rain, blizzard … map',
-  t:'Sets every cg_rain_ value below at once, as weather.scr does:\nsnow, snow_fast, blizzard, hail, snow_original (the game\'s m6l1a snow), rain, drizzle, monsoon, rain_original (the game\'s m5l1a rain), off, map, for the map script\'s values',
+  t:'Sets every cg_rain_ value below at once, as weather.scr does:\nsnow, snow_fast, blizzard, hail, snow_original (the game\'s m6l1a snow), rain, drizzle, monsoon, rain_original (the game\'s m5l1a rain), off, map, for the map script\'s values\n\nIt starts at "map" when the map (or its script) sets the weather, else at "rain", since "map" would make nothing fall',
   ng:'This is not a real game cvar. In-game, the values can only be changed in map script with level.rain_density = 0.2, level.rain_speed = 32 ... (weather.scr copies them from cvars of these names)'},
  {n:'cg_rain_density',num:[0,100],step:0.05,f:1,d:'drops a frame',
   t:'level.rain_density: each client frame, each rain box near you starts sqrt(width x depth) x density / 200 drops (in the square rain_min_dist round you), at most 4096',

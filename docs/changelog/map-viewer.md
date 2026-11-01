@@ -673,6 +673,10 @@ cvars' Weather group (`drawWeather`, `wxRain`, `wxFrame` in the page).
   (`wxCol`, kept per 16-unit column). A spot with no sky brush above it (a tunnel, or
   mohdm7's covered streets) gets none, and the drops never fall through a roof. The
   Rain display filter doesn't count: only Hide does.
+- **A map that sets no weather** (no rain density from its script, as on every map
+  without func_rain) starts at `cg_weather rain` and the rain preset's values, so Weather
+  shows something. `cg_weather map` still gives the map's own, which is nothing; Reset
+  goes back to rain.
 - **Each client frame** (`com_maxfps` a second, the game's default 85, run on the page's
   clock), each box cut to the square `rain_min_dist` round the viewer starts
   `sqrt(width x depth) x density / 200` drops (at most 4096), at random places in that

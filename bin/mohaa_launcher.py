@@ -237,7 +237,7 @@ PAK_ENTRY_MAX=getattr(getattr(MTX,"Vfs",None),"MAX_ENTRY",192*1024*1024)
 # Source mtimes are the usual rebuild trigger, but a zip round-trip can scramble them,
 # so the baked rev is the backstop. Also gates the animation/attachment sidecar caches
 # (see _stamp_anim_cache).
-VIEWER_REV_REQUIRED=78
+VIEWER_REV_REQUIRED=79
 # Sentinel subdir for single-file builds (Browse / drag-drop / Recent / path bar). It
 # routes the output HTML to a "standalone" folder beside "models" instead of the
 # pak-mirroring tree; the null byte means it can't collide with a real folder name.
@@ -5157,8 +5157,9 @@ class App(tk.Tk):
     # page opened in a plain browser never receives MOHAA_ATTACH_MODELS, so the panel stays
     # hidden.
     def _attach_key(self, vpath):
-        return MTX._cache_id("attach|"+(vpath or "").lower()) if MTX is not None \
-               else hashlib.blake2s(("attach|"+(vpath or "").lower()).encode("utf-8","replace"),
+        # "attach2|": attachments built before they carried their load_scale ("ls") are rebuilt
+        return MTX._cache_id("attach2|"+(vpath or "").lower()) if MTX is not None \
+               else hashlib.blake2s(("attach2|"+(vpath or "").lower()).encode("utf-8","replace"),
                                     digest_size=6).hexdigest()
 
     def _send_attach_models(self):
@@ -5193,6 +5194,7 @@ class App(tk.Tk):
             os.makedirs(tdir,exist_ok=True)
             self._attach_idle=None
             self._attach_skelvfs=None; self._attach_tikmap=None; self._attach_parts=[]
+            self._attach_ls=1.0
             skd_path=self._extract_attach_files(vpath,tdir)
             if not skd_path:
                 self._log_q.put(("err",f"{vpath}: no .skd geometry found for this model"))
@@ -5237,6 +5239,7 @@ class App(tk.Tk):
             if manifest: cmd.append("--textures="+manifest)
             if getattr(self,"_attach_idle",None): cmd.append("--attachidle="+self._attach_idle)
             for _pt in getattr(self,"_attach_parts",[]): cmd.append("--attachpart="+_pt)
+            cmd.append("--attachscale=%g"%(getattr(self,"_attach_ls",1.0) or 1.0))
             p=subprocess.run(cmd,capture_output=True,text=True,timeout=180,**NOWIN)
             for line in (p.stdout or "").splitlines():
                 if line.strip(): self._log_q.put(("stdout",line))
@@ -5293,6 +5296,10 @@ class App(tk.Tk):
             # keyed by .skd path, so a .tik path would never match).
             try: self._attach_tikmap=MTX.parse_tik_setup(txt)
             except Exception: self._attach_tikmap=None
+            # its setup `scale` (load_scale, $include'd files too: a player's is 0.52 from
+            # models/player/base/include.txt): the game multiplies its verts by it
+            try: self._attach_ls=MV.parse_tik_scale(txt)
+            except Exception: self._attach_ls=1.0
         elif low.endswith(".skd"):
             want=vpath
         if not want: return None

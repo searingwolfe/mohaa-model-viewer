@@ -84,6 +84,7 @@ ascending order, so add new ones at the end of their section.
 - rev 76: a right-click that opens the browser's own menu stops the camera (a `contextmenu` the page doesn't cancel). The page cancels none, so that is any right-click on it. The menu takes the keyboard while it is open, so a key let go then never reached the page and the camera flew on; in the launcher's pane only the key watch (rev 75) let go of it, once the key came up. In the pane the menu is Edge's (Back, Refresh, Inspect...), which tkwebview2 turns on. Pages draw pixel for pixel as before.
 - rev 77: a Reset button in the game cvars list's head, at its right, after the "N set" / "all at default" count: it sets every cvar that is set back to its default (`resetCvars`), so the count beside the game cvars button reads "none set" again. Greyed while none is set.
 - rev 78: every popup list closes when the window changes size (maximize, restore, a drag of its edge): the surfaces list, which was moved back beside its button, and the game cvars list, which was left where it was (far from its button once the window grew), now close like the animations and attach-to-bone lists.
+- rev 79: an attached model is sized by its own .tik's setup `scale` over the host's, as the game multiplies each entity's verts by its own load_scale. Before, it was drawn at its raw size in the host's unscaled space, so a player (`scale 0.52`, from models/player/base/include.txt) on the jeep (`scale 1.33`) was 2.6 times too big. A rifle (0.52) in a player's hand (0.52) is unchanged. The launcher reads the attached .tik's scale (`$include`s too) and passes it as `--attachscale`; the attachment's record carries it as `ls`, and its cache key changed (`attach2|`) so old attachments are rebuilt.
 
 ## Launcher cache floor (VIEWER_REV_REQUIRED)
 
@@ -114,6 +115,7 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - rev 76: pages built before this keep flying while a right-click's browser menu is open.
 - rev 77: pages built before this have no Reset button in the game cvars list.
 - rev 78: pages built before this leave the surfaces and game cvars lists open when the window changes size.
+- rev 79: pages built before this draw an attached model at its raw size, without its own or the host's .tik `scale`.
 
 ## Launcher (mohaa_launcher.py)
 
@@ -1225,3 +1227,7 @@ Changes to `python_installer_updater.bat` unless noted.
     line and the game cvars list's foot are updated about 8 times a second while moving.
   - On m5l1a a frame sends about 3.6 times fewer triangles (14 times fewer with Cubic clip
     2048), with the same picture.
+- Map Viewer page rev 53 (`MAP_VIEWER_REV` 53, `MAP_VIEWER_REV_REQUIRED` 53): on a map
+  whose own settings make no weather (no density from its script), `cg_weather` and the
+  `cg_rain_*` cvars start at the "rain" preset instead of "map", so turning Weather on
+  makes rain (from the sky on maps without func_rain). The cg_weather tooltip says so.

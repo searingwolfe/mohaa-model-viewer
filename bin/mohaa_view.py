@@ -2497,7 +2497,7 @@ ANIM_PRELOAD_MAX=150
 # Page format revision, baked into each HTML as <!--mohaa-viewer-rev:N-->. Bump it when
 # the page gains features a cached HTML must pick up, and raise VIEWER_REV_REQUIRED in
 # mohaa_launcher.py to match so older pages are rebuilt. History: docs/CHANGELOG.md.
-VIEWER_REV=78
+VIEWER_REV=79
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!--mohaa-viewer-rev:__REV__-->
@@ -6262,8 +6262,10 @@ function attMat3Mul(A,B){
 //   15cmcannon (tik `scale 0.52`)  viewer ( -4  233 -498 ) -> game ( -2   120  -257 )
 //   20mmflak   (tik `scale 0.35`)  viewer ( 2.1 -512 185 ) -> game ( 0.7 -182.5 66.2 )
 // Both land within ~2 units of viewer*load_scale, with residuals on opposite sides.
-// The attachment mesh itself isn't corrected: the engine draws attachments at the parent's
-// scale, which in viewer units is just `scale * verts`.
+// The attachment mesh: each entity's verts are multiplied by its own .tik's load_scale, so in
+// the host's unscaled viewer units an attachment is `scale * verts * its load_scale / the
+// host's` (g.ls / ATT_OFS). A player (0.52) on the jeep (1.33) is 0.39 of its raw size; a
+// rifle (0.52) in a player's hand (0.52) stays 1.
 const ATT_OFS=(DATA.setsizeScale&&DATA.setsizeScale>1e-6)?DATA.setsizeScale:1;
 function attAppend(base){
   if(!ATT_VN||!curWorld)return base;
@@ -6276,7 +6278,7 @@ function attAppend(base){
     if(!R||!T2)continue;
     // User angles on top of the base correction; offsets from world units to viewer units.
     const ao=a.off||[0,0,0],o=[ao[0]/ATT_OFS,ao[1]/ATT_OFS,ao[2]/ATT_OFS];
-    const s=(+a.scale)||1,
+    const s=((+a.scale)||1)*((+g.ls)||1)/ATT_OFS,
           M=attMat3Mul(attAngMat(a.ang),attAngMat(a.bang||[0,0,0]));
     let w=a.vbase*3;
     for(let i=0;i<g.v.length;i++){
@@ -8283,7 +8285,14 @@ def main(argv):
             print(f"- attach textures: {_nt}/{len(_asr)} surfaces"
                   +(f" ({_neff} effect/sprite)" if _neff else ""))
 
-        _rec={"n":os.path.splitext(os.path.basename(_atbuild))[0],
+        # the attached model's own load_scale (its .tik's setup `scale`), from --attachscale:
+        # the page sizes it by that over the host's (each entity's verts are scaled by its own)
+        _als=1.0
+        for _a2 in argv[1:]:
+            if _a2.startswith("--attachscale="):
+                try: _als=float(_a2.split("=",1)[1]) or 1.0
+                except ValueError: pass
+        _rec={"ls":_als,"n":os.path.splitext(os.path.basename(_atbuild))[0],
               "src":_atbuild.replace("\\","/"),
               "v":_av,"t":_atris,"uv":_auv,"sr":_asr,
               "bb":[[round(c,3) for c in _lo],[round(c,3) for c in _hi2]],
