@@ -1572,6 +1572,8 @@ function prepMaterials(){
   matFaces=TEX.map(()=>[]);
   for(let f=0;f<SC.nf;f++)matFaces[SC.faceTex[f]].push(f);
   matOrder=TEX.map((_t,i)=>i).filter(i=>matFaces[i].length);
+  cullPrepFaces();
+  for(const l of matFaces)l.sort((a,b)=>CULL.fk[a]-CULL.fk[b]||a-b);
 }
 let faceVis=null;
 function faceShown(f){
@@ -1600,9 +1602,10 @@ function rebuildWorld(){
   const rep=LIT?LIT.rep:null;
   for(const ti of matOrder){
     for(const want of (rep?[1,0]:[0])){
-      const start=n;
-      for(const f of matFaces[ti])if(faceVis[f]&&(!rep||rep[f]===want)){const a=SC.faceI0[f],c=SC.faceIN[f];tri.set(SC.tri.subarray(a,a+c),n);n+=c;}
-      if(n>start){const op={ti:ti,start:start,count:n-start,m:MAT[ti],rep:want===1,back:(TEX[ti]||{}).g==='caulk',sky:!!((TEX[ti]||{}).f&TF_SKY)};
+      const start=n,sg=cullSegs();
+      for(const f of matFaces[ti])if(faceVis[f]&&(!rep||rep[f]===want)){const a=SC.faceI0[f],c=SC.faceIN[f];
+        sg.add(CULL.fk[f],CULL.fb,f*6,n,c);tri.set(SC.tri.subarray(a,a+c),n);n+=c;}
+      if(n>start){const op={ti:ti,start:start,count:n-start,m:MAT[ti],rep:want===1,back:(TEX[ti]||{}).g==='caulk',sky:!!((TEX[ti]||{}).f&TF_SKY),seg:sg.done()};
         (MAT[ti].kind>=2?drawTrans:drawOps).push(op);}
     }
   }
@@ -1788,9 +1791,17 @@ function auto2Data(R){
 }
 function rebuildModels(){
   for(const R of MODELS){
-    const a=[];for(const ei of R.inst)if(entShown(ei))a.push(...instData(ei));
-    gl.bindBuffer(gl.ARRAY_BUFFER,R.instBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(a.length?a:new Array(INST_FLOATS).fill(0)),gl.DYNAMIC_DRAW);
-    R.n=a.length/INST_FLOATS;
+    const a=[],sp=[],M=R.M,b=M&&M.b;
+    for(const ei of R.inst)if(entShown(ei)){const d=instData(ei);a.push(...d);
+      // its bounding sphere, for culling (cullModels): the model's box turned and scaled
+      if(b){const c=[(b[0][0]+b[1][0])/2,(b[0][1]+b[1][1])/2,(b[0][2]+b[1][2])/2],h=Math.hypot(b[1][0]-b[0][0],b[1][1]-b[0][1],b[1][2]-b[0][2])/2,
+          sc=Math.max(Math.hypot(d[0],d[4],d[8]),Math.hypot(d[1],d[5],d[9]),Math.hypot(d[2],d[6],d[10]));
+        sp.push(d[0]*c[0]+d[1]*c[1]+d[2]*c[2]+d[3],d[4]*c[0]+d[5]*c[1]+d[6]*c[2]+d[7],d[8]*c[0]+d[9]*c[1]+d[10]*c[2]+d[11],h*sc+16);}
+      else sp.push(d[3],d[7],d[11],1e9);}
+    R.all=new Float32Array(a.length?a:new Array(INST_FLOATS).fill(0));R.sph=new Float32Array(sp);R.full=a.length/INST_FLOATS;
+    R.stage=new Float32Array(R.all.length);R.vis=null;
+    gl.bindBuffer(gl.ARRAY_BUFFER,R.instBuf);gl.bufferData(gl.ARRAY_BUFFER,R.all,gl.DYNAMIC_DRAW);
+    R.n=R.full;
   }
 }
 // How a model surface is lit in game (tr_shader.c rgbGen): 2 baked vertex light on a
@@ -2078,11 +2089,12 @@ function litUnitShown(u){
 function rebuildLit(){
   const tri=new Uint32Array(LIT.tri.length);let n=0;
   LIT.ops=[];LIT.trans=[];LIT.sky=[];
+  cullPrepLit();
   for(const[ti,list]of LIT.byTex){
-    const start=n;
-    for(const k of list){const u=LIT.units[k];if(!litUnitShown(u))continue;tri.set(LIT.tri.subarray(u.i0,u.i0+u.n),n);n+=u.n;}
+    const start=n,sg=cullSegs();
+    for(const k of list){const u=LIT.units[k];if(!litUnitShown(u))continue;sg.add(CULL.uk[k],CULL.ub,k*6,n,u.n);tri.set(LIT.tri.subarray(u.i0,u.i0+u.n),n);n+=u.n;}
     if(n===start)continue;
-    const te=TEX[ti]||{f:0}, m=(MAT[ti]&&MAT[ti].lit)||{kind:0,af:0,alpha:1}, op={ti:ti,start:start,count:n-start,m:m};
+    const te=TEX[ti]||{f:0}, m=(MAT[ti]&&MAT[ti].lit)||{kind:0,af:0,alpha:1}, op={ti:ti,start:start,count:n-start,m:m,seg:sg.done()};
     if(te.f&TF_SKY)LIT.sky.push(op);else(m.kind>=2?LIT.trans:LIT.ops).push(op);
   }
   // those that write depth in game first (they hide what is behind them), then by kind
@@ -2149,7 +2161,9 @@ function fogFar(){return farOverride()?CVARS.r_farplane:FOG.far;}
 function fogCol(){return farOverride()?(parseVec(CVARS.r_farplane_color,3)||[0.5,0.5,0.5]):THU.flash?[0.9,0.9,0.9]:FOG.col;}
 function fogOn(){return (view.fog||farOverride())&&fogFar()>0&&!CVARS.r_farplane_nofog;}
 let _drawReq=false;
-function requestDraw(){if(_drawReq||!gl)return;_drawReq=true;requestAnimationFrame(()=>{_drawReq=false;draw();});}
+// A draw is asked for here and made once, by the frame loop (loop), however many things
+// asked for it this frame (a mouse look, a key move, the clouds, the hover outline).
+function requestDraw(){_drawReq=true;}
 function resize(){const r=glcv.getBoundingClientRect();W=Math.max(1,r.width);H=Math.max(1,r.height);DPR=Math.min(2,window.devicePixelRatio||1);
   glcv.width=Math.round(W*DPR);glcv.height=Math.round(H*DPR);cv2.width=Math.round(W*DPR);cv2.height=Math.round(H*DPR);
   ctx.setTransform(DPR,0,0,DPR,0,0);requestDraw();}
@@ -2206,10 +2220,11 @@ function setModelCommon(vp,mode,lit){
   if(lit)gl.uniform1f(PM.u.uShade,0);
 }
 function drawScene(vp,mode){
+  FR=frustumOf(vp);
   gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);gl.frontFace(gl.CW);gl.cullFace(gl.BACK);
   if(mode===2){   // pick ids of the sky faces alone, at their own depth (pickAt)
     setCommon(PW,vp,1);gl.bindVertexArray(B.vTri);gl.disable(gl.BLEND);
-    for(const op of drawOps)if(op.sky){bindMat(PW,op.ti,1);gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
+    for(const op of drawOps)if(op.sky){bindMat(PW,op.ti,1);drawRuns(op);}
     gl.bindVertexArray(null);return;
   }
   const lit=mode===0&&litOn();
@@ -2220,11 +2235,11 @@ function drawScene(vp,mode){
   const gameSky=!simpleSky;
   setCommon(PW,vp,mode);gl.bindVertexArray(B.vTri);gl.disable(gl.BLEND);
   for(const op of drawOps){if(op.sky?gameSky:(lit&&op.rep))continue;bindMat(PW,op.ti,mode);gl.uniform1f(PW.u.uPush,op.back?0.5:0);
-    gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
+    drawRuns(op);}
   gl.uniform1f(PW.u.uPush,0);
   if(lit){
     setCommon(PLIT,vp,0);bindLit(PLIT);gl.bindVertexArray(B.vLit);
-    for(const op of LIT.ops){bindMat(PLIT,op.ti,0,true);gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
+    for(const op of LIT.ops){bindMat(PLIT,op.ti,0,true);drawRuns(op);}
   }
   if(gameSky&&mode===0&&!THU.flash)drawGameSky(vp);
   // models (solid surfaces)
@@ -2241,10 +2256,10 @@ function drawScene(vp,mode){
   if(mode===1){
     // see-through world surfaces are pickable too (that is how you find a trigger)
     setCommon(PW,vp,1);gl.bindVertexArray(B.vTri);
-    for(const op of drawTrans){bindMat(PW,op.ti,1);gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
+    for(const op of drawTrans){bindMat(PW,op.ti,1);drawRuns(op);}
     // the game's sky can be picked only where nothing else is, as it is seen
     if(gameSky){gl.depthRange(1,1);
-      for(const op of drawOps)if(op.sky){bindMat(PW,op.ti,1);gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
+      for(const op of drawOps)if(op.sky){bindMat(PW,op.ti,1);drawRuns(op);}
       gl.depthRange(0,1);}
     gl.bindVertexArray(null);return;
   }
@@ -2256,12 +2271,12 @@ function drawScene(vp,mode){
   if(lit&&LIT.trans.length){
     setCommon(PLIT,vp,0);bindLit(PLIT);gl.bindVertexArray(B.vLit);
     for(const op of LIT.trans){gl.depthMask(!!op.m.dw);blendFor(op.m.kind);bindMat(PLIT,op.ti,0,true);
-      gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
+      drawRuns(op);}
     gl.depthMask(false);
   }
   drawDecals(vp,lit);
   setCommon(PW,vp,0);gl.bindVertexArray(B.vTri);
-  for(const op of drawTransG){if(lit&&op.rep)continue;blendFor(op.m.kind);bindMat(PW,op.ti,0);gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
+  for(const op of drawTransG){if(lit&&op.rep)continue;blendFor(op.m.kind);bindMat(PW,op.ti,0);drawRuns(op);}
   setModelCommon(vp,0,lit);
   for(const R of MODELS){if(!R.n)continue;gl.bindVertexArray(R.vao);
     for(const s of R.surfs){if(!surfOn(R,s))continue;const k=(MAT[s.ti]||{}).kind||0;if(k<2)continue;
@@ -2270,11 +2285,11 @@ function drawScene(vp,mode){
       blendFor(k);bindMat(PM,s.ti,0);gl.drawElementsInstanced(gl.TRIANGLES,s.count,gl.UNSIGNED_INT,s.first*4,R.n);}}
   gl.uniform1i(PM.u.uAuto2,0);
   setCommon(PW,vp,0);gl.bindVertexArray(B.vTri);
-  for(const op of drawTransE){if(lit&&op.rep)continue;blendFor(op.m.kind);bindMat(PW,op.ti,0);gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
+  for(const op of drawTransE){if(lit&&op.rep)continue;blendFor(op.m.kind);bindMat(PW,op.ti,0);drawRuns(op);}
   // the inner sides of see-through brushes the camera is inside
   if(insideOps.length){gl.bindVertexArray(B.vInside);
     for(const op of insideOps){blendFor(4);bindMat(PW,op.ti,0);gl.enable(gl.CULL_FACE);gl.cullFace(gl.FRONT);
-      gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);}
+      drawRuns(op);}
     gl.cullFace(gl.BACK);}
   drawSprites(vp);
   drawWeather(vp);
@@ -2555,16 +2570,49 @@ function wxTex(name){const t=D.weather&&D.weather.tex&&D.weather.tex[name];retur
 function wxVolumes(){
   const out=[];
   if(GV)gvCamera();
-  for(const ei of WX.rainEnts){const B=gameBox(ei);if(!B||(GV&&!gvSent(GV,ei)))continue;
+  // no func_rain shown (none in the map, or Hide hid them all): from the sky instead
+  if(wxSkyMode()){if(!WX.world)WX.world=worldBounds();out.push([WX.world.mins,WX.world.maxs,-2]);}
+  else for(const ei of WX.rainEnts){if(hidEnt.has(ei))continue;const B=gameBox(ei);if(!B||(GV&&!gvSent(GV,ei)))continue;
     const mn=[B.o[0]+B.mins[0],B.o[1]+B.mins[1],B.o[2]+B.mins[2]],mx=[B.o[0]+B.maxs[0],B.o[1]+B.maxs[1],B.o[2]+B.maxs[2]];
     if(mx[0]>mn[0]&&mx[1]>mn[1])out.push([mn,mx,ei]);}
   if(CVARS.cg_rain_wholemap){if(!WX.world)WX.world=worldBounds();out.push([WX.world.mins,WX.world.maxs,-1]);}
   return out;
 }
+// ---- weather from the sky ------------------------------------------------------------------
+// The viewer's own addition, for maps without func_rain (or with every one hidden with
+// Hide): drops start under the highest sky brush whose footprint covers their spot and fall
+// to the first solid thing under it (a roof, the ground, a lower sky brush), so a spot with
+// no sky brush above it (a tunnel, an indoor map such as mohdm7's covered streets) gets
+// none, and rain never falls through a roof. The game has nothing like it: in game, rain
+// falls only in func_rain boxes, through anything inside them.
+function wxSkyBrushes(){
+  if(WX.sky)return WX.sky;
+  if(!SC||!TEX)return [];
+  const L=[];
+  for(const p of SC.prims){if(p.kind!==0||!WORLDLIKE[MAP.ents[p.ent].cls]||!isFinite(p.mins[0]))continue;
+    let sky=false;for(let f=p.f0;f<p.f1;f++)if(TEX[SC.faceTex[f]].f&TF_SKY){sky=true;break;}
+    if(sky)L.push([p.mins[0],p.mins[1],p.mins[2],p.maxs[0],p.maxs[1]]);}
+  return WX.sky=L;
+}
+function wxSkyMode(){return !WX.rainEnts.some(ei=>!hidEnt.has(ei))&&wxSkyBrushes().length>0;}
+// a 16-unit column's sky (the bottom of the highest sky brush over it) and what the drops
+// land on under it, worked out once; null where no sky brush covers it or nothing is under
+const WX_COL=16;
+function wxCol(x,y){
+  const cx=Math.floor(x/WX_COL),cy=Math.floor(y/WX_COL),k=cx+','+cy;
+  if(!WX.cols)WX.cols=new Map();
+  if(WX.cols.has(k))return WX.cols.get(k);
+  const px=(cx+0.5)*WX_COL,py=(cy+0.5)*WX_COL;let top=-Infinity;
+  for(const b of wxSkyBrushes())if(px>=b[0]&&px<=b[3]&&py>=b[1]&&py<=b[4]&&b[2]>top)top=b[2];
+  let c=null;
+  if(top>-Infinity){const s=[px,py,top-1],lo=WX.world?WX.world.mins[2]-1:top-65536,t=expTrace(s,[px,py,lo],[0,0,0],[0,0,0]);
+    if(!t.startsolid&&t.f<1){const bot=s[2]+(lo-s[2])*t.f;if(top-bot>1)c=[top,bot];}}
+  WX.cols.set(k,c);return c;
+}
 function wxRand(){WX.seed=(Math.imul(WX.seed,214013)+2531011)>>>0;return (WX.seed>>>16)&0x7fff;}   // MSVC rand()
 function wxStep(r){return ((Math.imul(214013,r)+2531011)>>16)&0x7fff;}                           // CG_Rain's own
-// one CG_Rain for one box
-function wxRain(mn,mx){
+// one CG_Rain for one box (sky: the viewer's sky weather, each drop in its own column)
+function wxRain(mn,mx,sky){
   const md=+CVARS.cg_rain_min_dist||0,vo=cam.pos;
   const x0=Math.max(mn[0],vo[0]-md),y0=Math.max(mn[1],vo[1]-md),z0=mn[2];
   const x1=Math.min(mx[0],vo[0]+md),y1=Math.min(mx[1],vo[1]+md),z1=mx[2];
@@ -2582,24 +2630,25 @@ function wxRain(mn,mx){
     const sx=(r%mx0)+x0;r=wxStep(r);
     const sy=(r%my0)+y0;r=wxStep(r);
     // 2.0 / OpenMoHAA: anywhere in the box's height; 1.11: at its top
-    const sz=v2?(r%mz0)+z0:z1;
+    let sz=v2?(r%mz0)+z0:z1,zb=z0;
     const dx=vo[0]-sx,dy=vo[1]-sy;
     if(dx*dx+dy*dy>md2)continue;
+    if(sky){const c=wxCol(sx,sy);if(!c)continue;zb=c[1];sz=v2?(r%Math.trunc(c[0]-c[1]+1))+c[1]:c[0];}
     r=wxStep(r);
     const exx=(slant>0?r%slant:0)+sx+wx;r=wxStep(r);
     const eyy=(slant>0?r%slant:0)+sy+wy;
     const sp=(vary>0?r%vary:0)+speed;
-    let life=sp>0?Math.trunc((sz-z0)/sp*1000):1e9;
+    let life=sp>0?Math.trunc((sz-zb)/sp*1000):1e9;
     if(v2&&life>10000)life=10000;
     if(!WX.free.length){WX.stat.missed++;continue;}
     const b=WX.free.pop();
-    WX.sx[b]=sx;WX.sy[b]=sy;WX.sz[b]=sz;WX.ex[b]=exx;WX.ey[b]=eyy;WX.ez[b]=z0;
+    WX.sx[b]=sx;WX.sy[b]=sy;WX.sz[b]=sz;WX.ex[b]=exx;WX.ey[b]=eyy;WX.ez[b]=zb;
     WX.end[b]=WX.t+life;WX.life[b]=life;WX.sh[b]=si;WX.len[b]=blen;WX.wid[b]=bwid;WX.on[b]=1;WX.n++;WX.stat.made++;}
 }
 // one client frame: the boxes' new drops (CG_AddPacketEntities), then the beams whose
 // time is up freed (CG_AddBeams)
 function wxFrame(vols){
-  if(CVARS.cg_rain)for(const v of vols)wxRain(v[0],v[1]);
+  if(CVARS.cg_rain)for(const v of vols)wxRain(v[0],v[1],v[2]===-2);
   const t=WX.t;
   for(let b=0;b<WX_MAX;b++)if(WX.on[b]&&WX.end[b]<t){WX.on[b]=0;WX.n--;WX.free.push(b);}
   WX.stat.frames++;
@@ -2620,7 +2669,7 @@ function wxAdvance(now){
     WX.stat.made=WX.stat.missed=WX.stat.frames=0;WX.stat.at=now;}
 }
 // keep running while drops are falling or can start
-function wxActive(){return WX.n>0||(!!CVARS.cg_rain&&(+CVARS.cg_rain_density>0)&&(WX.rainEnts.length>0||!!CVARS.cg_rain_wholemap));}
+function wxActive(){return WX.n>0||(!!CVARS.cg_rain&&(+CVARS.cg_rain_density>0)&&(WX.rainEnts.length>0||!!CVARS.cg_rain_wholemap||wxSkyBrushes().length>0));}
 function drawWeather(vp){
   if(!WX.n||!WX.P)return;
   const t=WX.t,a=camAxes(),L=[-a.r[0],-a.r[1],-a.r[2]],U=a.u;
@@ -2664,7 +2713,7 @@ function drawWeather(vp){
 }
 function wxSummary(){
   const s=WX.stat.last,v=WX.vols|0;
-  let h='weather: '+WX.n+' of '+WX_MAX+' beams falling, from '+v+' rain box'+(v===1?'':'es')+' the client has';
+  let h='weather: '+WX.n+' of '+WX_MAX+' beams falling, '+(wxSkyMode()?'from the sky ('+(WX.rainEnts.length?'every func_rain hidden':'no func_rain in this map')+')':'from '+v+' rain box'+(v===1?'':'es')+' the client has');
   if(s)h+=' · last second: '+s.made+' started'+(s.missed?', <span class="warn">'+s.missed+' not started (no free beam: MAX_BEAMS)</span>':'')+
     ' in '+s.frames+' client frames';
   return h;
@@ -2672,9 +2721,9 @@ function wxSummary(){
 function toggleWeather(){
   setCvar('cg_rain',CVARS.cg_rain?0:1);syncButtons();
   if(!CVARS.cg_rain){flash('Weather off (cg_rain 0)');return;}
-  if(!WX.rainEnts.length&&!CVARS.cg_rain_wholemap){flash('Weather on, but this map has no func_rain: the game makes none here. cg_rain_wholemap 1 (game cvars, `) lets it fall over the whole map');return;}
+  if(!WX.rainEnts.length&&!CVARS.cg_rain_wholemap&&!wxSkyBrushes().length){flash('Weather on, but this map has no func_rain and no sky: the game makes none here. cg_rain_wholemap 1 (game cvars, `) lets it fall over the whole map');return;}
   if(!(+CVARS.cg_rain_density>0)){flash('Weather on, but its density is 0: set cg_rain_density, or cg_weather snow / rain (game cvars, `)');return;}
-  flash('Weather on: '+(wxNames()[0]||'no shader')+', density '+CVARS.cg_rain_density);
+  flash('Weather on: '+(wxNames()[0]||'no shader')+', density '+CVARS.cg_rain_density+(wxSkyMode()?' · from the sky ('+(WX.rainEnts.length?'every func_rain is hidden':'no func_rain in this map')+')':''));
 }
 
 // ---- moving leaves: deformVertexes on models ----------------------------------------------
@@ -3578,6 +3627,7 @@ function draw(){
   gl.clearColor(bg[0],bg[1],bg[2],1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   VP=viewProj(null);
   updateInside(false);
+  cullModels(frustumOf(VP));
   drawScene(VP,0);
   drawShowSky(VP);
   drawSunFlare(VP);
@@ -3590,9 +3640,101 @@ function draw(){
   if(CVARS.r_light_showgrid)drawLightGrid(VP);
   drawCvarLines(VP);
   draw2D();
-  if(cvEl)cvarWhereRender();
-  updateHint();
+  // the text read-outs: a few times a second while the view moves (a DOM change each frame
+  // costs a layout), and once more when it stops
+  textSoon();
   cloudTick();
+}
+// ---- view culling --------------------------------------------------------------------------
+// Only what can be seen is sent to the graphics card. The world's faces (and the game's
+// polygons) are sorted, within each texture's run, by the 1024-unit cell they lie in, and a
+// cell's part of a run is skipped when its box is outside the view: off to a side or
+// behind, past the far plane (the fog's or r_farplane's far end, the cubic clip), or outside
+// the cubic clip's cube. Faces of brush entities (doors and exploder chunks move) are never
+// skipped. Model instances are skipped by their bounding sphere (cullModels).
+const CULL_CELL=1024;
+const CULL={fk:null,fb:null,uk:null,ub:null};
+let FR=null;                 // the frustum drawScene is drawing with (frustumOf)
+// the six planes of a view-projection matrix, normalised (inside: a x + b y + c z + d >= 0)
+function frustumOf(vp){
+  const m=vp,P=[];
+  for(const[r,sg]of[[0,1],[0,-1],[1,1],[1,-1],[2,1],[2,-1]]){
+    const a=m[3]+sg*m[r],b=m[7]+sg*m[4+r],c=m[11]+sg*m[8+r],d=m[15]+sg*m[12+r],l=Math.hypot(a,b,c)||1;
+    P.push([a/l,b/l,c/l,d/l]);}
+  return{pl:P,clip:clipOn?clipDist:0,eye:[cam.pos[0],cam.pos[1],cam.pos[2]]};
+}
+function boxSeen(F,b,o){
+  if(F.clip){const e=F.eye,c=F.clip;if(b[o]>e[0]+c||b[o+3]<e[0]-c||b[o+1]>e[1]+c||b[o+4]<e[1]-c||b[o+2]>e[2]+c||b[o+5]<e[2]-c)return false;}
+  for(const p of F.pl){if(p[0]*(p[0]>=0?b[o+3]:b[o])+p[1]*(p[1]>=0?b[o+4]:b[o+1])+p[2]*(p[2]>=0?b[o+5]:b[o+2])+p[3]<0)return false;}
+  return true;
+}
+function cullKey(mn,mx){
+  const c=k=>Math.floor(((mn[k]+mx[k])/2+65536)/CULL_CELL)&127;
+  return (c(2)*128+c(1))*128+c(0);
+}
+// each face's cell (-1: a brush entity's, never skipped) and box, from where the .map has it
+function cullPrepFaces(){
+  if(CULL.fk&&CULL.fk.length===SC.nf)return;
+  const nf=SC.nf,K=new Int32Array(nf),Bb=new Float32Array(nf*6),P=SC.pos;
+  for(let f=0;f<nf;f++){const ei=SC.faceEnt[f];
+    const mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+    for(let v=SC.faceV0[f],ve=v+SC.faceVN[f];v<ve;v++)for(let k=0;k<3;k++){const w=P[v*3+k];if(w<mn[k])mn[k]=w;if(w>mx[k])mx[k]=w;}
+    if(!isFinite(mn[0])||(ei>0&&!WORLDLIKE[MAP.ents[ei].cls])){K[f]=-1;Bb.set([-1e30,-1e30,-1e30,1e30,1e30,1e30],f*6);continue;}
+    K[f]=cullKey(mn,mx);Bb.set([mn[0],mn[1],mn[2],mx[0],mx[1],mx[2]],f*6);}
+  CULL.fk=K;CULL.fb=Bb;
+}
+// the same for the game's polygons, and each texture's list of them sorted by cell
+function cullPrepLit(){
+  if(CULL.uk&&CULL.uk.length===LIT.units.length)return;
+  const U=LIT.units,K=new Int32Array(U.length),Bb=new Float32Array(U.length*6),P=LIT.pos,T=LIT.tri;
+  U.forEach((u,k)=>{
+    const mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+    for(let i=u.i0;i<u.i0+u.n;i++){const v=T[i]*3;for(let j=0;j<3;j++){const w=P[v+j];if(w<mn[j])mn[j]=w;if(w>mx[j])mx[j]=w;}}
+    if(!isFinite(mn[0])||(u.ei>0&&!WORLDLIKE[MAP.ents[u.ei].cls])){K[k]=-1;Bb.set([-1e30,-1e30,-1e30,1e30,1e30,1e30],k*6);return;}
+    K[k]=cullKey(mn,mx);Bb.set([mn[0],mn[1],mn[2],mx[0],mx[1],mx[2]],k*6);});
+  CULL.uk=K;CULL.ub=Bb;
+  for(const l of LIT.byTex.values())l.sort((a,b)=>K[a]-K[b]||a-b);
+}
+// a run's parts, one per cell, as its faces are added in cell order
+function cullSegs(){
+  const st=[],ct=[],bb=[];let key=null;
+  return{add(k,B,o,at,n){
+      if(k!==key||!st.length){key=k;st.push(at);ct.push(0);bb.push(Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity);}
+      const q=bb.length-6;ct[ct.length-1]+=n;
+      for(let j=0;j<3;j++){if(B[o+j]<bb[q+j])bb[q+j]=B[o+j];if(B[o+3+j]>bb[q+3+j])bb[q+3+j]=B[o+3+j];}},
+    done(){return st.length>1||(st.length===1&&bb[0]>-1e29)?{st:Int32Array.from(st),ct:Int32Array.from(ct),bb:Float32Array.from(bb)}:null;}};
+}
+// draw a run's parts that can be seen, joining neighbours (and small hidden gaps between
+// them, so a run isn't cut into many tiny draws)
+function drawRuns(op){
+  const S=op.seg;
+  if(!S||!FR){gl.drawElements(gl.TRIANGLES,op.count,gl.UNSIGNED_INT,op.start*4);return;}
+  let a=-1,b=0,gap=0;
+  for(let i=0;i<S.st.length;i++){
+    if(boxSeen(FR,S.bb,i*6)){if(a<0)a=S.st[i];b=S.st[i]+S.ct[i];gap=0;}
+    else if(a>=0){gap+=S.ct[i];if(gap>768){gl.drawElements(gl.TRIANGLES,b-a,gl.UNSIGNED_INT,a*4);a=-1;gap=0;}}
+  }
+  if(a>=0)gl.drawElements(gl.TRIANGLES,b-a,gl.UNSIGNED_INT,a*4);
+}
+// the model instances in view (their bounding spheres), packed into each model's buffer
+function cullModels(F){
+  for(const R of MODELS){
+    const N=R.full|0;if(!N||!R.sph){continue;}
+    const S=R.sph,A=R.all,O=R.stage;let n=0,same=!!R.vis&&R.vis.length===N;
+    const vis=R.vis&&R.vis.length===N?R.vis:(R.vis=new Uint8Array(N));
+    for(let i=0;i<N;i++){
+      const x=S[i*4],y=S[i*4+1],z=S[i*4+2],r=S[i*4+3];let ok=true;
+      if(F.clip){const e=F.eye,c=F.clip+r;if(Math.abs(x-e[0])>c||Math.abs(y-e[1])>c||Math.abs(z-e[2])>c)ok=false;}
+      if(ok)for(const p of F.pl)if(p[0]*x+p[1]*y+p[2]*z+p[3]<-r){ok=false;break;}
+      if(vis[i]!==(ok?1:0)){vis[i]=ok?1:0;same=false;}
+      if(ok){O.set(A.subarray(i*INST_FLOATS,(i+1)*INST_FLOATS),n*INST_FLOATS);n++;}
+    }
+    if(same&&R.n===n)continue;
+    R.n=n;
+    // new storage rather than writing into the buffer the last frame may still be drawing
+    // from (bufferSubData into a buffer in use can wait for the card)
+    if(n){gl.bindBuffer(gl.ARRAY_BUFFER,R.instBuf);gl.bufferData(gl.ARRAY_BUFFER,O.subarray(0,n*INST_FLOATS),gl.DYNAMIC_DRAW);}
+  }
 }
 // The selection: tinted red like MOHRadiant, plus an outline that shows through walls.
 function drawSelection(vp){
@@ -3761,8 +3903,11 @@ function drawLines(vp){
 }
 
 // ---- 2D overlay: labels, the Radiant fly crosshair -------------------------------------
+let _d2d=true;                // the overlay has something on it (cleared only then)
 function draw2D(){
-  ctx.clearRect(0,0,W,H);
+  const any=view.labels||radFly||(view.leak&&leakHas());
+  if(!any&&!_d2d)return;
+  ctx.clearRect(0,0,W,H);_d2d=!!any;
   const selE=selectedEnts();
   if(view.labels){
     // Nearest first, never overlapping: named entities out to 2048 units, unnamed ones
@@ -5919,7 +6064,7 @@ function cvarWhyNot(need){
     if(fullBright)return 'Full Brightness is on: turn it off (B) to see the game\'s lighting';return '';}
   if(need==='lgrid'){if(D.lg)return '';return D.kind==='map'?'a .map has no light grid: open the compiled .bsp':'this .bsp has no light grid';}
   if(need==='spline'){if(MAP.ents.some(e=>e.cls==='info_splinepath'||e.cls==='func_camera'))return '';return 'this map has no info_splinepath or func_camera';}
-  if(need==='rain'){if(MAP.ents.some(e=>e.cls==='func_rain')||CVARS.cg_rain_wholemap)return '';return 'this map has no func_rain (cg_rain_wholemap 1 makes the whole map one)';}
+  if(need==='rain'){if(MAP.ents.some(e=>e.cls==='func_rain')||CVARS.cg_rain_wholemap||wxSkyBrushes().length)return '';return 'this map has no func_rain and no sky (cg_rain_wholemap 1 makes the whole map one)';}
   if(need==='farset'){if(Math.trunc(CVARS.r_farplane))return '';return 'only with r_farplane set';}
   if(need==='fog'){if(fogFar()>0)return '';return 'the map has no farplane (worldspawn "farplane") and r_farplane isn\'t set';}
   return '';
@@ -6422,8 +6567,8 @@ function loop(t){
   // the weather: its client frames run with the page's clock while drops fall or can start
   let wx=false;
   if(wxActive()){wxAdvance(performance.now());wx=true;}else WX.wall=0;
-  if(moved){camChanged();draw();}
-  else if(doors||exps||wx||sway)draw();
+  if(moved)camChanged();
+  if(moved||doors||exps||wx||sway||_drawReq){_drawReq=false;draw();}
 }
 // Turn the view dx degrees right and dy degrees down as seen on the screen. With the camera
 // tilted (Q / E), the screen's right and down are tilted too, so the turn is rotated by the
@@ -6542,7 +6687,7 @@ glcv.addEventListener('wheel',e=>{e.preventDefault();const a=camAxes();
 glcv.addEventListener('mouseleave',()=>{hoverAt=null;setHover(null);updateHoverText(null);});
 // hover read-out, a few times a second at most
 setInterval(()=>{if(!hoverDirty||!hoverAt||drag||!SC||keys.size||flyAnim||radFly)return;hoverDirty=false;
-  const h=hitInfo(pickAt(hoverAt[0],hoverAt[1]),hoverAt[0],hoverAt[1]);setHover(h);updateHoverText(h);draw();},90);
+  const h=hitInfo(pickAt(hoverAt[0],hoverAt[1]),hoverAt[0],hoverAt[1]);setHover(h);updateHoverText(h);requestDraw();},90);
 function updateHoverText(h){
   const el=$('hintHover');if(_flashT&&el.style.color)return;
   if(!h){el.textContent='';return;}
@@ -6551,6 +6696,12 @@ function updateHoverText(h){
   else s='entity '+h.ent+' · '+entName(h.ent)+(h.face>=0?' · '+(TEX[SC.faceTex[h.face]]||{n:'?'}).n.replace(/^textures\//,''):'');
   if(h.point)s+=' · '+fvec(h.point);
   el.textContent=s;
+}
+let _txtT=0,_txtTo=0;
+function textSoon(){
+  const now=performance.now();
+  if(now-_txtT>=120){_txtT=now;if(cvEl)cvarWhereRender();updateHint();return;}
+  if(!_txtTo)_txtTo=setTimeout(()=>{_txtTo=0;_txtT=performance.now();if(cvEl)cvarWhereRender();updateHint();},130);
 }
 function updateHint(){
   $('hintCam').textContent=(camMode==='free'?'free-look ':'radiant-look ')+fvec(cam.pos)+'  yaw '+fnum(cam.yaw)+' pitch '+fnum(cam.pitch)+(Math.abs(wrap180(cam.roll))>=0.005?' roll '+fnum(camAngles()[2]):'')+(clipOn?'  clip '+clipDist:'');
@@ -6758,7 +6909,7 @@ function flareAs(on){return !sunHas()||sunFlare===on;}
 function syncButtons(){
   for(const d of DISPLAY){const b=$('d_'+d.k);if(b&&d.k!=='lights'&&d.k!=='sun'&&d.k!=='weather')b.classList.toggle('on',!!view[d.k]&&!b.disabled);}
   {const b=$('d_weather');if(b){b.classList.toggle('on',!!CVARS.cg_rain);
-    b.classList.toggle('part',!!CVARS.cg_rain&&(!(+CVARS.cg_rain_density>0)||(!WX.rainEnts.length&&!CVARS.cg_rain_wholemap)));}}
+    b.classList.toggle('part',!!CVARS.cg_rain&&(!(+CVARS.cg_rain_density>0)||(!WX.rainEnts.length&&!CVARS.cg_rain_wholemap&&!wxSkyBrushes().length)));}}
   {const b=$('d_sun');if(b)b.classList.toggle('on',LT.ok?(LT.sunHas&&!LT.sunOff):false);}
   // Lights off: on while every light is off, dashed while only some are
   {const b=$('d_lights');if(b){const n=LT.off?LT.off.reduce((a,x)=>a+x,0):0,all=LT.off&&n===LT.off.length&&n>0;

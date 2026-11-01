@@ -95,6 +95,24 @@ run at once.
 
 ## The page
 
+- **Drawing.** The frame loop (`loop`, once per screen refresh) draws at most once a
+  frame. Anything that needs the view redrawn (a mouse look, a key move, the clouds, the
+  hover outline, a cvar) only asks for it (`requestDraw`).
+  - **What is sent to the card is culled to the view** (`frustumOf`, `drawRuns`,
+    `cullModels`). Each texture's run of world faces, and of the game's polygons, is
+    sorted by the 1024-unit cell it lies in (`cullPrepFaces`, `cullPrepLit`). A cell's part
+    is skipped when its box is outside the view's six planes or outside the cubic clip.
+    The far plane is the fog's or r_farplane's far end, or 1.8 times the cubic clip, so
+    Fog and Cubic clip now cut what is drawn and not only what is seen.
+  - Parts next to each other, and small hidden gaps between them, are drawn as one.
+  - Brush entities' faces (doors and exploder chunks move) are never culled.
+  - Model instances are culled by their bounding sphere, and the shown ones are packed into
+    the instance buffer, in new storage each time it changes.
+  - On m5l1a from one spot, the four ways round average 78k triangles a frame instead of
+    280k (20k with Cubic clip at 2048). The picture is the same.
+  - The overlay canvas is cleared only when it has something on it. The text read-outs (the
+    camera line, the game cvars list's foot) change at most about 8 times a second while
+    the view moves, and once more when it stops (`textSoon`).
 - **Data.** One `MMV1` container: a JSON header followed by binary blobs (the `.map`
   text, textures, model meshes), gzip-compressed, base64 in a
   `<script type="application/octet-stream">` block. The page unpacks it with
@@ -647,6 +665,14 @@ cvars' Weather group (`drawWeather`, `wxRain`, `wxFrame` in the page).
   the client has: a box in a cluster the camera's PVS sees (`gvSent`; every box on a `.map`
   page). The box is its brush model's bounds. `cg_rain_wholemap 1` (not a game cvar) adds
   the whole map's box, so a map without rain can be tried.
+- **From the sky** (the viewer's own addition): a map with no `func_rain`, or with every
+  one hidden with Hide, gets its weather from the sky instead (`wxSkyMode`). The drops
+  start in the same square round the viewer, each under the highest sky brush whose
+  footprint covers its spot, and fall to the first solid thing under that (a roof, the
+  ground or a lower sky brush). The test is a point trace through the chunks' solids
+  (`wxCol`, kept per 16-unit column). A spot with no sky brush above it (a tunnel, or
+  mohdm7's covered streets) gets none, and the drops never fall through a roof. The
+  Rain display filter doesn't count: only Hide does.
 - **Each client frame** (`com_maxfps` a second, the game's default 85, run on the page's
   clock), each box cut to the square `rain_min_dist` round the viewer starts
   `sqrt(width x depth) x density / 200` drops (at most 4096), at random places in that

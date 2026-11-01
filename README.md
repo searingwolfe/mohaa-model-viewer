@@ -252,7 +252,8 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
   light** (`-`) takes the sun and sky out of the baked light, so you can see what each
   light gives the map.
 * **Weather** (`Y`): the map's rain and snow, made the way the game makes it in its Rain
-  (`func_rain`) brushes, beam limit and all, with every setting in the game cvars (speed,
+  (`func_rain`) brushes, beam limit and all (a map without any falls from its sky instead,
+  never indoors), with every setting in the game cvars (speed,
   size, slant, density, shader, the client's frame rate, Allied Assault 1.11 or OpenMoHAA
   behaviour) and presets (`cg_weather snow`, `rain`, `blizzard` ...). `cg_thunder` adds the
   lightning flashes of the game's weather script, and the trees' leaves sway as in game

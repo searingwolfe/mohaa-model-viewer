@@ -1207,3 +1207,21 @@ Changes to `python_installer_updater.bat` unless noted.
   entity's targetname before its class. Every Results row has a tooltip with the whole row
   (targetname, class, entity number, origin, and whether it is hidden), where it used to
   say only "hidden".
+- Map Viewer page rev 51 (`MAP_VIEWER_REV` 51, `MAP_VIEWER_REV_REQUIRED` 51): weather from
+  the sky. With no func_rain in the map, or all of them hidden with Hide, the drops start
+  under the highest sky brush over their spot and stop at the first solid thing below
+  (`wxSkyMode`, `wxCol`). Indoors and in tunnels nothing falls. The Weather button, the
+  cvar rows and the list's foot say so.
+- Map Viewer page rev 52 (`MAP_VIEWER_REV` 52, `MAP_VIEWER_REV_REQUIRED` 52): drawing
+  speed.
+  - **One draw a frame.** The frame loop draws, and `requestDraw` only asks it to. Before,
+    looking with the mouse while moving with the keys drew twice a frame, as did the
+    clouds' timer and the hover outline.
+  - **View culling.** World faces and the game's polygons are sorted by 1024-unit cell
+    within each texture's run, and parts outside the view, past the far plane (fog,
+    r_farplane, cubic clip) or outside the cubic clip are skipped. Model instances are
+    culled by their bounding spheres.
+  - **Overlay and text.** The overlay canvas is cleared only when used, and the camera
+    line and the game cvars list's foot are updated about 8 times a second while moving.
+  - On m5l1a a frame sends about 3.6 times fewer triangles (14 times fewer with Cubic clip
+    2048), with the same picture.
