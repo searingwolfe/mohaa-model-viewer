@@ -1083,6 +1083,70 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
   added. Copy puts the new entities on the clipboard as entity-lump text. Outside the launcher, Save as .map downloads the file and
   Save as .bsp isn't available.
 
+## Simulate
+
+Phase 1 flies a model along an `info_splinepath` path the way a script's `followpath`
+moves a `script_model` (`ScriptSlave::FollowPath`, `CreatePath` and `FollowingPath` in
+fgame/scriptslave.cpp; `BSpline` and `SplinePath` in fgame/bspline.cpp). Later phases are
+to run actors along `info_pathnode` / waypoint / `script_origin` chains and play an actor's
+cover and corner animations at a node.
+
+- **Where.** Selecting an `info_splinepath` (the map's, or one Modify added) shows the
+  SIMULATE section between SELECTION and CAMERA (`simSect`), with **Simulate** and
+  **Reset** at its top, then the path's first and last node, how many, what
+  ends it, how long it takes in game time, the model and the playback speed. The section
+  stays while a simulation runs, whatever is selected (`simPanel`, called from
+  `updateSelPanel` and `modRender`).
+- **The path.** The entities are taken as the game would spawn them: the map's in order
+  with Modify's changes, then Modify's new ones (`simWorld`; Modify's `$` / `#` keys read
+  as `spawnKeys` reads the map's, `simKvl`). A node's next is the first entity with the
+  targetname its `target` names (`G_FindTarget`); one that isn't an `info_splinepath` ends
+  the path (`SplinePath::CreatePath`'s ScriptError), as does a missing one. The path starts
+  at its first node: the selected node's chain followed back through the node that targets
+  it, the last one in spawn order where several do (the engine's `owner`); a closed loop
+  starts at the selected node. `CreatePath` stops when the chain comes back to its start;
+  one that runs into a loop further on stops there (the game would hang).
+- **The flight** (`simChain`, `simFrames`, `simEval`). Each node is a control point: its
+  origin, its angles as the forward vector `AngleVectors` gives plus the roll in -180..180,
+  and its `speed` (1 when it has none) (`BSplineControlPoint::Set`). `splineTime` starts at
+  -2 (followpath's default); each 0.05 s server frame the model goes to the position and
+  angles `EvalClamp` gives (cubic B-spline weights over four points, clamped at the ends;
+  the forward vectors are blended and turned back into angles by `Vector::toAngles`, the
+  roll blended apart), and `splineTime` moves on by 0.05 times the blended speed, so a
+  speed is in nodes per second. It stops once `splineTime` passes the number of nodes
+  less 2, short of the last node. The frames are worked out when it starts (at most 10
+  minutes of them, for a path whose speed never gets it there) and drawn between, angles
+  the short way round, as the client does. A Python copy of `EvalClamp` gives the same
+  frames for m3l2's `$bomberpath`.
+- **Drawing** (`drawSim`). While the section shows, the curve the model flies (a point
+  every tenth of a node) in orange, faintly through walls, and a short line from each node
+  along its facing. While it flies, the model: an extra instance drawn with the map's
+  models (`modelsDrawn`, its matrix every frame, `simInst`), lit by the light grid where it
+  is (`lgFast`, brightened and clamped as `RB_GetEntityGridLighting`), without its
+  emitters or sprites, and left out of the pick pass so clicks go through it. Until a
+  model is there, or when it can't be drawn, a box with a nose flies instead.
+- **Buttons.** Simulate is greyed out while it flies, Reset while it doesn't; Reset stops
+  it and takes the model away, and the end does the same by itself. Speed plays it at
+  0.25x to 4x without a jump. The camera (`simFollow`, `simEyeStart`): **Follow** alone
+  keeps it behind the model's heading and a little above it, looking at it, catching up
+  smoothly; **Eye view** alone puts it on the path's first node at the node's angles when
+  the simulation starts, and leaves it there; both put it behind the model along its own
+  facing at its exact angles (the page's roll is the game's turned the other way). The
+  **camera zoom** slider sets how far behind it follows (24 to 4096 units, log scale), and
+  the mouse wheel over the view changes it while the camera follows. Moving the camera by
+  hand turns Follow off.
+- **The model** (`simOpen`, `simUseModel`). **Choose...** opens a picker with a search box
+  (every word must match): the models the map places, from the page's own data, and in the
+  launcher's pane every `models/**.tik` in the loaded paks (`mohaa-sim-models` →
+  `MOHAA_SIM_MODELS`). A pak model is built by the launcher in a thread
+  (`MapApp._sim_build`: the path must be a `.tik` under `models/` in the loaded paks), as
+  the map build builds a map's models (`ModelBuilder`, `TextureTable`, `pack_payload`),
+  and handed to the page as page data (`MOHAA_SIMMODEL`, or `MOHAA_SIMMODEL_FAIL`). The
+  page decodes it like its own (`decodePacket`), uses the map's picture where the shader
+  is the same and adds the rest after the map's textures (kept out of the Textures list
+  and Find), and makes its mesh as the map's models' (`modelR`). The choice is remembered
+  in the browser (`mohaaMapViewerSimModel`); "Placeholder box" goes back to the box.
+
 ## Cameras
 
 - **Free-look** is the Model Viewer's: drag to look, WASD, Space / C, Q / E tilt, Left /

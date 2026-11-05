@@ -306,6 +306,13 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
 * **Run exploder** sets off an exploder's `#set` as `global/exploder.scr` does: the
   building goes and its chunks fly toward their targets, land and sink away. **Reset
   exploder** puts it back.
+* **Simulate**: select an `info_splinepath` and press **Simulate** to fly a model along
+  its path the way a script's `followpath` does: from the path's first node, through each
+  node's origin, angles (it banks) and `speed`, at the game's own pace. **Choose...** picks
+  the model (any `.tik` in the loaded paks, with a search box; a box with a nose until
+  one is picked), **Reset** stops it, **Follow** rides along behind it (with **Eye view**
+  too, at its own angles, banking with it), and **camera zoom** (or the mouse wheel)
+  sets how far behind. Move or edit the nodes in Modify and simulate again to see the change.
 * **Modify** (above Find): add entities, most of all AI path nodes: Add, then click on the
   map where it goes. A new node is drawn
   see-through until saved, its parameters edit as entity-lump text (applied as you type),

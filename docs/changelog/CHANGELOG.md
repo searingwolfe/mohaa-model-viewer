@@ -1538,6 +1538,41 @@ Changes to `python_installer_updater.bat` unless noted.
   green with its edges (`drawScriptTrigs`); under Script ents the trigger stays a small
   marker of its class's size (`markerBoxOf`), and selecting it outlines the whole volume.
   Tested with m3l1b's 11 respawned `$minefield` triggers.
+- Map Viewer page rev 96 (`MAP_VIEWER_REV` 96, `MAP_VIEWER_REV_REQUIRED` 96): Simulate's
+  controls. **Simulate** and **Reset** moved from SELECTION to the top of the SIMULATE
+  section. Follow with the camera is split into **Follow** and **Eye view**: Follow alone
+  rides behind the model as before but much lower (just above it rather than high over
+  it); Eye view alone puts the camera on the path's first node at its angles when the
+  simulation starts and leaves it there; both ride behind the model along its own facing
+  at its exact angles, turning, climbing and banking with it. A **camera zoom** slider
+  (24 to 4096 units behind, log scale) sets how far back the camera follows, and the mouse
+  wheel changes it while the camera follows (Shift for bigger steps). Speed reads 0.25x
+  and 0.5x instead of the fractions.
+- Map Viewer page rev 95 (`MAP_VIEWER_REV` 95, `MAP_VIEWER_REV_REQUIRED` 95): **Simulate**,
+  phase 1. With an `info_splinepath` selected (one of the map's, or one Modify added),
+  SELECTION gets **Simulate** and **Reset** and a new SIMULATE section (between SELECTION and
+  CAMERA) shows the path, its length in game time and what ends it. Simulate flies a model
+  along it as a script's `followpath` does: the path starts at its first node (the selected
+  node's chain followed back), each next node is the first entity its `target` names
+  (`G_FindTarget`; a target that isn't an `info_splinepath` ends it), and each server frame
+  (0.05 s) the model goes where `BSpline::EvalClamp` puts it for `splineTime`, which starts
+  at -2 and moves on by 0.05 times the blended node `speed` until it passes the number of
+  nodes less 2 (`ScriptSlave::FollowingPath`, fgame/scriptslave.cpp, fgame/bspline.cpp).
+  Origins, angles (pitch, yaw and roll, so it banks) and speeds come from the nodes as
+  Modify has them, so a node can be moved or retimed and the path flown again. The frames
+  are worked out when it starts and drawn between, as the game's client does; the curve is
+  drawn while the section shows (faintly through walls), with each node's facing. Simulate
+  greys out while it flies and Reset stops it; at the end it resets by itself. **Choose...**
+  opens a model picker with a search box: the models the map places, and (in the Map
+  Viewer) every `models/**.tik` in the loaded paks, which the launcher builds as the map
+  build builds a map's models (`mohaa-sim-models`, `mohaa-sim-build`; the path is checked
+  against the paks) and hands back as page data (`MOHAA_SIMMODEL`). Until it arrives, or if
+  it can't be drawn, a box with a nose flies instead. The model is lit by the light grid
+  where it is, has no emitters, and is drawn but can't be clicked. Speed (1/4x to 4x) and
+  **Follow with the camera** (behind and above it; moving the camera stops it) are in the
+  section; the picked model is remembered (`mohaaMapViewerSimModel`, added to the Map
+  Viewer's privacy wording among the display choices). Checked on m3l2's
+  `$bomberpath` with the Stuka, against a Python copy of `EvalClamp`.
 - Map Viewer page rev 94 (`MAP_VIEWER_REV` 94, `MAP_VIEWER_REV_REQUIRED` 94): Modify gets
   hotkeys for its selected entity, **Alt+M** Move, **Alt+T** Trim origin, **Alt+E** Edit
   parameters (every plain letter already has a job), each button's tooltip naming its own

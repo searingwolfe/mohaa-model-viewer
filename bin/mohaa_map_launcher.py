@@ -55,7 +55,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 94
+MAP_VIEWER_REV_REQUIRED = 96
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".bak": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".lin": "bin", ".cfg": "scr"}
@@ -128,10 +128,11 @@ _PRIVACY_SWAPS = (
      "        closes; in your own browser they stay with that browser's data for local\n"
      "        files.",
      "(theme, backdrop colour,\n"
-     "        panel options, the grid's size and colour, game cvars, and where the Edit\n"
-     "        parameters box was left) in the browser's local storage. The embedded\n"
-     "        pane runs in private mode and forgets them when the program closes; in\n"
-     "        your own browser they stay with that browser's data for local files."),
+     "        panel options, the grid's size and colour, game cvars, where the Edit\n"
+     "        parameters box was left, and Simulate's model) in the browser's local\n"
+     "        storage. The embedded pane runs in private mode and forgets them when the\n"
+     "        program closes; in your own browser they stay with that browser's data for\n"
+     "        local files."),
     ("(textures are embedded as data: URIs)", "(its textures are embedded in it)"),
     ("workspace, model headers\n"
      "   are bounds-checked, and generated pages escape game-file text), but no\n"
@@ -1315,6 +1316,62 @@ class MapApp(ML.App):
             MC.swallowed()
             self._launch_with("text_editor", "text editor", "Text Editor", mp)
 
+    # ------------------------------------------------ SIMULATE: a model for the page ---
+    def _sim_models(self):
+        """The page's model picker asked for the paks' models: every models/**.tik."""
+        if self._vfs is None or not self._tex_ready:
+            self._page_js("try{MOHAA_SIM_MODELS(null,%s)}catch(e){}"
+                          % json.dumps("The paks are still loading: close this and choose again in a moment"))
+            return
+        try:
+            names = sorted(k for k in self._vfs.names() if k.startswith("models/") and k.endswith(".tik"))
+        except Exception as e:
+            MC.swallowed()
+            self._page_js("try{MOHAA_SIM_MODELS(null,%s)}catch(e){}" % json.dumps("No model list: %s" % e))
+            return
+        self._page_js("try{MOHAA_SIM_MODELS(%s)}catch(e){}" % json.dumps(names, separators=(",", ":")))
+
+    def _sim_build(self, vpath):
+        """Build one model (a .tik in the loaded paks) for the page's SIMULATE, as the map
+        build builds the models a map places, and hand it to the page (MOHAA_SIMMODEL).
+        The path comes from the page, so it must name a .tik under models/ in the paks."""
+        vp = (vpath or "").strip().replace("\\", "/").lower()
+        fail = lambda why: self._page_js("try{MOHAA_SIMMODEL_FAIL(%s,%s)}catch(e){}" % (json.dumps(vp), json.dumps(why)))
+        if (not vp.startswith("models/") or not vp.endswith(".tik") or ".." in vp or len(vp) > 260
+                or any(ord(c) < 32 for c in vp)):
+            fail("not a model in the paks"); return
+        vfs, shaders = self._vfs, self._SH
+        if vfs is None or not self._tex_ready:
+            fail("the paks are still loading"); return
+        if not vfs.exists(vp):
+            fail("not found in the loaded paks"); return
+        try: texsize = int(self._texsize.get())
+        except (TypeError, ValueError): texsize = 256
+        cache = self._index_cache
+        if not hasattr(self, "_sim_lock"): self._sim_lock = threading.Lock()
+        self._log_line(f"(Simulate: building {vp} ...)", "dim")
+        threading.Thread(target=self._sim_build_work, args=(vp, vfs, shaders, texsize, cache), daemon=True).start()
+
+    def _sim_build_work(self, vp, vfs, shaders, texsize, cache):
+        """Worker thread: one model's mesh and pictures, packed as the page's own data."""
+        with self._sim_lock:
+            try:
+                import mohaa_map_view as MMV
+                blobs = MMV.Blobs()
+                tcache = MMV.TextureCache(os.path.join(cache, "tex")) if cache else None
+                texs = MMV.TextureTable(vfs, shaders, blobs, max(32, min(1024, texsize)), tcache)
+                mb = MMV.ModelBuilder(vfs, texs, blobs, say=lambda *a: None)
+                if mb.get(vp) < 0:
+                    raise ValueError(mb.failed.get(vp) or "it can't be drawn")
+                b64, _raw, gz = MMV.pack_payload({"tex": texs.entries, "models": mb.models}, blobs)
+                js = "try{MOHAA_SIMMODEL(%s,%s)}catch(e){}" % (json.dumps(vp), json.dumps(b64))
+                self._log_q.put(("dim", f"  (Simulate: {vp} built, {gz // 1024} KB)"))
+            except Exception as e:
+                MC.swallowed()
+                js = "try{MOHAA_SIMMODEL_FAIL(%s,%s)}catch(e){}" % (json.dumps(vp), json.dumps(str(e)[:200]))
+                self._log_q.put(("warn", f"  (Simulate: {vp} can't be drawn: {str(e)[:200]})"))
+            self._page_requests.append(lambda j=js: self._page_js(j))
+
     def _open_scr(self, vpath, where):
         """The level-script card's Open .scr / Open: the script in the Text Editor. `where`
         is the file it was read from (a path on disk) or "<path> (<pak>)" for one read from a
@@ -1388,6 +1445,13 @@ class MapApp(ML.App):
                         # the level-script card's Open .scr: "mohaa-open-scr\n<path in the paks>\n<where>"
                         parts = (m.split("\n") + ["", ""])[1:3]
                         self._page_requests.append(lambda v=parts[0], w=parts[1]: self._open_scr(v, w))
+                    elif m == "mohaa-sim-models":
+                        # SIMULATE's model picker: every model in the loaded paks
+                        self._page_requests.append(self._sim_models)
+                    elif m.startswith("mohaa-sim-build\n"):
+                        # SIMULATE's model: "mohaa-sim-build\n<path of a .tik in the paks>"
+                        vp = m.split("\n", 1)[1][:300]
+                        self._page_requests.append(lambda v=vp: self._sim_build(v))
                     elif m.startswith("mohaa-modify-save\n"):
                         # MODIFY's Save as .bsp / .map: the new entities, and the map they go in
                         try: req = json.loads(m.split("\n", 1)[1])

@@ -114,6 +114,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  #legBody h4{position:sticky;top:0;z-index:1;background:var(--panel);margin:0;padding:0 0 5px;
    font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
  #legClose{flex:none;align-self:flex-start}
+ /* Simulate's model picker */
+ #simCard{width:560px;height:min(600px,86%);display:flex;flex-direction:column;overflow:hidden}
+ #simQ{flex:none;width:100%;box-sizing:border-box}
+ #simStat{flex:none;margin:6px 0 4px;min-height:14px}
+ #simList{flex:1 1 auto;min-height:0;overflow-y:auto;border:1px solid var(--line);border-radius:6px;font-size:12px}
+ #simList .sh{padding:6px 8px 2px;color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.1em}
+ #simList .it{padding:3px 8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ #simList .it:hover{background:var(--line)}
+ #simList .it.on{color:var(--accent);font-weight:bold}
+ .simMod{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  @media (max-width:820px){#legCard{height:auto}#legBody{flex-direction:column;overflow-y:auto}
    #legBody .sec{flex:none;overflow:visible;border-left:none;padding:0 0 12px}}
  #legBody .note{color:var(--dim);font-size:11px;margin:0 0 6px}
@@ -274,6 +284,18 @@ __KEYS_CSS__
   <div id="loading"><div id="loadMsg">Loading map&hellip;</div><div class="bar"><i id="loadBar"></i></div></div>
   <!-- keyboard shortcuts (H): the keyboard map, built from MAP_VIEWER_KEYS on first open -->
   <div id="helpOv" class="kx-ov" style="display:none"><div class="kx-card" id="helpCard"></div></div>
+  <div id="simOv" class="ov" style="display:none">
+   <div class="card" id="simCard">
+    <h3>Simulate with a model</h3>
+    <input id="simQ" type="text" spellcheck="false" autocomplete="off" placeholder="Search models, e.g. vehicles/stuka">
+    <div id="simStat" class="co"></div>
+    <div id="simList"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="simBoxBtn" title="Fly a plain box with a nose instead of a model">Placeholder box</button>
+      <span style="flex:1"></span>
+      <button id="simClose" title="Close (Esc)">Close</button></div>
+   </div>
+  </div>
   <div id="legOv" class="ov" style="display:none">
    <div class="card" id="legCard">
     <h3>Legend</h3>
@@ -311,6 +333,27 @@ __KEYS_CSS__
        <button class="sm" id="bLightOn" style="display:none" title="Turn the selected lights back on">Turn on</button>
      </div>
      <div class="row co" id="hidLine" style="display:none"><span id="hidCount"></span><button class="sm" id="bUndoHide" title="Undo the last Hide or Show all (Ctrl+Z); press again for the one before">Undo</button><button class="sm" id="bUnhide" title="Show everything you hid (Shift+H); Ctrl+Z hides it again">Show all</button></div>
+   </div>
+   <div class="sect" id="simSect" style="display:none">
+     <h2>Simulate</h2>
+     <div class="row">
+       <button class="sm" id="bSim" title="Fly a model along this info_splinepath's path from its first node, as a script's followpath does">&#9654; Simulate</button>
+       <button class="sm" id="bSimReset" disabled title="Stop the simulation and take the model away">Reset</button>
+     </div>
+     <div id="simSum" class="co"></div>
+     <div class="row" style="align-items:center">
+       <span class="co">Model</span><span id="simModel" class="simMod"></span>
+       <button class="sm" id="bSimPick" title="Choose the model that flies the path: any model in the paks (from the launcher), or a model this map places">Choose&hellip;</button>
+     </div>
+     <div class="row" style="align-items:center">
+       <span class="co">Speed</span>
+       <select id="simMul" title="How fast the simulation plays: 1x is the game's own speed">
+         <option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option><option value="4">4x</option></select>
+       <label class="co" title="Follow: keep the camera behind the model while it flies, looking at it (with Eye view too: from behind it at its own angles, turning and banking with it). Moving the camera by hand stops it"><input type="checkbox" id="simCam"> Follow</label>
+       <label class="co" title="Eye view: the camera starts on the path's first node, facing the node's angles, and stays there (with Follow too: rides with the model at its own angles)"><input type="checkbox" id="simEye"> Eye view</label>
+     </div>
+     <div class="row co" id="simTime"></div>
+     <div class="row co" title="How far behind the model the camera follows (the mouse wheel changes it while the camera follows)">camera zoom <input type="range" id="simZoom" min="0" max="100" step="1" value="40"><span id="simZoomV" style="min-width:34px;text-align:right"></span></div>
    </div>
    <div class="sect">
      <h2>Camera</h2>
@@ -1254,6 +1297,10 @@ const tick=()=>new Promise(r=>setTimeout(r,0));
 async function loadData(){
   const b64=$('mapdata').textContent.trim();
   if(!b64)throw new Error('This page has no map data.');
+  return decodePacket(b64);
+}
+// a packet in that form (the page's own data, or a model built later for Simulate)
+async function decodePacket(b64){
   const bin=atob(b64), n=bin.length, u8=new Uint8Array(n);
   for(let i=0;i<n;i++)u8[i]=bin.charCodeAt(i);
   if(typeof DecompressionStream!=='function')throw new Error('This browser is too old to open the page (no DecompressionStream). Use a current Edge, Chrome or Firefox.');
@@ -1824,8 +1871,8 @@ function colourTex(c){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t)
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([c[0]*255|0,c[1]*255|0,c[2]*255|0,255]));return t;}
 // Pictures arrive as blobs; decode them in the background and swap them in as they load.
 const TEXURL=[];
-function blobTexture(blob,mime,done){
-  const url=URL.createObjectURL(new Blob([D.bytes(blob)],{type:mime||'image/jpeg'}));
+function blobTexture(blob,mime,done,A){
+  const url=URL.createObjectURL(new Blob([(A||D).bytes(blob)],{type:mime||'image/jpeg'}));
   const im=new Image();
   im.onload=()=>{const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
@@ -1999,8 +2046,12 @@ function instData(ei){
   return rows.concat([NF+1+ei, g?g[0]/255:1, g?g[1]/255:1, g?g[2]/255:1, st!=null?st:-1, slot, isStaticProp(ei)?1:0]);
 }
 function initModels(){
-  (D.models||[]).forEach((M,mi)=>{
-    const R={M:M,pos:D.f32(M.v),uv:D.f32(M.t),idx:D.u32(M.i),inst:[],n:0,nsel:0,sprites:[]};
+  (D.models||[]).forEach(M=>MODELS.push(modelR(M,D)));
+  for(const X of ENTS)if(X.model>=0)MODELS[X.model].inst.push(X.ei);
+}
+// one model's mesh on the card, from a packet (A: the page's data, or Simulate's model)
+function modelR(M,A){
+    const R={M:M,pos:A.f32(M.v),uv:A.f32(M.t),idx:A.u32(M.i),inst:[],n:0,nsel:0,sprites:[]};
     // A tree's sprite version (TF_LOD) is drawn only with Simple models on (surfOn); other
     // camera-facing sprite surfaces (coronas) are drawn as billboards (drawSprites).
     R.surfs=M.s.map(s=>{const f=(TEX[s[2]]||{}).f|0, lod=!!(f&TF_LOD);
@@ -2012,7 +2063,7 @@ function initModels(){
     for(const s of M.s)if(s.length>=7)for(let k=0;k<s[5];k++)eng[s[4]+k]=s[6]+k;
     R.vbE=makeBuf(gl.ARRAY_BUFFER,eng);R.eng=eng;
     // the vertex normals (signed bytes), for deformVertexes; which surfaces move
-    if(M.n!=null){const nb=D.i8(M.n);if(nb.length>=R.pos.length)R.vbN=makeBuf(gl.ARRAY_BUFFER,nb);}
+    if(M.n!=null){const nb=A.i8(M.n);if(nb.length>=R.pos.length)R.vbN=makeBuf(gl.ARRAY_BUFFER,nb);}
     R.dv=!!R.vbN&&R.surfs.some(s=>(TEX[s.ti]||{}).dv);
     const a2=R.hasLod?auto2Data(R):null;
     if(a2){R.vbA2=makeBuf(gl.ARRAY_BUFFER,a2.mid);R.vbA2M=makeBuf(gl.ARRAY_BUFFER,a2.axis);}
@@ -2034,10 +2085,11 @@ function initModels(){
       c=c.map(x=>x/Math.max(1,n));
       for(let k=s.first;k<s.first+s.count;k++){const v=R.idx[k];r=Math.max(r,Math.hypot(R.pos[v*3]-c[0],R.pos[v*3+1]-c[1],R.pos[v*3+2]-c[2]));}
       s.c=c;s.r=r;R.sprites.push(s);}
-    MODELS.push(R);
-  });
-  for(const X of ENTS)if(X.model>=0)MODELS[X.model].inst.push(X.ei);
+    return R;
 }
+// the models drawScene draws: the map's, and Simulate's while it flies (not in the pick
+// pass: it is clicked through)
+function modelsDrawn(mode){return(mode===0&&SIM.R&&SIM.R.n)?MODELS.concat([SIM.R]):MODELS;}
 // Which of a model's surfaces are drawn: never its camera-facing sprites (drawSprites
 // draws those); a tree that has a sprite version shows the sprite alone with Simple models
 // on, and everything but the sprite with it off.
@@ -2523,7 +2575,7 @@ function drawScene(vp,mode){
   if(gameSky&&mode===0&&!THU.flash)drawGameSky(vp);
   // models (solid surfaces)
   setModelCommon(vp,mode,lit);
-  for(const R of MODELS){if(!R.n)continue;gl.bindVertexArray(R.vao);
+  for(const R of modelsDrawn(mode)){if(!R.n)continue;gl.bindVertexArray(R.vao);
     for(const s of R.surfs){if(!surfOn(R,s))continue;const k=(MAT[s.ti]||{}).kind||0;if(mode===0&&k>=2)continue;
       if(lit)gl.uniform1i(PM.u.uLit,modelLitMode(s.ti));
       gl.uniform1i(PM.u.uAuto2,s.lod?1:0);
@@ -2558,7 +2610,7 @@ function drawScene(vp,mode){
   setCommon(PW,vp,0);gl.bindVertexArray(B.vTri);
   for(const op of drawTransG){if(lit&&op.rep)continue;blendFor(op.m.kind);bindMat(PW,op.ti,0);drawRuns(op);}
   setModelCommon(vp,0,lit);
-  for(const R of MODELS){if(!R.n)continue;gl.bindVertexArray(R.vao);
+  for(const R of modelsDrawn(0)){if(!R.n)continue;gl.bindVertexArray(R.vao);
     for(const s of R.surfs){if(!surfOn(R,s))continue;const k=(MAT[s.ti]||{}).kind||0;if(k<2)continue;
       if(lit)gl.uniform1i(PM.u.uLit,modelLitMode(s.ti));
       gl.uniform1i(PM.u.uAuto2,s.lod?1:0);
@@ -4168,6 +4220,7 @@ function draw(){
   drawGrid(VP);
   drawScriptTrigs(VP);
   drawModify(VP);
+  drawSim(VP);
   if(CVARS.r_light_showgrid)drawLightGrid(VP);
   drawCvarLines(VP);
   draw2D();
@@ -7597,8 +7650,11 @@ function loop(t){
   // the weather: its client frames run with the page's clock while drops fall or can start
   let wx=false;
   if(wxActive()){wxAdvance(performance.now());wx=true;}else WX.wall=0;
+  // Simulate's model in flight (a camera moved by hand stops following it)
+  if(moved&&SIM.run&&$('simCam').checked){$('simCam').checked=false;flash('The camera no longer follows the model');}
+  const sims=SIM.run?simTick(performance.now()):false;
   if(moved)camChanged();
-  if(moved||doors||exps||wx||sway||_drawReq){_drawReq=false;draw();}
+  if(moved||doors||exps||wx||sway||sims||_drawReq){_drawReq=false;draw();}
 }
 // Turn the view dx degrees right and dy degrees down as seen on the screen. With the camera
 // tilted (Q / E), the screen's right and down are tilted too, so the turn is rotated by the
@@ -7762,7 +7818,10 @@ window.addEventListener('mouseup',e=>{
   else if(d.b===1)faceInfoAt(h);
 });
 glcv.addEventListener('dblclick',e=>{if(SEL.size)focusSelection();});
-glcv.addEventListener('wheel',e=>{e.preventDefault();if(MOD.trim)return;const a=camAxes();
+glcv.addEventListener('wheel',e=>{e.preventDefault();if(MOD.trim)return;
+  // while the camera follows Simulate's model, the wheel is its camera zoom
+  if(SIM.run&&$('simCam').checked){const z=$('simZoom');z.value=Math.max(0,Math.min(100,+z.value+Math.sign(e.deltaY)*(e.shiftKey?10:3)));simZoomShow();return;}
+  const a=camAxes();
   moveBy(a.f,-Math.sign(e.deltaY)*(e.shiftKey?256:64));camChanged();requestDraw();},{passive:false});
 glcv.addEventListener('mouseleave',()=>{hoverAt=null;setHover(null);updateHoverText(null);});
 // hover read-out, a few times a second at most
@@ -7902,6 +7961,7 @@ function gridStep(kl){const a=camAxes(),g=64;const flat=vnorm([a.f[0],a.f[1],0])
   camChanged();requestDraw();}
 // Esc peels one layer at a time: help or legend, info card, selection, then the map itself.
 function escape(){
+  if($('simOv').style.display!=='none'){simClose();return;}
   if(MOD.placing){modPlaceCancel();return;}
   if(MOD.linking){modLinkCancel();return;}
   if(MOD.edit>=0){modEditClose(true);return;}
@@ -8104,6 +8164,7 @@ function loadOpts(){try{const o=JSON.parse(LS.get('mohaaMapViewerOpts')||'null')
   for(const k in (o.cv||{}))if(k in CVAR_DEFAULTS){const v=cvarClamp(k,o.cv[k]);if(v!=null)CVARS[k]=v;}}catch(_e){}}
 
 function updateSelPanel(){
+  simPanel();
   const n=SEL.size;$('selBtns').style.display=n?'':'none';
   const hid=hidEnt.size+hidPrim.size;$('hidLine').style.display=(hid||HIDE_UNDO.length)?'':'none';
   $('hidCount').textContent=hid+' hidden';$('bUndoHide').disabled=!HIDE_UNDO.length;$('bUnhide').disabled=!hid;
@@ -9529,6 +9590,7 @@ function modRender(){
   const over=LM&&(LM.real>LM.rmax||LM.nodes>MAX_PATHNODES),near=LM&&!over&&(LM.real>LM.rmax-(LM.mp?96:64)||LM.nodes>MAX_PATHNODES-200||(IS&&IS.n));
   $('modStat').style.color=over?'var(--selcol)':near?'#ffd040':'';
   $('modStat').title=over?'Past the game\'s limit: '+(LM.real>LM.rmax?'more real entities than its '+LM.rmax+' slots (with one player; "no free edicts") ':'')+(LM.nodes>MAX_PATHNODES?'more than 4096 path nodes ("Exceeded MAX_PATHNODES!")':'')+'. The saved map won\'t load.':near?(IS&&IS.n?[...IS.node.values()].flat().map(x=>x.t).join('\n'):'Close to the game\'s limit'+(LM.mp?' (in multiplayer each player slot takes one more entity slot)':'')):'';
+  simPanel();
 }
 // Edit parameters' place: where it was dragged, kept inside the 3D view
 function modEdPlace(){
@@ -9677,6 +9739,364 @@ function modInit(){
 }
 
 // ============================================================================
+//  SIMULATE: a model flying an info_splinepath path, as a script's followpath does
+// ============================================================================
+// ScriptSlave::FollowPath / CreatePath / FollowingPath (fgame/scriptslave.cpp) with
+// BSpline::EvalClamp (fgame/bspline.cpp): the path is the given node and each next one its
+// "target" names (G_FindTarget: the first entity with that targetname; a target that isn't
+// an info_splinepath ends it), until one has no target or the path comes back to the
+// start. Each node gives the spline its origin, its angles (as the forward vector and the
+// roll) and its "speed" (1 if it has none). splineTime starts at -2; every server frame
+// (0.05 s) the model is sent to the position and angles EvalClamp gives for it, and
+// splineTime moves on by 0.05 times the speed EvalClamp blends from the nodes (so a speed
+// is in nodes per second), until it passes the number of nodes less 2. The game draws the
+// model between its frames; so does this.
+// The path starts at the first node: the selected node's chain followed back through what
+// targets it (the engine keeps the last node, in spawn order, that targets a node as its
+// previous one), up to a node nothing targets.
+const SIM={run:false,t0:0,mul:1,frames:null,rc:null,chain:null,cur:null,pick:'',R:null,cache:new Map(),fail:new Map(),
+  busy:'',list:null,listErr:'',asked:false,texi:new Map(),txAt:0,camT:0};
+const SIM_FT=0.05, SIM_MAX=20*60*10;       // a server frame; at most 10 minutes of frames
+const SIM_LS='mohaaMapViewerSimModel';
+function simHost(){try{return !!(window.chrome&&window.chrome.webview);}catch(_e){return false;}}
+function simPost(m){try{if(simHost()){window.chrome.webview.postMessage(m);return true;}}catch(_e){}return false;}
+// The node Simulate starts from: the selected info_splinepath (a map entity, or a new one
+// Modify placed): 'e<entity>' / 'm<Modify id>', else null.
+function simFocus(){
+  const m=MOD.ents[MOD.sel];
+  if(m&&!modIsMap(m))return modCls(m)==='info_splinepath'?'m'+m.id:null;
+  const ei=m&&modIsMap(m)?m.ei:selFocusEnt();
+  if(!(ei>0)||ei>=MAP.ents.length)return null;
+  const mm=MOD.ents.find(x=>x.ei===ei),cls=mm&&modEdited(mm)?modCls(mm):String(MAP.ents[ei].kvl.classname||'').toLowerCase();
+  return cls==='info_splinepath'?'e'+ei:null;
+}
+// Every entity as the game would spawn it (Modify's changes in, its new ones after the
+// map's), and the first one with each targetname.
+// Modify's keys as the game takes them: "$targetname" / "#speed" name the key too (the
+// first such form wins over a plain one after it; spawnKeys does the same for the map's)
+function simKvl(m){
+  const k=modKvl(m),SK=new Set(D.sk||[]),pre=new Map(),plain=new Map();
+  m.kv.forEach(([a,v],i)=>{const l=a.toLowerCase(),c=l[0];
+    if((c==='$'||c==='#')&&SK.has(l.slice(1))){const n=l.slice(1);if(!pre.has(n))pre.set(n,[i,c==='#'?String(parseInt(v,10)||0):v]);}
+    else if(!plain.has(l))plain.set(l,i);});
+  for(const[n,[i,v]]of pre){const p=plain.get(n);if(p==null||i<p)k[n]=v;}
+  return k;
+}
+function simWorld(){
+  const all=[],tn=new Map(),modOf=new Map();
+  for(const m of MOD.ents)if(modIsMap(m))modOf.set(m.ei,m);
+  const add=(key,kvl,ei)=>{const n={key:key,kvl:kvl,ei:ei,cls:String(kvl.classname||'').toLowerCase()};all.push(n);
+    const t=kvl.targetname;if(t&&!tn.has(t))tn.set(t,n);};
+  for(let ei=1;ei<MAP.ents.length;ei++){const m=modOf.get(ei);add('e'+ei,m&&modEdited(m)?simKvl(m):MAP.ents[ei].kvl,ei);}
+  for(const m of MOD.ents)if(!modIsMap(m))add('m'+m.id,simKvl(m),-1);
+  return{all:all,tn:tn};
+}
+function simNodeName(n){return n.kvl.targetname?'$'+n.kvl.targetname:n.ei>0?'entity '+n.ei:'a new node';}
+// The path through the node 'key': its nodes from the first, what ends it, and its frames.
+function simChain(key){
+  const W=simWorld();let s=null;
+  for(const n of W.all)if(n.key===key){s=n;break;}
+  if(!s||s.cls!=='info_splinepath')return null;
+  const isS=n=>!!n&&n.cls==='info_splinepath';
+  const next=n=>{const t=n.kvl.target;return t?W.tn.get(t)||null:null;};
+  const prev=new Map();
+  for(const n of W.all)if(isS(n)){const q=next(n);if(isS(q)&&q!==n)prev.set(q,n);}
+  let head=s;const back=new Set([s]);
+  for(let p=prev.get(head);p&&!back.has(p);p=prev.get(head)){back.add(p);head=p;}
+  if(prev.get(head)===s&&head!==s)head=s;     // a closed loop: it starts where it was selected
+  const nodes=[],seen=new Set();let end='', n=head;
+  while(n){
+    if(seen.has(n)){end=n===head?'its last node leads back to the first':'it runs back into '+simNodeName(n)+' (the game would follow that loop for ever)';break;}
+    seen.add(n);nodes.push(n);
+    if(nodes.length>=4096){end='4096 nodes';break;}
+    const t=n.kvl.target;
+    if(!t){end='';break;}
+    const q=W.tn.get(t);
+    if(!q){end=simNodeName(n)+'\'s target $'+t+' isn\'t in the map';break;}
+    if(!isS(q)){end=simNodeName(n)+'\'s target $'+t+' is a '+q.cls+', not an info_splinepath';break;}
+    n=q;
+  }
+  const P=nodes.map(x=>{const k=x.kvl,o=parseVec(k.origin,3)||(x.ei>0&&ENTS[x.ei]&&ENTS[x.ei].origin)||[0,0,0];
+    let sp=parseFloat(k.speed);if(!isFinite(sp))sp=1;return{n:x,o:o.slice(),a:entAngles(k),s:sp};});
+  const ch={key:key,head:head,nodes:P,end:end,sel:s};
+  ch.fr=simFrames(ch);
+  return ch;
+}
+// BSpline::EvalClamp at t: position, angles ( pitch yaw roll ) and speed
+function simEval(C,t){
+  const n=C.p.length,seg=Math.floor(t),u=t-seg,u2=u*u,u3=u2*u,m=1-u;
+  const B=[m*m*m/6,(3*u3-6*u2+4)/6,(-3*u3+3*u2+3*u+1)/6,u3/6];
+  const P=[0,0,0],A=[0,0,0];let sp=0,rl=0;
+  for(let i=0;i<4;i++){let j=seg+i;if(j<0)j=0;else if(j>=n)j=n-1;const b=B[i],p=C.p[j],f=C.f[j];
+    P[0]+=p[0]*b;P[1]+=p[1]*b;P[2]+=p[2]*b;A[0]+=f[0]*b;A[1]+=f[1]*b;A[2]+=f[2]*b;sp+=C.s[j]*b;rl+=C.r[j]*b;}
+  // Vector::toAngles: ( -pitch yaw 0 ), both 0..360; then the blended roll
+  let yaw,pitch;
+  if(A[0]===0&&A[1]===0){yaw=0;pitch=A[2]>0?90:270;}
+  else{yaw=Math.atan2(A[1],A[0])*180/Math.PI;if(yaw<0)yaw+=360;
+    pitch=Math.atan2(A[2],Math.hypot(A[0],A[1]))*180/Math.PI;if(pitch<0)pitch+=360;}
+  return{p:P,a:[-pitch,yaw,rl],s:sp};
+}
+// the control points (BSplineControlPoint::Set) and every server frame of the flight
+function simFrames(ch){
+  const C={p:[],f:[],r:[],s:[]};
+  for(const x of ch.nodes){C.p.push(x.o);C.f.push(anglesAxis(x.a)[0]);
+    let r=x.a[2];if(r>180)r-=360;if(r<-180)r+=360;C.r.push(r);C.s.push(x.s);}
+  const F=[],end=C.p.length-2;let t=-2,cap=false;
+  if(C.p.length)while(t<=end){if(F.length>=SIM_MAX){cap=true;break;}const e=simEval(C,t);F.push(e);t+=SIM_FT*e.s;}
+  if(!F.length&&C.p.length)F.push(simEval(C,-2));
+  // the curve it flies, a point every tenth of a node
+  const curve=[];
+  if(C.p.length>1){for(let u=-2;u<end;u+=0.1)curve.push(simEval(C,u).p);curve.push(simEval(C,end).p);}
+  return{F:F,cap:cap,C:C,curve:curve};
+}
+function simDur(fr){return Math.max(0,fr.F.length-1)*SIM_FT;}
+function simSecs(x){return x<60?x.toFixed(1)+' s':Math.floor(x/60)+' min '+(x%60).toFixed(0)+' s';}
+function lerpAng(a,b,u){let d=b-a;d=((d%360)+540)%360-180;return a+d*u;}
+// ---- the panel -----------------------------------------------------------------------------
+function simPanel(){
+  if(!$('simSect')||!MAP)return;
+  const key=simFocus(),show=!!key||SIM.run;
+  $('simSect').style.display=show?'':'none';
+  if(!show){SIM.chain=null;return;}
+  if(key&&(!SIM.chain||SIM.chain.key!==key||!SIM.run))SIM.chain=simChain(key);
+  const ch=SIM.run?SIM.rc:SIM.chain;
+  $('bSim').disabled=SIM.run||!SIM.chain;$('bSimReset').disabled=!SIM.run;
+  let s='';
+  if(ch){const n=ch.nodes.length,last=ch.nodes[n-1];
+    s='Path from '+simNodeName(ch.head.n||ch.head)+(n>1?' to '+simNodeName(last.n):'')+': '+n+' node'+(n===1?'':'s');
+    if(ch.end)s+='\nEnds where '+ch.end;
+    if(ch.fr.cap)s+='\nIts speed never gets it to the end: the first 10 minutes are shown';
+    if(n<2)s+='\nOne node: the model stays on it';
+    const sl=ch.nodes.filter(x=>x.s<=0);if(sl.length)s+='\n'+sl.length+' node'+(sl.length>1?'s have':' has')+' a speed of 0 or less';}
+  $('simSum').textContent=s;
+  simModelText();simTimeText(performance.now(),true);
+}
+function simModelText(){
+  const e=$('simModel');if(!e)return;
+  const p=SIM.pick;let t=p?p.replace(/^models\//,''):'placeholder box';
+  if(p&&SIM.busy===p)t+=' (building…)';
+  else if(p&&SIM.fail.has(p))t+=' (can\'t be drawn: the box flies instead)';
+  e.textContent=t;e.title=p?(SIM.fail.get(p)||p):'A plain box with a nose; Choose… picks a model';
+}
+function simTimeText(now,force){
+  const e=$('simTime');if(!e)return;
+  if(!force&&now-SIM.txAt<100)return;SIM.txAt=now;
+  const ch=SIM.run?SIM.rc:SIM.chain;
+  if(!ch){e.textContent='';return;}
+  const d=simDur(ch.fr);
+  if(SIM.run){const t=Math.min(d,(now-SIM.t0)/1000*SIM.mul);e.textContent=simSecs(t)+' of '+simSecs(d)+' (game time)';}
+  else e.textContent='Takes '+simSecs(d)+' at its nodes\' speeds';
+}
+// ---- running ---------------------------------------------------------------------------------
+function simStart(){
+  if(SIM.run)return;
+  const key=simFocus();if(!key){flash('Select an info_splinepath first');return;}
+  const ch=simChain(key);if(!ch||!ch.nodes.length){flash('This info_splinepath has no path to fly');return;}
+  SIM.rc=ch;SIM.chain=ch;SIM.frames=ch.fr.F;SIM.run=true;SIM.t0=performance.now();SIM.cur=null;SIM.camT=0;
+  simUseModel();
+  if($('simEye').checked&&!$('simCam').checked)simEyeStart(ch);
+  simTick(performance.now());
+  simPanel();requestDraw();
+  flash('Simulating '+ch.nodes.length+' node'+(ch.nodes.length===1?'':'s')+' from '+simNodeName(ch.head)+': '+simSecs(simDur(ch.fr))+
+    (ch.fr.cap?' (its speed never gets it to the end: 10 minutes shown)':''));
+}
+function simReset(done){
+  if(!SIM.run&&!done)return;
+  SIM.run=false;SIM.rc=null;SIM.cur=null;SIM.frames=null;if(SIM.R)SIM.R.n=0;
+  simPanel();requestDraw();
+  if(done)flash('Simulation finished');
+}
+// each frame while it runs: where the model is (between two server frames), the camera if it
+// follows; the end resets it
+function simTick(now){
+  const F=SIM.frames;if(!F||!F.length){simReset(true);return true;}
+  const x=(now-SIM.t0)/1000*SIM.mul/SIM_FT;
+  if(x>=F.length-1){simReset(true);return true;}
+  const i=Math.min(F.length-1,Math.floor(x)),j=Math.min(F.length-1,i+1),u=Math.min(1,x-i),a=F[i],b=F[j];
+  const p=[0,1,2].map(k=>a.p[k]+(b.p[k]-a.p[k])*u),an=[0,1,2].map(k=>lerpAng(a.a[k],b.a[k],u));
+  SIM.cur={p:p,a:an};
+  if(SIM.R&&gl)simInst(SIM.R,p,an);
+  if($('simCam').checked)simFollow(p,an,now);
+  simTimeText(now,false);
+  return true;
+}
+// the model's place in the view: its angles and position, the light grid's light there
+// (RB_GetEntityGridLighting's brightening), not pickable
+function simInst(R,p,a){
+  const ax=anglesAxis(a),G=lightGrid();let c=[255,255,255];
+  if(G){const v=lgFast(G,p).slice(0,3).map(x=>x*2),m=Math.max(v[0],v[1],v[2]);c=m>255?v.map(x=>x*255/m):v;}
+  const d=new Float32Array([ax[0][0],ax[1][0],ax[2][0],p[0], ax[0][1],ax[1][1],ax[2][1],p[1], ax[0][2],ax[1][2],ax[2][2],p[2],
+    0, c[0]/255,c[1]/255,c[2]/255, -1, -1, 0]);
+  gl.bindBuffer(gl.ARRAY_BUFFER,R.instBuf);gl.bufferData(gl.ARRAY_BUFFER,d,gl.DYNAMIC_DRAW);R.n=1;
+}
+// Camera zoom: how far behind the model the camera follows, 24 to 4096 units (the slider's
+// 0..100, on a log scale)
+function simZoomDist(){const v=+$('simZoom').value;return 24*Math.pow(4096/24,v/100);}
+function simZoomShow(){$('simZoomV').textContent=Math.round(simZoomDist());}
+// the model's size, for how high above it Follow rides
+function simSize(){const b=SIM.R&&SIM.R.M&&SIM.R.M.b;return b?Math.max(16,Math.hypot(b[1][0]-b[0][0],b[1][1]-b[0][1],b[1][2]-b[0][2])/2):32;}
+// Follow: behind the model (its heading) and a little above it, looking at it, catching up
+// smoothly. Follow and Eye view: behind it along its own facing, at its exact angles
+// (pitch, yaw and roll; the page's roll turns the other way to the game's).
+function simFollow(p,a,now){
+  const dist=simZoomDist();
+  if($('simEye').checked){const ax=anglesAxis(a),f=ax[0],u=ax[2];
+    for(let i=0;i<3;i++)cam.pos[i]=p[i]-f[i]*dist+u[i]*(dist*0.12+simSize()*0.5);
+    let pt=((a[0]%360)+540)%360-180,rl=((a[2]%360)+540)%360-180;
+    cam.yaw=a[1];cam.pitch=pt;cam.roll=-rl;camChanged();SIM.camT=now;return;}
+  const y=a[1]*Math.PI/180,want=[p[0]-Math.cos(y)*dist,p[1]-Math.sin(y)*dist,p[2]+simSize()*0.4+dist*0.15];
+  const dt=SIM.camT?Math.min(0.1,(now-SIM.camT)/1000):1;SIM.camT=now;
+  const k=Math.min(1,dt*5);
+  for(let i=0;i<3;i++)cam.pos[i]+=(want[i]-cam.pos[i])*k;
+  const d=[p[0]-cam.pos[0],p[1]-cam.pos[1],p[2]-cam.pos[2]];
+  cam.yaw=Math.atan2(d[1],d[0])*180/Math.PI;cam.pitch=-Math.atan2(d[2],Math.hypot(d[0],d[1]))*180/Math.PI;cam.roll=0;
+  camChanged();
+}
+// Eye view alone: the camera on the path's first node, at its angles, where it stays
+function simEyeStart(ch){
+  const n=ch.nodes[0];if(!n)return;
+  const a=n.a,pt=((a[0]%360)+540)%360-180,rl=((a[2]%360)+540)%360-180;
+  flyAnim=null;cam.pos=n.o.slice();cam.yaw=a[1];cam.pitch=pt;cam.roll=-rl;camChanged();
+}
+// ---- the model -------------------------------------------------------------------------------
+// The picked model's mesh, once it is here: one the map places (in the page already), else
+// built by the launcher from the paks (mohaa-sim-build); the box until then.
+function simUseModel(){
+  const p=SIM.pick;
+  if(SIM.R)SIM.R.n=0;
+  SIM.R=null;
+  if(!p){simModelText();return;}
+  if(SIM.cache.has(p)){SIM.R=SIM.cache.get(p);}
+  else if(!SIM.fail.has(p)){
+    const mi=(D.models||[]).findIndex(M=>String(M.p||'').toLowerCase()===p);
+    if(mi>=0&&gl){try{const R=modelR(D.models[mi],D);SIM.cache.set(p,R);SIM.R=R;}catch(e){SIM.fail.set(p,String(e.message||e));}}
+    else if(SIM.busy!==p){if(simPost('mohaa-sim-build\n'+p))SIM.busy=p;else SIM.fail.set(p,'Only the map\'s own models can fly in a browser: open the map in the Map Viewer for the rest');}
+  }
+  if(SIM.R&&SIM.run&&SIM.cur)simInst(SIM.R,SIM.cur.p,SIM.cur.a);
+  simModelText();requestDraw();
+}
+function simSetPick(p){
+  SIM.pick=String(p||'').toLowerCase();LS.set(SIM_LS,SIM.pick);
+  simUseModel();simClose();
+}
+// A picture the model needs: the map's own entry when it has the same shader, else a new
+// entry (kept out of the Textures list and Find: they list the map's faces and models).
+function simTexIndex(t,P){
+  const e=TEXI.get(t.n);if(e&&!e.standin)return e.i;
+  if(SIM.texi.has(t.n))return SIM.texi.get(t.n);
+  const i=TEX.length,te=Object.assign({},t,{i:i,sim:1});delete te.b;delete te.gb;
+  TEX.push(te);MAT.push(matOf(te));matFaces.push([]);
+  GLT[i]=colourTex(te.c||[0.5,0.5,0.5]);
+  if(t.b!=null)TEXURL[i]=blobTexture(t.b,t.m,x=>{GLT[i]=x;},P);
+  if(t.gb!=null&&LIT)blobTexture(t.gb,t.gm,x=>{GLTG[i]=x;},P);
+  SIM.texi.set(t.n,i);return i;
+}
+// the launcher's replies
+window.MOHAA_SIMMODEL=async function(path,b64){
+  const p=String(path||'').toLowerCase();if(SIM.busy===p)SIM.busy='';
+  try{
+    if(!gl)throw new Error('no 3D view');
+    const P=await decodePacket(String(b64||''));
+    const M=(P.models||[])[0];if(!M)throw new Error('the build sent no model');
+    const ti=(P.tex||[]).map(t=>simTexIndex(t,P));
+    const M2=Object.assign({},M,{s:M.s.map(s=>{const c=s.slice();c[2]=ti[s[2]]!=null?ti[s[2]]:0;return c;})});
+    SIM.cache.set(p,modelR(M2,P));
+  }catch(e){SIM.fail.set(p,String(e&&e.message||e));flash('Simulate: '+p+' can\'t be drawn ('+(e&&e.message||e)+'): the box flies instead');}
+  if(SIM.pick===p)simUseModel();else simModelText();
+};
+window.MOHAA_SIMMODEL_FAIL=function(path,why){
+  const p=String(path||'').toLowerCase();if(SIM.busy===p)SIM.busy='';
+  SIM.fail.set(p,String(why||'not built'));
+  if(SIM.pick===p){flash('Simulate: '+p+' can\'t be drawn ('+why+'): the box flies instead');simUseModel();}
+};
+window.MOHAA_SIM_MODELS=function(list,why){
+  SIM.list=Array.isArray(list)?list.map(x=>String(x).toLowerCase()):null;SIM.listErr=why?String(why):'';SIM.asked=false;
+  if($('simOv').style.display!=='none')simListRender();
+};
+// ---- the model picker ------------------------------------------------------------------------
+function simOpen(){
+  $('simOv').style.display='flex';stopCamera();
+  if(!SIM.list&&!SIM.asked&&simPost('mohaa-sim-models'))SIM.asked=true;
+  const q=$('simQ');q.value='';simListRender();setTimeout(()=>q.focus(),0);
+}
+function simClose(){$('simOv').style.display='none';const a=document.activeElement;if(a&&a.id==='simQ')a.blur();}
+function simListRender(){
+  const L=$('simList'),q=$('simQ').value.trim().toLowerCase(),terms=q.split(/\s+/).filter(Boolean);
+  const ok=p=>terms.every(t=>p.includes(t));
+  const own=[...new Set((D.models||[]).map(M=>String(M.p||'').toLowerCase()).filter(Boolean))].sort();
+  const ownSet=new Set(own),pak=(SIM.list||[]).filter(p=>!ownSet.has(p));
+  const esc=x=>x.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  let h='',n=0;const MAXR=400;
+  const sect=(title,arr)=>{const m=arr.filter(ok);if(!m.length)return;h+='<div class="sh">'+title+' ('+m.length+')</div>';
+    for(const p of m){if(n>=MAXR)break;n++;h+='<div class="it'+(p===SIM.pick?' on':'')+'" data-p="'+esc(p)+'" title="'+esc(p)+'">'+esc(p.replace(/^models\//,''))+'</div>';}};
+  sect('Models this map places',own);
+  sect('Models in the paks',pak);
+  L.innerHTML=h||'<div class="sh">No model matches</div>';
+  let st='';
+  if(!simHost())st='In a browser only the map\'s own models can fly (the Map Viewer lists every model in the paks)';
+  else if(SIM.listErr)st=SIM.listErr;
+  else if(!SIM.list)st='Asking the launcher for the paks\' models…';
+  if(n>=MAXR)st=(st?st+' · ':'')+'Showing the first '+MAXR+': type more to narrow it down';
+  $('simStat').textContent=st;
+}
+function simInit(){
+  if(!$('bSim'))return;
+  try{SIM.pick=String(LS.get(SIM_LS)||'').toLowerCase();}catch(_e){SIM.pick='';}
+  $('bSim').onclick=simStart;
+  $('bSimReset').onclick=()=>simReset(false);
+  $('bSimPick').onclick=simOpen;
+  $('simClose').onclick=simClose;
+  $('simBoxBtn').onclick=()=>simSetPick('');
+  $('simOv').addEventListener('click',e=>{if(e.target===$('simOv'))simClose();});
+  $('simQ').addEventListener('input',simListRender);
+  $('simQ').addEventListener('keydown',e=>{
+    if(e.key==='Escape'){simClose();e.preventDefault();e.stopPropagation();return;}
+    if(e.key==='Enter'){const f=$('simList').querySelector('.it');if(f)simSetPick(f.dataset.p);e.preventDefault();e.stopPropagation();}});
+  $('simList').addEventListener('click',e=>{const it=e.target.closest('.it');if(it)simSetPick(it.dataset.p);});
+  $('simMul').onchange=()=>{const m=parseFloat($('simMul').value)||1,now=performance.now();
+    if(SIM.run){const x=(now-SIM.t0)*SIM.mul;SIM.t0=now-x/m;}SIM.mul=m;$('simMul').blur();};
+  // (let go of the focus, so the camera keys work again straight away)
+  $('simCam').onchange=()=>{SIM.camT=0;$('simCam').blur();};
+  $('simEye').onchange=()=>{SIM.camT=0;$('simEye').blur();};
+  $('simZoom').oninput=simZoomShow;$('simZoom').onchange=()=>$('simZoom').blur();simZoomShow();
+  simModelText();
+}
+// ---- drawing: the path's curve (while the section shows) and the box ----------------------
+function drawSim(vp){
+  const ch=SIM.run?SIM.rc:(($('simSect')&&$('simSect').style.display!=='none')?SIM.chain:null);
+  if(!gl||(!ch&&!SIM.run))return;
+  const T=[],L=[],Lx=[];
+  const lin=(A,p,q,c)=>A.push(p[0],p[1],p[2],q[0],q[1],q[2],c[0],c[1],c[2],c[3],q[0],q[1],q[2],p[0],p[1],p[2],c[0],c[1],c[2],c[3]);
+  const tri=(a,b,c,col)=>{for(const p of[a,b,c])T.push(p[0],p[1],p[2],p[0],p[1],p[2],col[0],col[1],col[2],col[3]);};
+  if(ch&&ch.fr.curve.length>1){const cv=ch.fr.curve,c=[1,0.62,0.12,0.95],cx=[1,0.62,0.12,0.3];
+    for(let i=1;i<cv.length;i++){lin(L,cv[i-1],cv[i],c);lin(Lx,cv[i-1],cv[i],cx);}
+    // each node's spot on the curve's control polygon, and its facing (its angles)
+    for(const x of ch.nodes){const f=anglesAxis(x.a)[0],o=x.o,e=[o[0]+f[0]*24,o[1]+f[1]*24,o[2]+f[2]*24];lin(L,o,e,[1,0.85,0.3,0.9]);}}
+  // the placeholder: a box with a nose, until (or instead of) a model
+  if(SIM.run&&SIM.cur&&!(SIM.R&&SIM.R.n)){const ax=anglesAxis(SIM.cur.a),o=SIM.cur.p;
+    const at=(x,y,z)=>[o[0]+ax[0][0]*x+ax[1][0]*y+ax[2][0]*z,o[1]+ax[0][1]*x+ax[1][1]*y+ax[2][1]*z,o[2]+ax[0][2]*x+ax[1][2]*y+ax[2][2]*z];
+    const hx=32,hy=16,hz=12,C=k=>at(k&1?hx:-hx,k&2?hy:-hy,k&4?hz:-hz),fc=[0.95,0.55,0.15,0.55],ec=[1,0.9,0.6,1];
+    for(const q of[[0,2,3,1],[4,5,7,6],[0,1,5,4],[2,6,7,3],[0,4,6,2],[1,3,7,5]]){tri(C(q[0]),C(q[1]),C(q[2]),fc);tri(C(q[0]),C(q[2]),C(q[3]),fc);}
+    for(const[a,d]of[[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7]])lin(L,C(a),C(d),ec);
+    // the nose: a pyramid on the front, and its top marked
+    const tip=at(hx+22,0,0),nc=[1,0.3,0.15,0.85];
+    for(const[a,d]of[[1,3],[3,7],[7,5],[5,1]])tri(C(a),C(d),tip,nc);
+    lin(L,at(-hx,0,hz),at(hx,0,hz),ec);}
+  if(!T.length&&!L.length)return;
+  if(!PMODT)PMODT=compile(VS_GVL,FS_LINE);
+  if(!B.simBuf){B.simBuf=gl.createBuffer();B.vSim=gvLineVAO(B.simBuf,true);gl.bindVertexArray(null);}
+  gl.enable(gl.DEPTH_TEST);gl.depthMask(false);gl.disable(gl.CULL_FACE);
+  gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
+  gvUniforms(PMODT,vp,0.0015);
+  gl.bindVertexArray(B.vSim);gl.bindBuffer(gl.ARRAY_BUFFER,B.simBuf);
+  // the curve faintly through walls, then as it is seen
+  if(Lx.length){gl.depthFunc(gl.GREATER);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(Lx),gl.STREAM_DRAW);gl.drawArrays(gl.LINES,0,Lx.length/10);}
+  gl.depthFunc(gl.LEQUAL);
+  if(T.length){gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(T),gl.STREAM_DRAW);gl.drawArrays(gl.TRIANGLES,0,T.length/10);}
+  if(L.length){gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(L),gl.STREAM_DRAW);gl.drawArrays(gl.LINES,0,L.length/10);}
+  gl.bindVertexArray(null);gl.disable(gl.BLEND);gl.depthMask(true);
+}
+// ============================================================================
 //  Start up
 // ============================================================================
 async function main(){
@@ -9708,6 +10128,7 @@ async function main(){
     initGL();
     buildPanel();
     modInit();
+    simInit();
     cvarCountRender();
     loadTextures();
     resize();

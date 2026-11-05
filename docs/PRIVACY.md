@@ -5,8 +5,8 @@ If you change one, change the other (`PRIVACY_TEXT` in `mohaa_launcher.py`).
 
 The Map Viewer shows the same notice under its own name, worded for its own files:
 `mohaa_map_viewer_config.json`, `output_console_map.log` and `mohaamap_*` temp folders,
-its decompiled `.map` files among the working files, and the grid's size and colour and
-where the Edit parameters box was left among the display choices (`_PRIVACY_SWAPS` in
+its decompiled `.map` files among the working files, and the grid's size and colour,
+where the Edit parameters box was left and Simulate's model among the display choices (`_PRIVACY_SWAPS` in
 `mohaa_map_launcher.py`).
 
 `python tests/check_privacy_sync.py` checks that this file, `PRIVACY_TEXT` and every
