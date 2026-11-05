@@ -1,14 +1,27 @@
 # MOHAA Model Viewer and Map Viewer -- runtime dependencies (Python 3.8 or newer)
 # Both programs need the same packages.
 #
+# The RUN launchers install these for you, VENDORED into the program's own bin folder
+# (never into Python itself), one folder per operating system so a dual-boot copy of the
+# program works from both:
+#     Windows  bin\libs        RUN -- Medal of Honor Viewer.bat
+#     Linux    bin/libs-linux  RUN -- Medal of Honor Viewer.sh
+#     macOS    bin/libs-mac    RUN -- Medal of Honor Viewer.sh
+# The checks and installs are done by bin/mohaa_envcheck.py. To do it by hand:
+#     python -m pip install -r docs/requirements.txt --target bin/libs --no-user
+# (use the same python that runs the program, and the folder for your OS). --target also
+# works where pip refuses system-wide installs (Ubuntu / Kubuntu 23.04+, PEP 668).
+#
 # Required. MOHAA textures are .tga, which only Pillow decodes; without it every
 # model and map loads untextured. The floor is a SECURITY floor, not a feature
 # floor: these programs feed Pillow image data straight out of .pk3 archives the
 # user downloaded, i.e. untrusted input, and older Pillow releases carry known
-# image-decoder vulnerabilities.
+# image-decoder vulnerabilities. It is enforced at run time too (mohaa_common.py):
+# with an older Pillow, textures are disabled. Note that Ubuntu 24.04's packaged
+# python3-pil is 10.2.0, below the floor -- another reason the launchers vendor it.
 Pillow>=10.3.0
 
-# Optional, Windows only -- the embedded 3D pane. Without these the launchers
+# Optional, Windows 8.1+ only -- the embedded 3D pane. Without these the launchers
 # still work and pages open in the default browser instead.
 # pywebview is PINNED: tkwebview2 3.5.0 drives pywebview 4.4.1's internals
 # directly and is signature-verified against that exact call.
@@ -17,4 +30,4 @@ Pillow>=10.3.0
 #   pywebview==4.4.1
 #   tkwebview2
 #
-# Install those with:  pip install pythonnet "pywebview==4.4.1" tkwebview2
+# Install those with:  python -m pip install pythonnet "pywebview==4.4.1" tkwebview2 --target bin\libs --no-user

@@ -16,6 +16,14 @@
 #    info card, panels      selection details, setsize, script lines, filters, find
 # ==============================================================================
 
+# --- Vendored dependencies: dormant hook (this module is page text only) ---
+import sys
+import os
+_LIBS_NAME = "libs" if sys.platform.startswith("win") else ("libs-mac" if sys.platform == "darwin" else "libs-linux")
+_libs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), _LIBS_NAME)
+if os.path.isdir(_libs_dir) and _libs_dir not in sys.path:
+    sys.path.insert(0, _libs_dir)
+
 HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!--mohaa-map-viewer-rev:__REV__-->
 <html lang="en"><head><meta charset="utf-8">
@@ -254,6 +262,7 @@ __KEYS_CSS__
   <div id="sideTab" title="Collapse the control panel (\)">&#10095;</div>
   <div id="info"><div id="infoHead"><span class="t" id="infoTitle">info</span>
     <button class="sm" id="infoCopy" title="Copy everything in this card as text">Copy</button>
+    <button class="sm" id="infoScr" style="display:none" title="Open the map's .scr in your Text Editor (from the launcher; in a browser its path is copied)">Open .scr</button>
     <button class="sm" id="infoClose" title="Close (Esc)">&#10005;</button></div>
     <div id="infoBody"></div></div>
   <div id="modEd"><div id="modEdHead"><span class="t" id="modEdT">Edit parameters</span></div>
@@ -357,11 +366,9 @@ __KEYS_CSS__
    </div>
    <div class="sect">
      <h2>Show</h2>
-     <div class="tg" style="margin-bottom:7px"><button id="bFull" title="Full Brightness (B). Off: the map lit the way the game lights it (lightmaps, vertex light). On: every texture at full brightness, as MOHRadiant shows it.">Full Brightness<span class="k">B</span></button><button id="bSimpleSky" title="Simple Sky (K). On: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off: the game's sky box and its moving clouds, drawn behind everything, so whatever is behind a sky brush shows through it as in game.">Simple Sky<span class="k">K</span></button><button id="bSimpleMod" title="Simple models (M). On: each tree that has a sprite version is drawn as that sprite alone, the way the game draws trees far away; it turns about its upright axis to face the camera. Off: the whole tree. Models with no sprite version (bushes, props) don't change.">Simple models<span class="k">M</span></button><button id="bRoutes" title="AI routes: the game cvar ai_showroutes (game cvars, `): the connections the AI can walk between path nodes, from the map's .pth file (worked out here when it has none, and for Modify's new nodes), green both ways, a red arrowhead one way. Only the nodes within ai_showroutes_distance of the camera">AI routes</button><button id="bSunFlare" title="Sun flare (J). On: the game's lens flare, drawn as the game draws it when the view looks toward the map's sun and nothing solid is between the camera and the sky that way, with the screen's glare that fades when the sun goes out of sight. Off: no flare, as in MOHRadiant.">Sun flare<span class="k">J</span></button></div>
-     <div class="tg" id="filtBtns"></div>
-     <div class="row" style="margin-top:7px">
-       <button class="sm" id="bShowAll" title="Show every group (Ctrl+A)">All<span class="k">Ctrl+A</span></button>
-     </div>
+     <div class="tg" style="margin-bottom:7px"><button id="bFull" title="Full Brightness (B). Off: the map lit the way the game lights it (lightmaps, vertex light). On: every texture at full brightness, as MOHRadiant shows it.">Full Brightness<span class="k">B</span></button><button id="bSimpleSky" title="Simple Sky (K). On: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off: the game's sky box and its moving clouds, drawn behind everything, so whatever is behind a sky brush shows through it as in game.">Simple Sky<span class="k">K</span></button><button id="bSimpleMod" title="Simple models (M). On: each tree that has a sprite version is drawn as that sprite alone, the way the game draws trees far away; it turns about its upright axis to face the camera. Off: the whole tree. Models with no sprite version (bushes, props) don't change.">Simple models<span class="k">M</span></button><button id="bRoutes" title="AI routes: the game cvar ai_showroutes (game cvars, `): the connections the AI can walk between path nodes, from the map's .pth file (worked out here when it has none, and for Modify's new nodes), green both ways, a red arrowhead one way. Only the nodes within ai_showroutes_distance of the camera (I)">AI routes<span class="k">I</span></button><button id="bSunFlare" title="Sun flare (J). On: the game's lens flare, drawn as the game draws it when the view looks toward the map's sun and nothing solid is between the camera and the sky that way, with the screen's glare that fades when the sun goes out of sight. Off: no flare, as in MOHRadiant.">Sun flare<span class="k">J</span></button></div>
+     <div class="tg" id="filtBtns" style="margin-bottom:7px"></div>
+     <button id="bShowAll" title="Show every group (Ctrl+A)">All<span class="k">Ctrl+A</span></button>
      <!-- the two looks, as wide as the panel like the cameras' buttons; each is on while the
           Show buttons, the light, the sky and the sun flare are as it sets them (the flare
           only on a map that has one). A name never breaks: in a
@@ -379,13 +386,13 @@ __KEYS_CSS__
      </div>
      <div id="modList" style="margin-top:6px"></div>
      <div class="row" style="gap:4px;flex-wrap:wrap;margin-top:6px">
-       <button class="sm" id="bModEdit" title="Edit the entity as the .bsp's entity lump holds it: &quot;key&quot; &quot;value&quot; lines, applied as you type (double-click a row too). A path node joins the AI's paths again when you're done">Edit parameters</button>
-       <button class="sm" id="bModMove" title="Move: the selected entity follows the mouse again; a click on the map puts it there (Esc or Move again cancels). Off while Trim origin is on">Move</button>
-       <button class="sm" id="bModTrim" title="Trim origin: the camera stops and W A S D / the arrow keys move the entity along the map's axes (the way you face), Space / C up and down, by the trim step. Esc or T stops">Trim origin</button>
+       <button class="sm" id="bModEdit" title="Edit the entity as the .bsp's entity lump holds it: &quot;key&quot; &quot;value&quot; lines, applied as you type. A path node joins the AI's paths again when you're done&#10;&#10;Hotkey: Alt+E">Edit parameters</button>
+       <button class="sm" id="bModMove" title="Move: the selected entity follows the mouse again; a click on the map puts it there (Esc or Move again cancels). Off while Trim origin is on&#10;&#10;Hotkey: Alt+M">Move</button>
+       <button class="sm" id="bModTrim" title="Trim origin: the camera stops and W A S D / the arrow keys move the entity along the map's axes (the way you face), Space / C up and down, by the trim step. Esc or T stops&#10;&#10;Hotkey: Alt+T">Trim origin</button>
        <button class="sm" id="bModLink" title="Make path: click another entity to set this one's &quot;target&quot; to its targetname (only entities that have one can be picked), drawn as a target link. The clicked one is selected after, so pressing Make path again goes on along the path (info_waypoint, info_splinepath, script_origin...). Esc cancels">Make path</button>
-       <button class="sm" id="bModView" title="Move the entity to where the middle of the view meets the map">To view</button>
-       <button class="sm" id="bModFly" title="Fly the camera to the entity">Fly to</button>
-       <button class="sm" id="bModDel" title="Remove the entity">Delete</button>
+       <button class="sm" id="bModEye" title="Eye view: put the camera where the entity sees from, as Eye view does for the map's entities: a path node, a player start or an AI 82 units above the floor under it, anything else at its origin, facing its angles, else its target, else yaw 0">Eye view</button>
+       <button class="sm" id="bModFly" title="Fly the camera to the entity&#10;&#10;Hotkey: click its row in the list again once it is selected (green), or double-click the row">Fly to</button>
+       <button class="sm" id="bModDel" title="Remove the entity&#10;&#10;Hotkey: Delete">Delete</button>
      </div>
      <div class="row co" style="margin-top:6px">trim step <input type="range" id="modStep" min="0" max="13" step="1" value="4" title="How far one key press of Trim origin moves it, 1 to 50 units"><span id="modStepV" style="min-width:22px;text-align:right">5</span></div>
      <div class="row" style="gap:4px;flex-wrap:wrap">
@@ -439,12 +446,14 @@ const TF_SKY=1, TF_NODRAW=2, TF_ALPHATEST=4, TF_BLEND=8, TF_ADD=16, TF_TWOSIDED=
 const C_WORLD=1<<0, C_DETAIL=1<<1, C_ENTBRUSH=1<<2, C_PATCH=1<<3, C_TERRAIN=1<<4, C_CAULK=1<<5,
       C_CLIP=1<<6, C_TRIGGER=1<<7, C_HINT=1<<8, C_SKY=1<<9, C_LIQUID=1<<10, C_TRANS=1<<11,
       C_ORIGIN=1<<12, C_PORTAL=1<<13, C_NODRAW=1<<14, C_POINT=1<<15, C_LIGHT=1<<16, C_AINODE=1<<17,
-      C_PATH=1<<18, C_MODEL=1<<19, C_STATIC=1<<20, C_VIS=1<<21, C_RAIN=1<<22, C_FOLIAGE=1<<23, C_SCRIPT=1<<24;
+      C_PATH=1<<18, C_MODEL=1<<19, C_STATIC=1<<20, C_VIS=1<<21, C_RAIN=1<<22, C_FOLIAGE=1<<23, C_SCRIPT=1<<24, C_SCRTRIG=1<<25;
 const C_ENTITIES=C_ENTBRUSH|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_MODEL|C_STATIC|C_VIS;
 // C_STATIC has no Show button of its own: it marks the static props, which get no label
 // unless selected; Models and Entities hide them. C_RAIN (common/rain, the volumes of
 // func_rain entities) and C_FOLIAGE (common/foliageclip) have their own Show buttons,
-// apart from Nodraw and Clips. C_SCRIPT marks the entities the level script spawns
+// apart from Nodraw and Clips. C_SCRTRIG is no entity's kind: it shows or hides the
+// volumes of the triggers the level script spawns (drawScriptTrigs). C_SCRIPT marks the
+// entities the level script spawns
 // (scriptEnts), on top of their own kind.
 
 // ---- tokenizer -------------------------------------------------------------
@@ -1133,14 +1142,68 @@ function drawGrid(vp){
   gvUniforms(GRID.prog,vp,0.001);gl.bindVertexArray(GRID.vao);gl.drawArrays(gl.LINES,0,GRID.n);gl.bindVertexArray(null);
   gl.disable(gl.BLEND);gl.depthMask(true);
 }
-// Modify's path problems in the view: a tag over each node that has one
+// path node i's spawnflags: a new node's or a changed one's as Modify has them, else its
+// info_pathnode's in the map (node i is the map's i-th)
+function nodeSpawnflags(A,i){
+  const kvOf=m=>{for(const[k,v]of m.kv)if(k.toLowerCase()==='spawnflags')return parseInt(v,10)|0;return 0;};
+  const n0=A.n0==null?A.n:A.n0;
+  if(A.mod&&i>=n0)return A.mod[i-n0]?kvOf(A.mod[i-n0]):0;
+  if(A.edits&&A.edits.has(i))return kvOf(A.edits.get(i));
+  const pn=pnEnts();return pn.length===n0&&pn[i]!=null?parseInt(MAP.ents[pn[i]].kvl.spawnflags||'0',10)|0:0;
+}
+// the earlier node on the very spot of node i, once both are dropped to the floor (the one
+// the game links: PathSearch::LoadNodes checks the nodes before it), or -1
+function nodeDupOf(A,i){
+  const x=A.o[i*3],y=A.o[i*3+1],z=A.o[i*3+2];
+  for(let j=i-1;j>=0;j--)if(A.o[j*3]===x&&A.o[j*3+1]===y&&A.o[j*3+2]===z)return j;
+  return -1;
+}
+// a path node as a tag names it: its map entity ("entity 111 $friendlynode"), else "new node"
+function nodeName(A,j){
+  const n0=A.n0==null?A.n:A.n0,pn=pnEnts();
+  if(j>=n0)return 'a new node';
+  const ei=pn.length===n0?pn[j]:-1;if(ei<0)return 'node '+j;
+  const tn=MAP.ents[ei].kvl.targetname;return 'entity '+ei+(tn?' $'+tn:'');
+}
+// A tag over each path node with something to say. Modify's problems with its new and
+// changed nodes (paIssues), wherever they are; and while ai_showroutes draws the routes,
+// what its marks mean for every node, the map's and new ones, within
+// ai_showroutes_distance (past 350 units only in sight, as the labels): "no paths" (the
+// red X: no connection the AI can take), "N one-way" (red arrowheads: it can go but not
+// come back, a drop past ai_fallheight back up), "DONT_LINK" (the blue circle: its
+// spawnflag keeps it unlinked, on purpose). One tag a node, over its label.
 function drawPathIssues2D(){
-  const R=PA_ISS;if(!R||!R.n||!MOD.ents.length||R.A!==PA_C)return;
-  const A=R.A,lbl={links:'48 paths: full',none:'no paths',island:'cut off: Path not found',cell:'cell full: Node overflow'};
+  const R=PA_ISS,useR=!!(R&&R.n&&MOD.ents.length&&R.A===PA_C);
+  const RT=CVARS.ai_showroutes&&ROUTES&&ROUTES.tags&&ROUTES.A===PA_C?ROUTES:null;
+  if(!useR&&!(RT&&RT.tags.size))return;
+  const A=useR?R.A:RT.A,lbl={links:'48 paths: full',none:'no paths',island:'cut off: Path not found',cell:'cell full: Node overflow'};
+  const out=new Map();          // node -> [texts], worst colour
+  const add=(i,t,lv)=>{let o=out.get(i);if(!o){o={t:[],lv:0};out.set(i,o);}if(!o.t.includes(t))o.t.push(t);o.lv=Math.max(o.lv,lv);};
+  if(useR)for(const[i,l]of R.node)for(const x of l)add(i,lbl[x.k],2);
+  if(RT){const far=CVARS.ai_showroutes_distance;
+    for(const[i,t]of RT.tags){const p=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40];
+      const d=Math.hypot(p[0]-cam.pos[0],p[1]-cam.pos[1],p[2]-cam.pos[2]);
+      if(d>far||(d>350&&!lblSeen('r'+i,p)))continue;
+      if(t.none)add(i,'no paths',2);
+      if(t.ow)add(i,t.ow+' one-way',1);
+      // DONT_LINK from its own spawnflag is on purpose; without it the game set it while
+      // loading: dropped to the floor, the node lands on the very spot of an earlier one
+      // ("^~^~^ Duplicate node at (...) not linked", PathSearch::LoadNodes)
+      if(t.dl){if(nodeSpawnflags(A,i)&1)add(i,'\u2298 DONT_LINK',0);
+        else{if(t.dup===undefined)t.dup=nodeDupOf(A,i);
+          add(i,'duplicate of '+(t.dup>=0?nodeName(A,t.dup):'another node')+': not linked',2);}}}}
+  const col=['#6ea8ff','#ff6b5b','#ffb020'];
+  // a map node's tag goes just under its class label (on its entity, where the label is
+  // whether or not it is drawn); a new node's, which has no label, 40 units over its spot
+  const pn=pnEnts(),nMap=A.n0==null?A.n:A.n0,mapEi=pn.length===nMap?pn:null;
   ctx.font='bold 11px ui-monospace,Menlo,Consolas,monospace';ctx.textBaseline='middle';
-  for(const[i,l]of R.node){const p=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40],s=project(p);if(!s||s[0]<0||s[0]>W||s[1]<0||s[1]>H)continue;
-    const txt='\u26a0 '+[...new Set(l.map(x=>lbl[x.k]))].join(', '),tw=ctx.measureText(txt).width;
-    ctx.fillStyle='rgba('+TH.labelbg+',.85)';ctx.fillRect(s[0]-tw/2-4,s[1]-8,tw+8,16);ctx.fillStyle='#ffb020';ctx.fillText(txt,s[0]-tw/2,s[1]);}
+  for(const[i,o]of out){
+    let s;const ei=mapEi&&i<nMap?mapEi[i]:-1,X=ei>=0?ENTS[ei]:null;
+    if(X&&X.anchor){s=project([X.anchor[0],X.anchor[1],X.anchor[2]+(X.box?X.box.maxs[2]+6:0)]);if(s)s=[s[0],s[1]+7];}
+    else s=project([A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40]);
+    if(!s||s[0]<0||s[0]>W||s[1]<0||s[1]>H)continue;
+    const txt=(o.lv?'\u26a0 ':'')+o.t.join(', '),tw=ctx.measureText(txt).width;
+    ctx.fillStyle='rgba('+TH.labelbg+',.85)';ctx.fillRect(s[0]-tw/2-4,s[1]-8,tw+8,16);ctx.fillStyle=col[o.lv];ctx.fillText(txt,s[0]-tw/2,s[1]);}
 }
 // the coordinates along the three lines through the grid's centre
 function drawGrid2D(){
@@ -1331,7 +1394,13 @@ function buildEntities(){
     ENTS.push(X);
   }
   ENTS.tn=tnIndex;
-  for(const X of ENTS)X.box=entityBox(X.ei);
+  for(const X of ENTS){const b=entityBox(X.ei);X.box=b&&!b.wmins?boxWorld(b):b;
+    // a trigger the level script spawns with a setsize: its marker keeps the class's small
+    // box (Script ents), and the setsize is drawn as its volume (Script trigs)
+    X.mbox=X.box;
+    const e=MAP.ents[X.ei];
+    if(X.ei>0&&e.scr&&X.marker&&X.box&&parseVec(e.kvl.setsize,6)&&(GAME_CLASS[e.cls]==='trigger'||e.cls.startsWith('trigger'))){
+      X.scrTrig=true;X.mbox=markerBoxOf(X);}}
 }
 // MOHRadiant's camera colours a point entity's box like this (its brush drawing, read from
 // mohradiant.exe): an info_path... class with a "targetname" gets its class colour turned
@@ -1371,6 +1440,44 @@ function nodeOutline(sf){
   for(const[b,c]of NODE_OUTLINES)if(sf&b)return c;
   return null;
 }
+// Whether the game turns a model entity's box with its angles (EF_LINKANGLES: the box's
+// trace, CM_TransformedBoxTrace, then rotates by r.currentAngles, and SV_LinkEntity links
+// the turned box's bounds). ScriptSlave sets it (script_model, script_object and the rest
+// of the 'slave' group), so do Vehicle and VehicleCollisionEntity; "rotatedbbox" sets or
+// clears it (Entity::EventSetRotatedBbox), as a map key or a script line. Other classes
+// (an Actor, an Animate...) keep an unturned box whatever their angles.
+function boxTurns(ei){
+  const e=MAP.ents[ei],rb=e.kvl.rotatedbbox;
+  if(rb!=null&&rb!=='')return (parseInt(rb,10)|0)!==0;
+  const M=ENTS[ei]&&ENTS[ei].model>=0?D.models[ENTS[ei].model]:null;
+  let g=GAME_CLASS[e.cls];
+  if(!g&&M&&M.cn)g=GAME_CLASS[String(M.cn).toLowerCase()];
+  return g==='slave'||g==='vehicle'||e.cls==='vehiclecollisionentity';
+}
+// A box's eight corners in the world (corner k: bit 1 x, 2 y, 4 z at the max end, as
+// boxLines), turned by its axes (B.ax: forward, left, up) when it has them; origin o in
+// place of its own (a moved door's).
+function boxCorners(B,o){
+  o=o||B.origin;const a=B.ax,C=[];
+  for(let k=0;k<8;k++){const t=[(k&1)?B.maxs[0]:B.mins[0],(k&2)?B.maxs[1]:B.mins[1],(k&4)?B.maxs[2]:B.mins[2]];
+    C.push(a?[o[0]+t[0]*a[0][0]+t[1]*a[1][0]+t[2]*a[2][0],o[1]+t[0]*a[0][1]+t[1]*a[1][1]+t[2]*a[2][1],o[2]+t[0]*a[0][2]+t[1]*a[1][2]+t[2]*a[2][2]]
+      :[o[0]+t[0],o[1]+t[1],o[2]+t[2]]);}
+  return C;
+}
+// B.wmins / B.wmaxs: the box's bounds along the world's axes, from its origin (the turned
+// box's, as CalculateRotatedBounds2 gives SV_LinkEntity's absmin / absmax)
+function boxWorld(B){
+  if(!B.ax){B.wmins=B.mins;B.wmaxs=B.maxs;return B;}
+  const C=boxCorners(B,[0,0,0]),mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+  for(const c of C)for(let k=0;k<3;k++){mn[k]=Math.min(mn[k],c[k]);mx[k]=Math.max(mx[k],c[k]);}
+  B.wmins=mn;B.wmaxs=mx;return B;
+}
+// the box a marker is drawn with when its setsize is shown otherwise: MOHRadiant's 16-unit
+// stand-in, else the class's editor box (as entityBox without the setsize)
+function markerBoxOf(X){
+  const B=X.standin||!(X.def&&X.def.b)?{origin:X.origin,mins:[-8,-8,-8],maxs:[8,8,8]}:{origin:X.origin,mins:X.def.b[0],maxs:X.def.b[1]};
+  return boxWorld(B);
+}
 // The entity's box as the game sees it: origin plus setsize mins/maxs, and where it
 // comes from. Brush entities: a .bsp gives the exact box; a .map is worked out the way
 // the compiler does it (origin brush centre, else the "origin" key, else the middle of
@@ -1390,15 +1497,19 @@ function entityBox(ei){
     return{origin:org,mins:[inf.mins[0]-org[0],inf.mins[1]-org[1],inf.mins[2]-org[2]],maxs:[inf.maxs[0]-org[0],inf.maxs[1]-org[1],inf.maxs[2]-org[2]],how:how,exact:!!inf.originBrush};
   }
   if(!o)return null;
+  // A model's setsize box turns with its angles when the game turns it (boxTurns); its own
+  // size always does, being the model's.
+  const ang=entAngles(e.kvl),turned=ang[0]||ang[1]||ang[2], ax=turned?anglesAxis(ang):null;
+  const set=(B)=>{if(ax&&X.model>=0&&boxTurns(ei)){B.ax=ax;B.how+=', turned with its angles';}
+    else if(ax&&X.model>=0&&B.exact)B.how+=(e.kvl.rotatedbbox!=null&&e.kvl.rotatedbbox!==''?'; "rotatedbbox" 0: the game doesn\'t turn its box with its angles'
+      :'; the game doesn\'t turn this class\'s box with its angles');
+    return boxWorld(B);};
   const ss=parseVec(e.kvl.setsize,6);
-  if(ss)return{origin:o,mins:ss.slice(0,3),maxs:ss.slice(3),how:'"setsize" key',exact:true};
+  if(ss)return set({origin:o,mins:ss.slice(0,3),maxs:ss.slice(3),how:'"setsize" key',exact:true});
   if(X.model>=0){const M=D.models[X.model];const sc=parseFloat(e.kvl.scale)||1;
-    if(M.ss)return{origin:o,mins:M.ss[0],maxs:M.ss[1],how:'setsize in '+M.p.replace(/^models\//,''),exact:true};
+    if(M.ss)return set({origin:o,mins:M.ss[0],maxs:M.ss[1],how:'setsize in '+M.p.replace(/^models\//,''),exact:true});
     // the model's own size, turned with the entity
-    const ax=anglesAxis(entAngles(e.kvl)), mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
-    for(let c=0;c<8;c++){const v=[(c&1?M.b[1]:M.b[0])[0]*sc,(c&2?M.b[1]:M.b[0])[1]*sc,(c&4?M.b[1]:M.b[0])[2]*sc];
-      for(let k=0;k<3;k++){const w=ax[0][k]*v[0]+ax[1][k]*v[1]+ax[2][k]*v[2];mn[k]=Math.min(mn[k],w);mx[k]=Math.max(mx[k],w);}}
-    return{origin:o,mins:mn,maxs:mx,how:'model size (no setsize in its .tik)',exact:false};}
+    return boxWorld({origin:o,mins:M.b[0].map(v=>v*sc),maxs:M.b[1].map(v=>v*sc),ax:ax,how:'model size (no setsize in its .tik), turned with the model',exact:false});}
   if(X.standin)return{origin:o,mins:[-8,-8,-8],maxs:[8,8,8],exact:false,
     how:'MOHRadiant\'s stand-in for a class it has no definition for, a 16-unit cube on the origin'+(e.cls==='info_pathnode'?' (a path node has no size in game)':'')};
   const d=X.def;
@@ -1834,7 +1945,7 @@ function initMarkers(){
   for(const X of ENTS){
     X.mv0=P.length/3;X.mvn=0;
     if(!X.marker)continue;
-    const o=X.origin, b=X.box||{mins:[-8,-8,-8],maxs:[8,8,8]}, id=NF+1+X.ei, ol=X.ol?[X.ol[0],X.ol[1],X.ol[2],1]:[0,0,0,0];
+    const o=X.origin, b=X.mbox||X.box||{mins:[-8,-8,-8],maxs:[8,8,8]}, id=NF+1+X.ei, ol=X.ol?[X.ol[0],X.ol[1],X.ol[2],1]:[0,0,0,0];
     const push=(v,c,m,q)=>{P.push(v[0],v[1],v[2]);Cc.push(c[0],c[1],c[2],m);K.push(id);Q.push(q[0],q[1],q[2]);O.push(ol[0],ol[1],ol[2],ol[3]);};
     if(X.marker===2){
       const c=X.col, lo=[c[0]*0.75,c[1]*0.75,c[2]*0.75], mid=[0.5,0.5,0.5];
@@ -2609,6 +2720,69 @@ function leakSeal(){
     const pl=[];for(const f of F){const q=planeOf(f);if(q)pl.push(q);}
     if(pl.length>=4)L.push({mn:p.mins,mx:p.maxs,pl:pl,pi:pi});}
   return LEAKSEAL=L;
+}
+// ---- labels through walls ---------------------------------------------------------------
+// The world brushes that hide a label behind them: solid, not see-through (no
+// "surfaceparm trans", not water), detail ones included, and only while one of their
+// faces is shown (World / Details / Caulk off, Hide). Patches, terrain and brush
+// entities don't hide labels. A box tree (BVH) over them keeps a sight line cheap.
+let LBLOCC=null;
+function lblOccluders(){
+  if(!LBLOCC){
+    const L=[];
+    for(let pi=0;pi<SC.prims.length;pi++){const p=SC.prims[pi];
+      if(p.kind!==0||!isFinite(p.mins[0]))continue;
+      const e=MAP.ents[p.ent];if(!WORLDLIKE[e.cls])continue;
+      const pr=e.prims[p.bn];if(!pr||!pr.d||!pr.d.faces.length)continue;
+      const F=pr.d.faces,bc=pgBcont(p.ent,p.bn);
+      let c=0;for(const f of F){const te=texFor(f.tex);c|=pgCont(bc!=null?bc:f.cont,te);if((te.p||[]).includes('trans'))c|=CONTENTS_TRANSLUCENT;}
+      if(bc!=null)c|=bc&CONTENTS_TRANSLUCENT;
+      if(!(c&1)||(c&CONTENTS_TRANSLUCENT))continue;
+      const pl=[];for(const f of F){const q=planeOf(f);if(q)pl.push(q);}
+      if(pl.length>=4)L.push({mn:p.mins,mx:p.maxs,pl:pl,p:p,on:true});}
+    const build=(it)=>{const mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+      for(const B of it)for(let k=0;k<3;k++){if(B.mn[k]<mn[k])mn[k]=B.mn[k];if(B.mx[k]>mx[k])mx[k]=B.mx[k];}
+      if(it.length<=4)return{mn:mn,mx:mx,it:it};
+      let ax=0;for(let k=1;k<3;k++)if(mx[k]-mn[k]>mx[ax]-mn[ax])ax=k;
+      it.sort((a,b)=>(a.mn[ax]+a.mx[ax])-(b.mn[ax]+b.mx[ax]));const h=it.length>>1;
+      return{mn:mn,mx:mx,l:build(it.slice(0,h)),r:build(it.slice(h))};};
+    LBLOCC={L:L,root:L.length?build(L.slice()):null,key:''};
+  }
+  // which of them are shown, again when the Show buttons or Hide change
+  const key=hiddenMask+':'+hidPrim.size+':'+hidEnt.size+':'+EXP.hid.size+':'+(THU.hid?1:0);
+  if(LBLOCC.key!==key){LBLOCC.key=key;
+    for(const B of LBLOCC.L){let on=false;for(let f=B.p.f0;f<B.p.f1&&!on;f++)if(faceShown(f))on=true;B.on=on;}}
+  return LBLOCC;
+}
+// Does a shown occluder stand between a and b? (the last 2 units before b don't count,
+// so a label on a floor or a wall isn't hidden by the brush it sits on)
+function lblBlocked(a,b){
+  const O=lblOccluders();if(!O.root)return false;
+  const d=[b[0]-a[0],b[1]-a[1],b[2]-a[2]],len=Math.hypot(d[0],d[1],d[2]);if(len<1)return false;
+  const tEnd=1-2/len,st=[O.root];
+  const slab=(mn,mx)=>{let t0=0,t1=tEnd;
+    for(let k=0;k<3;k++){if(Math.abs(d[k])<1e-9){if(a[k]<mn[k]||a[k]>mx[k])return false;continue;}
+      let u=(mn[k]-a[k])/d[k],v=(mx[k]-a[k])/d[k];if(u>v){const w=u;u=v;v=w;}if(u>t0)t0=u;if(v<t1)t1=v;if(t0>t1)return false;}
+    return true;};
+  while(st.length){const N=st.pop();if(!slab(N.mn,N.mx))continue;
+    if(N.l){st.push(N.l,N.r);continue;}
+    for(const B of N.it){if(!B.on)continue;
+      let t0=0,t1=tEnd,ok=true;
+      for(const q of B.pl){const dn=q[0]*d[0]+q[1]*d[1]+q[2]*d[2],dist=q[0]*a[0]+q[1]*a[1]+q[2]*a[2]-q[3];
+        if(Math.abs(dn)<1e-9){if(dist>0){ok=false;break;}continue;}
+        const t=-dist/dn;if(dn<0){if(t>t0)t0=t;}else if(t<t1)t1=t;
+        if(t0>t1){ok=false;break;}}
+      if(ok&&t0<t1)return true;}}
+  return false;
+}
+// sight lines kept until the camera moves (a 4-unit step) or the Show buttons change
+const LBLVIS={key:'',m:new Map()};
+function lblSeen(ei,top){
+  const k=Math.round(cam.pos[0]/4)+','+Math.round(cam.pos[1]/4)+','+Math.round(cam.pos[2]/4)+'|'+(LBLOCC?LBLOCC.key:'');
+  if(LBLVIS.key!==k){LBLVIS.key=k;LBLVIS.m.clear();}
+  let v=LBLVIS.m.get(ei);
+  if(v===undefined){v=!lblBlocked(cam.pos,top);LBLVIS.m.set(ei,v);}
+  return v;
 }
 // how far a ray goes before a sealing brush: [distance, brush] or null when it gets out
 function leakRay(o,d,len){
@@ -3992,6 +4166,7 @@ function draw(){
   drawShowNormals(VP);
   drawRoutes(VP);
   drawGrid(VP);
+  drawScriptTrigs(VP);
   drawModify(VP);
   if(CVARS.r_light_showgrid)drawLightGrid(VP);
   drawCvarLines(VP);
@@ -4159,7 +4334,7 @@ function rebuildLines(){
     const b=X.box,dx=X.hasGeo?doorXf(X.ei):null,o=dx?xfP(dx,b.origin):b.origin;
     const c=sel?[sc[0],sc[1],sc[2],1]:[X.col[0],X.col[1],X.col[2],0.85];
     if(dx)boxLinesC(sel?H:L,doorCorners(movObj(X.ei),dx),c);         // a door (or a flying exploder chunk) that has moved: its box moved with it
-    else boxLines(sel?H:L,[o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]],c);
+    else boxLinesC(sel?H:L,boxCorners(b,o),c);
     if(sel){const r=6;H.push(o[0]-r,o[1],o[2],1,1,1,1,o[0]+r,o[1],o[2],1,1,1,1, o[0],o[1]-r,o[2],1,1,1,1,o[0],o[1]+r,o[2],1,1,1,1, o[0],o[1],o[2]-r,1,1,1,1,o[0],o[1],o[2]+r,1,1,1,1);}
   }
   LINKS=[];
@@ -4178,7 +4353,7 @@ function rebuildLines(){
   if(view.arrows){
     for(const X of ENTS){if(!X.marker||!X.origin||!entShown(X.ei))continue;
       const e=MAP.ents[X.ei];if(e.kvl.angle==null&&e.kvl.angles==null)continue;
-      const ax=anglesAxis(entAngles(e.kvl)), f=ax[0], u=ax[2], o=X.origin, b=X.box||{mins:[-8,-8,-8],maxs:[8,8,8]};
+      const ax=anglesAxis(entAngles(e.kvl)), f=ax[0], u=ax[2], o=X.origin, b=X.mbox||X.box||{mins:[-8,-8,-8],maxs:[8,8,8]};
       const c=[o[0]+(b.mins[0]+b.maxs[0])/2,o[1]+(b.mins[1]+b.maxs[1])/2,o[2]+(b.mins[2]+b.maxs[2])/2];
       const hw=Math.max(4,(b.maxs[0]-b.mins[0])/2), len=hw*2.5, t=hw*0.5;
       const tip=[c[0]+f[0]*len,c[1]+f[1]*len,c[2]+f[2]*len];
@@ -4268,17 +4443,23 @@ function drawLines(vp){
 // ---- 2D overlay: labels, the Radiant fly crosshair -------------------------------------
 let _d2d=true;                // the overlay has something on it (cleared only then)
 function draw2D(){
-  const any=view.labels||radFly||(view.leak&&leakHas())||GRID.on||!!(PA_ISS&&PA_ISS.n&&MOD.ents.length);
+  const any=view.labels||radFly||(view.leak&&leakHas())||GRID.on||!!(PA_ISS&&PA_ISS.n&&MOD.ents.length)||!!(CVARS.ai_showroutes&&ROUTES&&ROUTES.tags&&ROUTES.tags.size);
   if(!any&&!_d2d)return;
   ctx.clearRect(0,0,W,H);_d2d=!!any;
   const selE=selectedEnts();
   if(view.labels){
     // Nearest first, never overlapping: named entities out to 2048 units, unnamed ones
-    // close by only, lights and static props only when named (there are hundreds).
-    const cand=[];
+    // close by only (700; brush entities too: doors, ladders...), lights and static props
+    // only when named (there are hundreds).
+    // Behind a wall, less far: 512 named, 350 unnamed, a label past that showing only when
+    // the camera can see its spot (lblSeen: a sight line through the world's opaque
+    // brushes). Each fades out over the last 40% of its own range, to nothing at its end.
+    // Selected ones always show, fully.
+    const cand=[];lblOccluders();
     for(const X of ENTS){if(X.ei===0||!X.anchor||!entVisible(X.ei))continue;
       const sel=selE.has(X.ei), e=MAP.ents[X.ei], tn=e.kvl.targetname;
-      if(!sel&&!tn&&(X.hasGeo||X.marker===2||(X.cat&C_STATIC)))continue;
+      if(!sel&&!tn&&(X.marker===2||(X.cat&C_STATIC)))continue;
+      if(!sel&&X.hasGeo&&isWorldlike(X.ei))continue;          // func_group, detail: part of the world
       const d=Math.hypot(X.anchor[0]-cam.pos[0],X.anchor[1]-cam.pos[1],X.anchor[2]-cam.pos[2]);
       if(!sel&&d>(tn?2048:700))continue;
       cand.push([sel?-1:d,X]);}
@@ -4286,13 +4467,23 @@ function draw2D(){
     ctx.font='11px ui-monospace,Menlo,Consolas,monospace';ctx.textBaseline='middle';
     const taken=[];let shown=0;
     for(const[d,X]of cand){if(shown>=120&&d>=0)break;
-      const top=X.box?[X.anchor[0],X.anchor[1],X.anchor[2]+(X.marker&&X.box?X.box.maxs[2]+6:0)]:X.anchor;
+      // a brush entity's in the middle of its box (a door's origin is its hinge, often in
+      // the wall), where it is now if it has moved
+      let top;
+      if(X.hasGeo&&X.box){const b=X.box,dx=doorXf(X.ei),c=[b.origin[0]+(b.mins[0]+b.maxs[0])/2,b.origin[1]+(b.mins[1]+b.maxs[1])/2,b.origin[2]+(b.mins[2]+b.maxs[2])/2];
+        top=dx?xfP(dx,c):c;}
+      else{const mb=X.mbox||X.box;top=mb?[X.anchor[0],X.anchor[1],X.anchor[2]+(X.marker?mb.maxs[2]+6:0)]:X.anchor;}
       const sp=project(top);if(!sp||sp[0]<-50||sp[0]>W+50||sp[1]<-20||sp[1]>H+20)continue;
-      const e=MAP.ents[X.ei], tn=e.kvl.targetname, txt=(e.kvl.classname||'?')+(tn?'  $'+tn:'');
+      const e=MAP.ents[X.ei], tn=e.kvl.targetname;
+      let lim=tn?2048:700;const wall=tn?512:350;
+      if(d>=0&&d>wall*0.6&&!lblSeen(X.ei,top))lim=wall;
+      const al=d<0?1:Math.min(1,(lim-d)/(lim*0.4));
+      if(al<0.04)continue;
+      const txt=(e.kvl.classname||'?')+nodeFlagTag(e)+(tn?'  $'+tn:'');
       const tw=ctx.measureText(txt).width, r=[sp[0]-tw/2-4,sp[1]-16,tw+8,14];
       if(d>=0&&taken.some(q=>r[0]<q[0]+q[2]&&q[0]<r[0]+r[2]&&r[1]<q[1]+q[3]&&q[1]<r[1]+r[3]))continue;
       taken.push(r);
-      ctx.globalAlpha=d<0?1:Math.max(0.4,1-d/2400);ctx.fillStyle='rgba('+TH.labelbg+',.8)';ctx.fillRect(r[0],r[1],r[2],r[3]);
+      ctx.globalAlpha=al;ctx.fillStyle='rgba('+TH.labelbg+',.8)';ctx.fillRect(r[0],r[1],r[2],r[3]);
       ctx.fillStyle=d<0?TH.sel:(tn?TH.accent:TH.txt);ctx.fillText(txt,sp[0]-tw/2,sp[1]-9);
       shown++;}
     ctx.globalAlpha=1;
@@ -4371,7 +4562,7 @@ function gvInit(){
     const door=DOOR_CLASSES[MAP.ents[X.ei].cls];
     if(!G.bm.has(X.ei)&&X.model<0&&!door)continue;
     const b=X.box,o=b.origin;
-    const E=gvLink(G,X.ei,[o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]]);
+    const E=gvLink(G,X.ei,[o[0]+b.wmins[0],o[1]+b.wmins[1],o[2]+b.wmins[2]],[o[0]+b.wmaxs[0],o[1]+b.wmaxs[1],o[2]+b.wmaxs[2]]);
     if(door)G.doorArea.set(X.ei,[E.a1,E.a2]);
   }
   G.key='';G.skey='';G.marked=false;G.leafVis=new Uint8Array(G.nl);G.nodeVis=new Uint8Array(Math.max(1,G.nn));G.conn=null;G.camArea=-1;G.camCluster=-1;
@@ -4602,7 +4793,7 @@ function gvUpdate(){
     const a=[],an=[];
     for(const ei of R.inst){if(!vis.has(ei))continue;
       const E=ENTS[ei],b=E.box,o=E.origin;
-      if(boxFar&&b&&gvBeyond(f,fe,far,o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2],o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]))continue;
+      if(boxFar&&b&&gvBeyond(f,fe,far,o[0]+b.wmins[0],o[1]+b.wmins[1],o[2]+b.wmins[2],o[0]+b.wmaxs[0],o[1]+b.wmaxs[1],o[2]+b.wmaxs[2]))continue;
       const rows=instRows(E);for(const v of rows)a.push(v);nmod++;sig=(Math.imul(sig,31)+ei*11+3)|0;
       // a static prop's cross takes its .tik scale and its own (R_RotateForStaticModel);
       // an entity's axes are unit length
@@ -4831,6 +5022,8 @@ function buildRoutes(){
   const line=(a,b,c,i)=>{const o=[O[i*3],O[i*3+1],O[i*3+2]];
     V.push(a[0],a[1],a[2],b[0],b[1],b[2],c[0],c[1],c[2],1,o[0],o[1],o[2], b[0],b[1],b[2],a[0],a[1],a[2],c[0],c[1],c[2],1,o[0],o[1],o[2]);};
   const G=[0,1,0],RED=[1,0,0],BLUE=[0,0,1];
+  const tags=new Map();          // node -> {none, dl, ow}: what its red X / blue circle / red arrows say
+  const tag=i=>{let t=tags.get(i);if(!t){t={none:false,dl:false,ow:0};tags.set(i,t);}return t;};
   for(let i=0;i<n;i++){
     const k0=first[i],k1=first[i+1];
     for(let k=k0;k<k1;k++){
@@ -4842,6 +5035,7 @@ function buildRoutes(){
       const p1=[C[q+3],C[q+4],C[q+5]+36],p2=[C[q+6],C[q+7],C[q+8]+36];
       line(p1,p2,G,i);
       if(!rev){
+        tag(i).ow++;
         let dx=C[q+6]-C[q+3],dy=C[q+7]-C[q+4];const l=Math.hypot(dx,dy);if(l>0){dx/=l;dy/=l;}else{dx=0;dy=0;}
         const t=[p1[0]+dx*16,p1[1]+dy*16,p1[2]];
         line(t,[t[0]-dx*8,t[1]-dy*8,t[2]-8],RED,i);
@@ -4851,9 +5045,11 @@ function buildRoutes(){
     if(k0===k1){
       const p=[O[i*3],O[i*3+1],O[i*3+2]+2];
       if(F[i]&1){                                     // PATH_DONT_LINK: a blue circle
+        tag(i).dl=true;
         for(let s=0;s<24;s++){const a0=s*Math.PI/12,a1=(s+1)*Math.PI/12;
           line([p[0]+Math.sin(a0)*12,p[1]+Math.cos(a0)*12,p[2]],[p[0]+Math.sin(a1)*12,p[1]+Math.cos(a1)*12,p[2]],BLUE,i);}
       }else{
+        tag(i).none=true;
         line([p[0]-12,p[1]-12,p[2]],[p[0]+12,p[1]+12,p[2]],RED,i);
         line([p[0]+12,p[1]-12,p[2]],[p[0]-12,p[1]+12,p[2]],RED,i);
       }
@@ -4864,7 +5060,7 @@ function buildRoutes(){
     gl.bindBuffer(gl.ARRAY_BUFFER,B.rtBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(13),gl.STATIC_DRAW);
     attr(0,B.rtBuf,3,52,0);attr(1,B.rtBuf,3,52,12);attr(7,B.rtBuf,4,52,24);attr(8,B.rtBuf,3,52,40);gl.bindVertexArray(null);}
   gl.bindBuffer(gl.ARRAY_BUFFER,B.rtBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(V.length?V:new Array(13).fill(0)),gl.STATIC_DRAW);
-  ROUTES={verts:V.length/13,fh:fh};
+  ROUTES={verts:V.length/13,fh:fh,tags:tags,A:A};
 }
 function drawRoutes(vp){
   if(!CVARS.ai_showroutes||!routesOk()||!gl)return;
@@ -5643,11 +5839,19 @@ function scrEntHtml(e){
   if(r.u){const u=Object.entries(r.u);if(u.length)h+='<div class="note warn">Not followed (worked out while the game runs): '+u.map(([k,v])=>esc(k)+' from <code>'+esc(v)+'</code>').join('; ')+'</div>';}
   return h;
 }
+// Open a file of the level script (the map's own .scr is 0) in the launcher's Text Editor:
+// a file on disk as it is, one in a pak extracted first. In a browser, its path is copied.
+function openScr(i){
+  const F=D.scr&&D.scr.files&&D.scr.files[i];if(!F)return;
+  try{if(window.chrome&&window.chrome.webview){window.chrome.webview.postMessage('mohaa-open-scr\n'+F[0]+'\n'+F[1]);
+    flash('Opening '+F[0]+' in your Text Editor');return;}}catch(_e){}
+  copyText(F[1],'Opening a file works from the launcher: the path of '+F[0]+' was copied');
+}
 function scrCard(){
   infoMode='scr';
   const S=D.scr;if(!S){card('Level script','<div class="note">This map has no level script.</div>');return;}
   let h='<div class="note">What the map\'s .scr spawns and sets, read from its lines (the script isn\'t run). Spawned entities are placed where the lines that follow give their origin; one whose origin comes from something only the game knows (a thread\'s parameter, a loop, another entity moved by script) is listed below, not drawn. Show > Script ents (Ctrl+E) shows or hides them.</div>';
-  h+='<h4>Files</h4>'+kvTable(S.files.map((F,i)=>[i?'runs':'map',esc(F[0])+' <span class="co">'+esc(F[1])+'</span>']));
+  h+='<h4>Files</h4>'+kvTable(S.files.map((F,i)=>[i?'runs':'map',esc(F[0])+' <button class="sm" data-openscr="'+i+'" title="Open it in your Text Editor (from the launcher)">Open</button> <span class="co">'+esc(F[1])+'</span>']));
   if(S.miss&&S.miss.length)h+='<div class="note warn">Run by the script but not found: '+S.miss.map(esc).join(', ')+'</div>';
   // the placed entities, by class
   const placed=[];for(let ei=MAP.nMap;ei<MAP.ents.length;ei++)placed.push(ei);
@@ -7187,9 +7391,8 @@ function setHover(h){
     for(const pi of prims){const p=SC.prims[pi];for(let f=p.f0;f<p.f1;f++){if(faceVis&&!faceVis[f])continue;const ea=SC.faceE0[f],ec=SC.faceEN[f];for(let k=ea;k<ea+ec;k++)edg.push(SC.edge[k]);}}
     const X=key[0]==='e'?ENTS[+key.slice(1)]:null;
     if(X&&X.box&&!edg.length){
-      const b=X.box,o=b.origin,g=X.marker?2:0.5;
-      const mn=[o[0]+b.mins[0]-g,o[1]+b.mins[1]-g,o[2]+b.mins[2]-g],mx=[o[0]+b.maxs[0]+g,o[1]+b.maxs[1]+g,o[2]+b.maxs[2]+g];
-      const C=k=>[(k&1)?mx[0]:mn[0],(k&2)?mx[1]:mn[1],(k&4)?mx[2]:mn[2]];
+      const b=X.box,g=X.marker?2:0.5;
+      const P=boxCorners({mins:b.mins.map(v=>v-g),maxs:b.maxs.map(v=>v+g),ax:b.ax},b.origin),C=k=>P[k];
       for(const[a,c]of[[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7]])L.push(...C(a),...C(c));
     }
   }
@@ -7295,7 +7498,7 @@ function selBounds(){
   for(const pi of selectedPrims()){const p=SC.prims[pi];if(isFinite(p.mins[0]))grow(p.mins,p.maxs);}
   for(const ei of selectedEnts()){const X=ENTS[ei],b=X.box,dx=X.hasGeo?doorXf(ei):null;
     if(dx){const q=ptsBounds(doorCorners(movObj(ei),dx));grow(q.mins,q.maxs);}
-    else if(b){const o=b.origin;grow([o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]]);}
+    else if(b){const o=b.origin;grow([o[0]+b.wmins[0],o[1]+b.wmins[1],o[2]+b.wmins[2]],[o[0]+b.wmaxs[0],o[1]+b.wmaxs[1],o[2]+b.wmaxs[2]]);}
     else if(X.anchor)grow(X.anchor,X.anchor);}
   return isFinite(mn[0])?{mins:mn,maxs:mx}:null;
 }
@@ -7424,25 +7627,31 @@ const EYE_GROUND=/^(info_player_(start|deathmatch|allied|axis)|info_pathnode|inf
 function eyeView(ei){
   const e=MAP.ents[ei],X=ENTS[ei];if(!e||!X)return null;
   const o=X.origin||parseVec(e.kvl.origin,3);if(!o)return null;
-  const hasAng=e.kvl.angle!=null||e.kvl.angles!=null;
-  let tgt=null;const tg=gameKey(ei,'target');
+  const kv=Object.assign({},e.kvl);const tg=gameKey(ei,'target');if(tg)kv.target=tg;
+  return eyeViewFrom(e.cls,kv,o,entName(ei),ei,false);
+}
+// Eye view of an entity given by its class, keys and origin (a map entity's, or one added in
+// Modify: any = true faces yaw 0 when it has neither angles nor a target, else there is none)
+function eyeViewFrom(cls,kvl,o,name,ei,any){
+  const hasAng=kvl.angle!=null||kvl.angles!=null;
+  let tgt=null;const tg=kvl.target;
   if(tg){const t=(typeof gameTn==='function'?gameTn(tg):ENTS.tn.get(tg))||[];for(const ti of t){const Y=ENTS[ti];if(Y&&(Y.anchor||Y.origin)&&ti!==ei){tgt=Y.anchor||Y.origin;break;}}}
   // a player start with no angle still faces somewhere: yaw 0, as the game spawns it
-  const spawn=/^info_player_(start|deathmatch|allied|axis)$/.test(e.cls);
-  if(!hasAng&&!tgt&&!spawn)return null;
-  const ground=EYE_GROUND.test(e.cls);
+  const spawn=/^info_player_(start|deathmatch|allied|axis)$/.test(cls);
+  if(!hasAng&&!tgt&&!spawn&&!any)return null;
+  const ground=EYE_GROUND.test(cls);
   let pos=o.slice();
   // (a player start is already at the feet: mappers set it on the floor, and dropping it
   // could fall through a vehicle the player starts on)
   if(ground){if(!spawn)try{const d=pgDrop(o);if(isFinite(d[2])&&o[2]-d[2]<2048)pos=[o[0],o[1],d[2]];}catch(_e){}pos[2]+=82;}
   let ang;
-  if(hasAng||!tgt){const a=hasAng?entAngles(e.kvl):[0,0,0];ang=[a[0]||0,a[1]||0,a[2]||0];}
+  if(hasAng||!tgt){const a=hasAng?entAngles(kvl):[0,0,0];ang=[a[0]||0,a[1]||0,a[2]||0];}
   else{const v=[tgt[0]-pos[0],tgt[1]-pos[1],tgt[2]-pos[2]],h=Math.hypot(v[0],v[1]);
     ang=[-Math.atan2(v[2],h)*180/Math.PI,Math.atan2(v[1],v[0])*180/Math.PI,0];}
   const how=hasAng?'its angles ( '+ang.map(fnum).join(' ')+' )':tgt?'its target $'+tg:'yaw 0 (it has no angle)';
   return{pos:pos,ang:ang,
-    why:'Eye view: put the camera '+(ground?'82 units (the player\'s eye height, DEFAULT_VIEWHEIGHT) above '+(spawn?'it':'the floor under it')+', as '+(/^info_player/.test(e.cls)?'a player spawned here sees':'someone standing here sees'):'at its origin, as it sees in game')+', looking the way '+how+' says',
-    flash:'Eye view from '+entName(ei)+(ground?(spawn?' (82 units above it)':' (82 units above the floor)'):' (its origin)')+', facing '+how};
+    why:'Eye view: put the camera '+(ground?'82 units (the player\'s eye height, DEFAULT_VIEWHEIGHT) above '+(spawn?'it':'the floor under it')+', as '+(/^info_player/.test(cls)?'a player spawned here sees':'someone standing here sees'):'at its origin, as it sees in game')+', looking the way '+how+' says',
+    flash:'Eye view from '+name+(ground?(spawn?' (82 units above it)':' (82 units above the floor)'):' (its origin)')+', facing '+how};
 }
 function flyTo(pos,yaw,pitch,roll){flyAnim={t0:performance.now(),dur:450,from:cam.pos.slice(),to:pos,y0:cam.yaw,p0:cam.pitch,r0:cam.roll,yaw:yaw,pitch:pitch,roll:null};
   if(yaw!=null){let d=yaw-cam.yaw;while(d>180)d-=360;while(d<-180)d+=360;flyAnim.yaw=cam.yaw+d;}
@@ -7537,9 +7746,18 @@ window.addEventListener('mouseup',e=>{
   if(d.b===0&&MOD.placing){modPlaceClick(x,y);return;}
   if(d.b===0&&!d.m.alt){const mi=modPick(x,y);if(mi>=0){
     if(d.m.shift&&mi===MOD.sel)modDeselect();                 // Shift+click: deselect, as a map entity
-    else{modSelect(mi);if(d.m.ctrl)showInfo('sel');}            // Ctrl+click: and its card
+    else{
+      // a plain click selects only it, so the map's selection (brushes, entities) goes, as
+      // a plain click on anything does; Shift+click adds it and keeps them
+      if(!d.m.shift&&SEL.size){SEL.clear();lastHit=null;selectionChanged();}
+      modSelect(mi);if(d.m.ctrl)showInfo('sel');}            // Ctrl+click: and its card
     return;}}
   const h=hitInfo(pickAt(x,y),x,y);
+  // a click that picks something else (a brush, a static prop, the sky) lets go of an
+  // added entity, as it does of a map entity; Shift+click adds to the selection and
+  // Ctrl+Shift+click only reads the face, so they keep it, and so does one being edited,
+  // trimmed or moved
+  if(d.b===0&&!d.m.shift&&MOD.sel>=0){const cur=MOD.ents[MOD.sel];if(cur&&!modIsMap(cur)&&!modBusy(MOD.sel))modDeselect();}
   if(d.b===0)clickSelect(h,d.m);
   else if(d.b===1)faceInfoAt(h);
 });
@@ -7577,13 +7795,16 @@ const CAM_KEYS_FREE=new Set(['w','a','s','d','q','e','c',' ','arrowup','arrowdow
 const CAM_KEYS_RAD=new Set(['arrowup','arrowdown','arrowleft','arrowright',',','.','d','c','a','z']);
 const FILTER_KEYS={'alt+1':C_WORLD,'alt+2':C_ENTITIES,'alt+3':C_PATCH,'alt+4':C_TRANS,'alt+5':C_LIQUID,'alt+6':C_CAULK,
   'alt+7':C_CLIP,'alt+8':C_PATH,'alt+9':C_AINODE,'alt+0':C_LIGHT,'ctrl+d':C_DETAIL,'ctrl+h':C_HINT,'ctrl+m':C_MODEL,
-  'ctrl+r':C_TERRAIN,'ctrl+t':C_TRIGGER,'ctrl+p':C_PORTAL,'ctrl+k':C_SKY,'ctrl+o':C_NODRAW,'ctrl+i':C_RAIN,'ctrl+g':C_FOLIAGE,'ctrl+e':C_SCRIPT};
+  'ctrl+r':C_TERRAIN,'ctrl+t':C_TRIGGER,'ctrl+p':C_PORTAL,'ctrl+k':C_SKY,'ctrl+o':C_NODRAW,'ctrl+i':C_RAIN,'ctrl+g':C_FOLIAGE,'ctrl+e':C_SCRIPT,'ctrl+b':C_SCRTRIG};
 window.addEventListener('keydown',e=>{
   if(typing()){if(e.key==='Escape'){document.activeElement.blur();e.preventDefault();}return;}
   // MODIFY's Trim origin takes the movement keys: the camera stays where it is
   if(MOD.trim&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&modTrimKey(e)){e.preventDefault();return;}
   const kl=e.key.length===1?e.key.toLowerCase():e.key.toLowerCase();
-  const combo=(e.ctrlKey||e.metaKey?'ctrl+':'')+(e.altKey?'alt+':'')+(/^digit\d$/i.test(e.code)?e.code.slice(5):kl);
+  // Shift counts with Ctrl or Alt (Ctrl+Shift+X is not Ctrl+X); alone it is part of the key
+  // (Shift+G, $)
+  const combo=(e.ctrlKey||e.metaKey?'ctrl+':'')+(e.altKey?'alt+':'')+(e.shiftKey&&(e.ctrlKey||e.metaKey||e.altKey)?'shift+':'')
+    +(/^digit\d$/i.test(e.code)?e.code.slice(5):kl);
   if(FILTER_KEYS[combo]!=null){toggleFilter(FILTER_KEYS[combo]);e.preventDefault();return;}
   // Ctrl+C over the 3D view (and no text picked out on the page): the point under the
   // cursor, as ( x y z ) for a script
@@ -7603,6 +7824,13 @@ window.addEventListener('keydown',e=>{
     if(camMode==='rad'&&e.ctrlKey){if(['arrowup','arrowdown',',','.'].includes(kl)){gridStep(kl);e.preventDefault();}return;}
     if(!e.repeat||keys.has(kl))keys.add(kl);
     e.preventDefault();return;}
+  // Alt+M Move, Alt+T Trim origin, Alt+E Edit parameters: Modify's buttons for its selected
+  // entity (as clicked, so not while one is off)
+  if(e.altKey&&!e.ctrlKey&&!e.metaKey&&(kl==='m'||kl==='t'||kl==='e')){
+    const b=$({m:'bModMove',t:'bModTrim',e:'bModEdit'}[kl]);
+    if(MOD.sel<0)flash('Select an entity in Modify first (Alt+M Move, Alt+T Trim origin, Alt+E Edit parameters)');
+    else if(!b.disabled)b.click();
+    e.preventDefault();return;}
   if(e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.code==='Backquote'){toggleCvarMenu();e.preventDefault();return;}   // as the game's console key
   switch(kl){
@@ -7614,6 +7842,7 @@ window.addEventListener('keydown',e=>{
     case 'k':toggleSimpleSky();break;
     case 'm':toggleSimpleModels();break;
     case 'j':toggleSunFlare();break;
+    case 'i':if($('bRoutes').disabled)flash($('bRoutes').title);else $('bRoutes').click();break;   // AI routes (ai_showroutes)
     case 'f':focusSelection();break;
     case '+':setGrid(!GRID.on);break;
     case '{':setGridSize(GRID.i-1);break;
@@ -7632,7 +7861,16 @@ window.addEventListener('keydown',e=>{
     case 'pagedown':changeFloor(false);e.preventDefault();break;
     case '[':setClipDist(clipDist-256);if(!clipOn)toggleClip();break;
     case ']':setClipDist(clipDist+256);if(!clipOn)toggleClip();break;
-    case 'backspace':hideSelection();e.preventDefault();break;
+    // Backspace hides, Delete removes an entity added in Modify (selected in the view or its
+    // list), as its Hide square and Delete button do; Backspace also hides the map's selection
+    case 'backspace':{const m=MOD.ents[MOD.sel];
+      if(m&&!modIsMap(m)&&!m.hid){const i=MOD.sel;modToggleHide(i);if(MOD.ents[i]&&MOD.ents[i].hid)modDeselect();}
+      if(SEL.size)hideSelection();e.preventDefault();break;}
+    case 'delete':{const m=MOD.ents[MOD.sel];
+      if(m&&!modIsMap(m)){const nm=modName(m);modRemove(MOD.sel);MOD.sel=-1;modRender();requestDraw();
+        flash('Deleted: '+nm+' (it was only added in Modify, not saved)');}
+      else if(SEL.size)flash('Delete removes an entity added in Modify; map entities stay (Backspace hides them)');
+      e.preventDefault();break;}
     case '/':$('findIn').focus();e.preventDefault();break;
     case '\\':case '|':$('sideTab').click();e.preventDefault();break;
     case 'escape':escape();break;
@@ -7691,8 +7929,8 @@ const DISPLAY=[
  {k:'xray',l:'X-ray',key:'9',t:'Show the selection\'s outline, box, target links and facing arrow faintly through walls (everything else stays hidden behind them)'},
  {k:'lights',l:'Lights off',key:'0',t:'Every light entity of the map off, as if it had never been there: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the sun, the sky and the ambient light give it. Again: every light back on. Single lights turn off and on from Selection (Turn off / Turn on). The first time takes a moment, while the page works out how much of the baked light each light gave'},
  {k:'sun',l:'Sun light',key:'-',t:'The sun\'s and the sky\'s light on the map (worldspawn suncolor, sundirection, sundiffuse). Off: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the lights and the ambient light give it, so open ground goes dark. The sun flare (J) is separate. The first time takes a moment, as Lights off does'},
- {k:'decals',l:'Decals',key:'=',t:'The map\'s permanent decals (its .dcl: signs, cracks, numbers placed in MOHRadiant), as the game draws them, lit by the colour the file keeps (white with Full Brightness)'},
  {k:'grid',l:'Grid',key:'+',t:'Grid: a see-through grid of MOHRadiant\'s grid size round what you work on (Modify\'s selected or moving entity, else the surface ahead of the camera), with its coordinates counted from ( 0 0 0 ). While it is on, Add and Move in Modify snap to it, as MOHRadiant snaps to its grid. Under the backdrop: which planes (Grid XY / XZ / YZ / all), the size ({ and }) and its colour'},
+ {k:'decals',l:'Decals',key:'=',t:'The map\'s permanent decals (its .dcl: signs, cracks, numbers placed in MOHRadiant), as the game draws them, lit by the colour the file keeps (white with Full Brightness)'},
  {k:'weather',l:'Weather',key:'Y',t:'The game\'s rain and snow (cg_rain): drops start in the map\'s func_rain boxes near you as the client makes them, with the map\'s settings (its script\'s level.rain_*). The game cvars (`) have every setting: cg_weather snow / rain / blizzard ..., density, speed, size, shader, the client\'s frame rate'},
  {k:'leak',l:'Leak',key:'P',t:'The compiler\'s leak trail (the map\'s .lin): a red line through walls from the void outside the map to the entity it reaches, with a light blue circle where it gets in (the gap to fix). On: its card says where and how to fix it, with Go buttons; a click on the trail opens it'}];
 const FILTERS=[
@@ -7716,9 +7954,10 @@ const FILTERS=[
  {m:C_NODRAW,l:'Nodraw',key:'Ctrl+O',t:'Other editor-only surfaces: nodraw, ladders, patharea, and the flat tree pictures that only cast a tree\'s shadow (misc_outside/commontreeshadow)'},
  {m:C_RAIN,l:'Rain',key:'Ctrl+I',t:'common/rain: the volumes of func_rain entities, where rain or snow falls in game. Hidden until you show them'},
  {m:C_FOLIAGE,l:'Foliage clips',key:'Ctrl+G',t:'common/foliageclip: walk-through brushes around trees and bushes that make foliage effects when shot'},
- {m:C_SCRIPT,l:'Script ents',key:'Ctrl+E',t:'Entities the map\'s level script spawns (spawn lines in its .scr), placed where its lines say: waypoints, script models and origins, actors... They are drawn as their kind (a waypoint with the Paths, a model with the Models) and this hides them all. The map\'s stats line opens the list'},
  {m:C_ORIGIN,l:'Origin',key:'',t:'common/origin brushes (the pivot of doors and movers)'},
- {m:C_POINT,l:'Point ents',key:'',t:'Other point entities: player starts, script origins, info_* ...'}];
+ {m:C_POINT,l:'Point ents',key:'',t:'Other point entities: player starts, script origins, info_* ...'},
+ {m:C_SCRIPT,l:'Script ents',key:'Ctrl+E',t:'Entities the map\'s level script spawns (spawn lines in its .scr), placed where its lines say: waypoints, script models and origins, actors... They are drawn as their kind (a waypoint with the Paths, a model with the Models) and this hides them all. The map\'s stats line opens the list'},
+ {m:C_SCRTRIG,l:'Script trigs',key:'Ctrl+B',t:'The volumes of the triggers the map\'s level script spawns, from their setsize (worked out from its lines, its own fields such as local.t.setsize1 included): see-through boxes in the trigger colour, as trigger brushes look. Script ents shows the triggers themselves as small markers; selecting one outlines its volume. Hidden by the In-game look'}];
 // The entity kinds the Entities button (Alt+2) covers, named for its tooltip when only
 // some of them are hidden (by their own buttons).
 const ENT_PARTS=[[C_ENTBRUSH,'brush entities'],[C_POINT,'point ents'],[C_LIGHT,'lights'],[C_AINODE,'AI nodes'],
@@ -7737,7 +7976,8 @@ function buildPanel(){
   const fb=$('filtBtns');
   for(const f of FILTERS){const b=document.createElement('button');b.innerHTML=esc(f.l)+(f.key?'<span class="k">'+f.key+'</span>':'');
     b.title=f.t+(f.key?' ('+f.key+')':'')+' - click to show / hide';f.el=b;b.onclick=()=>toggleFilter(f.m);fb.appendChild(b);}
-  fb.appendChild($('bRoutes'));          // AI routes goes last, on the line of Origin and Point ents
+  fb.appendChild($('bRoutes'));          // AI routes and All go last, after Origin and Point ents
+  fb.appendChild($('bShowAll'));
   $('bFull').onclick=toggleFullBright;
   if(!LIT){$('bFull').disabled=true;
     $('bFull').title=D.kind==='bsp'?'This .bsp has no lightmaps, so the game draws it at full brightness too.'
@@ -7773,7 +8013,7 @@ function buildPanel(){
   $('bDoor').onclick=doorUse;
   $('bExpRun').onclick=expRunSel;$('bExpReset').onclick=()=>expReset();
   $('bLightOff').onclick=()=>setSelLights(false);$('bLightOn').onclick=()=>setSelLights(true);
-  $('infoClose').onclick=hideInfo;$('infoCopy').onclick=()=>copyText($('infoBody').innerText);
+  $('infoClose').onclick=hideInfo;$('infoScr').onclick=()=>openScr(0);$('infoCopy').onclick=()=>copyText($('infoBody').innerText);
   $('tabFind').onclick=()=>setTab('find');$('tabCls').onclick=()=>setTab('cls');$('tabTex').onclick=()=>setTab('tex');
   $('tabEnt').onclick=()=>setTab('ent');
   const fi=$('findIn');let ft=null;
@@ -7783,7 +8023,7 @@ function buildPanel(){
 // All (Ctrl+A), In-game look (G) and Editor look (Shift+G). The two looks also set the light
 // and the sky: MOHRadiant is always full bright.
 function showAllGroups(){hiddenMask=0;filtersChanged();}
-const GAME_LOOK=C_CAULK|C_CLIP|C_TRIGGER|C_HINT|C_ORIGIN|C_PORTAL|C_NODRAW|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_VIS|C_RAIN|C_FOLIAGE,
+const GAME_LOOK=C_CAULK|C_CLIP|C_TRIGGER|C_HINT|C_ORIGIN|C_PORTAL|C_NODRAW|C_POINT|C_LIGHT|C_AINODE|C_PATH|C_VIS|C_RAIN|C_FOLIAGE|C_SCRTRIG,
   EDIT_LOOK=C_HINT|C_PORTAL|C_RAIN;
 function gameLook(){hiddenMask=GAME_LOOK;simpleSky=false;fullBright=false;setSunFlare(true);filtersChanged();requestDraw();}
 function editorLook(){hiddenMask=EDIT_LOOK;simpleSky=true;fullBright=true;setSunFlare(false);filtersChanged();requestDraw();}
@@ -8241,6 +8481,17 @@ const SF_NAMES=[[1,'nodamage'],[2,'slick'],[4,'sky'],[8,'ladder'],[0x10,'noimpac
  [0x800000,'gravel'],[0x1000000,'sand'],[0x2000000,'foliage'],[0x4000000,'snow'],[0x8000000,'carpet'],[0x10000000,'backside'],
  [0x20000000,'nodlight'],[0x40000000,'hint'],[0x80000000,'patch']];
 function bitNames(v,tab){v=v>>>0;const out=[];for(const[b,nm]of tab)if(v&(b>>>0))out.push(nm);return out;}
+// A path node's label tag: its highest spawnflag by name, "[CORNER_RIGHT]" for COVER +
+// CORNER_RIGHT (the more particular kind; one name keeps the label short), else "".
+// The outline's colour (nodeOutline) goes by the first of its own order instead.
+function nodeFlagTag(e){
+  if(e.cls!=='info_pathnode')return '';
+  const v=parseInt(e.kvl.spawnflags||'0',10)>>>0;if(!v)return '';
+  const d=(D.defs||{})[e.cls],names=d&&d.f?d.f:[];
+  for(let b=Math.min(31,names.length-1);b>=0;b--)
+    if((v>>>b)&1){const nm=names[b];if(nm&&nm.toLowerCase()!=='x')return ' ['+nm+']';}
+  return '';
+}
 function spawnflagNames(ei){
   const e=MAP.ents[ei], v=parseInt(e.kvl.spawnflags||'0',10)>>>0;if(!v)return '';
   const d=(D.defs||{})[e.cls], names=d&&d.f?d.f:[], ed=D.editorFlags||{}, out=[];
@@ -8248,7 +8499,7 @@ function spawnflagNames(ei){
   return out.join(', ');
 }
 function srcText(a,b){return D.srcText.slice(a,b);}
-function card(title,body){$('infoTitle').textContent=title;$('infoBody').innerHTML=body;$('info').classList.add('on');$('infoBody').scrollTop=0;}
+function card(title,body){$('infoScr').style.display=(infoMode==='scr'&&D.scr&&D.scr.files&&D.scr.files.length)?'':'none';$('infoTitle').textContent=title;$('infoBody').innerHTML=body;$('info').classList.add('on');$('infoBody').scrollTop=0;}
 function kvTable(rows){return '<table>'+rows.map(r=>'<tr><td class="k">'+esc(r[0])+'</td><td>'+r[1]+'</td></tr>').join('')+'</table>';}
 function copyBtn(text,label){return ' <button class="sm" data-copy="'+esc(text)+'">'+(label||'Copy')+'</button>';}
 // Open (beside Copy on a card's .map source): in the launcher's pane, the launcher opens the
@@ -8454,7 +8705,7 @@ function infoEntity(ei){
     h+='<div class="note">in game: '+(R.num>=0?'entity number '+R.num+', radnum '+R.rad+(R.gone?' ('+esc(R.why)+')':''):esc(R.why||'no entity number'))+
       ' <span class="co">(g_gametype '+CVARS.g_gametype+', skill '+CVARS.skill+(CVARS.developer?', developer 1':'')+')</span></div>';}
   if(b){
-    const o=b.origin, amin=[o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]], amax=[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]];
+    const o=b.origin, amin=[o[0]+b.wmins[0],o[1]+b.wmins[1],o[2]+b.wmins[2]], amax=[o[0]+b.wmaxs[0],o[1]+b.wmaxs[1],o[2]+b.wmaxs[2]];
     const ss='setsize '+fvec(b.mins)+' '+fvec(b.maxs);
     h+='<h4>Origin and setsize<span class="sp"></span>'+copyBtn(fvec(o)+'\n'+ss,'Copy')+'</h4>';
     h+=kvTable([['origin',esc(fvec(o))+copyBtn(fvec(o))],['setsize',esc(fvec(b.mins)+' '+fvec(b.maxs))+copyBtn(ss)],
@@ -8618,6 +8869,7 @@ $('infoBody').addEventListener('click',e=>{
   const g=e.target.closest('[data-go]');if(g){const v=vecNums(g.getAttribute('data-go')),f=vecNums(g.getAttribute('data-from')||'');
     if(v.length>=3)flyLook([v[0],v[1],v[2]],256,f.length>=3?[f[0],f[1],f[2]]:null);return;}
   const s=e.target.closest('[data-sel]');if(s){const ei=+s.getAttribute('data-sel');SEL.clear();SEL.add('e'+ei);lastHit=null;selectionChanged();focusSelection();showInfo('sel');return;}
+  const os_=e.target.closest('[data-openscr]');if(os_){openScr(+os_.getAttribute('data-openscr'));return;}
   const sp=e.target.closest('[data-selprims]');if(sp){SEL.clear();for(const pi of sp.getAttribute('data-selprims').split(','))SEL.add('p'+pi);lastHit=null;selectionChanged();focusSelection();
     if(infoMode!=='leak'){const t=$('infoBody').scrollTop;leakCard();$('infoBody').scrollTop=t;}flash('The brushes either side of the gap are selected (N: their info)');return;}
   const t=e.target.closest('[data-tex]');if(t){selectByTexture(+t.getAttribute('data-tex'),false);selectionChanged();return;}
@@ -9020,15 +9272,9 @@ function modSelect(i){MOD.sel=i;const m=MOD.ents[i];
   if(m&&!modIsMap(m)&&$('info').classList.contains('on')&&infoMode==='sel')showInfo('sel');
   modHideSync();modRender();requestDraw();}
 // "To view": where the middle of the screen meets the map (a node goes on the floor there)
-function modToView(){
-  const m=MOD.ents[MOD.sel];if(!m)return;
-  const h=hitInfo(pickAt(W/2,H/2),W/2,H/2);
-  if(!h||!h.point){flash('Nothing in the middle of the view');return;}
-  const p=h.point.map(v=>Math.round(v));p[2]+=modIsNode(m)?16:Math.max(0,-modBox(m).mins[2]);
-  modSetKv(m,'origin',p.join(' '));
-  if(MOD.edit===MOD.sel)$('modTxt').value=modText(m);
-  modChanged(modIsNode(m));
-}
+// Fly to: the camera to the entity, a little away from it (the button, a click on its
+// selected row in the list)
+function modFly(){const m=MOD.ents[MOD.sel];if(!m)return;flyTo(lookFrom(modOrigin(m),220),null,null);requestDraw();}
 
 // ---- Edit parameters: the entity as the .bsp's entity lump has it --------------------------
 function modParse(txt){
@@ -9115,6 +9361,35 @@ function modTrimKey(e){
   modRender();requestDraw();return true;
 }
 
+// ---- the volumes of the level script's triggers (Script trigs) ---------------------------
+// Each trigger the .scr spawns with a setsize, as a see-through box in the common/trigger
+// green with its edges, the way the map's own trigger brushes look; brighter while it is
+// selected. Drawn with Modify's line program, behind the map's surfaces like them.
+let SCRTRIGS=null;
+function drawScriptTrigs(vp){
+  if(!gl||(hiddenMask&C_SCRTRIG))return;
+  if(!SCRTRIGS)SCRTRIGS=ENTS.filter(X=>X.scrTrig);
+  if(!SCRTRIGS.length)return;
+  const T=[],L=[],selE=selectedEnts(),G=[0.35,0.85,0.35];
+  const E=[[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7]];
+  for(const X of SCRTRIGS){
+    if(hidEnt.has(X.ei)||!X.box)continue;
+    const P=boxCorners(X.box),sel=selE.has(X.ei),fc=[G[0],G[1],G[2],sel?0.3:0.18],lc=[G[0],G[1],G[2],sel?1:0.8];
+    for(const q of[[0,2,3,1],[4,5,7,6],[0,1,5,4],[2,6,7,3],[0,4,6,2],[1,3,7,5]])
+      for(const k of[q[0],q[1],q[2],q[0],q[2],q[3]]){const p=P[k];T.push(p[0],p[1],p[2],p[0],p[1],p[2],fc[0],fc[1],fc[2],fc[3]);}
+    for(const[a,d]of E){const p=P[a],q=P[d];
+      L.push(p[0],p[1],p[2],q[0],q[1],q[2],lc[0],lc[1],lc[2],lc[3],q[0],q[1],q[2],p[0],p[1],p[2],lc[0],lc[1],lc[2],lc[3]);}}
+  if(!T.length)return;
+  if(!PMODT)PMODT=compile(VS_GVL,FS_LINE);
+  if(!B.strBuf){B.strBuf=gl.createBuffer();B.vStr=gvLineVAO(B.strBuf,true);gl.bindVertexArray(null);}
+  gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(false);gl.disable(gl.CULL_FACE);
+  gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
+  gvUniforms(PMODT,vp,0.0015);
+  gl.bindVertexArray(B.vStr);gl.bindBuffer(gl.ARRAY_BUFFER,B.strBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(T),gl.STREAM_DRAW);gl.drawArrays(gl.TRIANGLES,0,T.length/10);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(L),gl.STREAM_DRAW);gl.drawArrays(gl.LINES,0,L.length/10);
+  gl.bindVertexArray(null);gl.disable(gl.BLEND);gl.depthMask(true);
+}
 // ---- drawing: see-through boxes, their edges, facing and the trim arrows -------------------
 let PMODT=null,PMODM=null;
 // The entities Modify draws: as the map's markers (VS_MARK / FS_MARK, its shading and its
@@ -9223,7 +9498,7 @@ function modRender(){
     (h||(MOD.placing?'':'<div class="co">Nothing added yet. Add, then click on the map to place it; new entities stay see-through until saved.</div>'));
   $('bModAdd').classList.toggle('on',!!MOD.placing&&MOD.placing.move==null);
   const has=MOD.ents[MOD.sel]!=null;
-  for(const id of['bModEdit','bModMove','bModTrim','bModLink','bModView','bModFly','bModDel'])$(id).disabled=!has;
+  for(const id of['bModEdit','bModMove','bModTrim','bModLink','bModEye','bModFly','bModDel'])$(id).disabled=!has;
   $('bModLink').classList.toggle('on',!!MOD.linking);
   lineDirty=true;                                   // its links and facing arrows
   // Move and Trim origin each shut the other off while on
@@ -9234,7 +9509,7 @@ function modRender(){
   $('bModTrim').classList.toggle('on',MOD.trim);$('bModEdit').classList.toggle('on',MOD.edit>=0);
   const cur=MOD.ents[MOD.sel];
   $('bModDel').textContent=cur&&modIsMap(cur)?'Restore':'Delete';
-  $('bModDel').title=cur&&modIsMap(cur)?'Put back the map\'s own keys for this entity':'Remove the entity';
+  $('bModDel').title=cur&&modIsMap(cur)?'Put back the map\'s own keys for this entity':'Remove the entity\n\nHotkey: Delete';
   if(cur&&modIsMap(cur)&&!modEdited(cur))$('bModDel').disabled=true;
   const nw=MOD.ents.filter(m=>!modIsMap(m)),ch=MOD.ents.filter(m=>modIsMap(m)&&modEdited(m));
   $('bModSaveBsp').disabled=$('bModSaveMap').disabled=$('bModCopy').disabled=!(nw.length||ch.length);
@@ -9361,8 +9636,10 @@ function modInit(){
   $('bModTrim').onclick=()=>modTrim();
   $('bModMove').onclick=()=>modMove();
   $('bModLink').onclick=()=>modLinkStart();
-  $('bModView').onclick=()=>modToView();
-  $('bModFly').onclick=()=>{const m=MOD.ents[MOD.sel];if(!m)return;const o=modOrigin(m);flyTo(lookFrom(o,220),null,null);};
+  $('bModEye').onclick=()=>{const m=MOD.ents[MOD.sel];if(!m)return;
+    const v=eyeViewFrom(modCls(m),modKvl(m),modOrigin(m),modName(m),-1,true);if(!v)return;
+    flyTo(v.pos,v.ang[1],v.ang[0],-v.ang[2]);requestDraw();flash(v.flash);};
+  $('bModFly').onclick=modFly;
   $('bModDel').onclick=()=>modRemove(MOD.sel);
   $('bModSaveBsp').onclick=()=>modSave('bsp');
   $('bModSaveMap').onclick=()=>modSave('map');
@@ -9374,8 +9651,10 @@ function modInit(){
   $('modList').addEventListener('click',e=>{const r=e.target.closest('[data-mi]');if(!r)return;const i=+r.dataset.mi;
     if(e.shiftKey&&e.target.closest('.sw')){modToggleHide(i);return;}
     if(e.shiftKey&&i===MOD.sel){modDeselect();return;}
+    // a click on the row already selected (green), so also the second click of a
+    // double-click: Fly to
+    if(!e.shiftKey&&i===MOD.sel){modFly();return;}
     modSelect(i);});
-  $('modList').addEventListener('dblclick',e=>{const r=e.target.closest('[data-mi]');if(r)modEditOpen(+r.dataset.mi);});
   $('modTxt').addEventListener('input',modEditInput);
   $('modTxt').addEventListener('keydown',e=>{if(e.key==='Escape'){modEditClose(true);e.preventDefault();e.stopPropagation();return;}
     const k=e.key.toLowerCase();

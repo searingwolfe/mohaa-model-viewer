@@ -15,8 +15,8 @@ run at once.
 
 | Path | Role |
 |---|---|
-| `RUN -- Medal of Honor Map Viewer.bat` | Windows entry point. Same checks as the Model Viewer's `.bat` (Python 3.8+ with tkinter, Pillow, the embedded-pane packages, WebView2) and the same installer, plus the map viewer's own scripts. A `.bsp` / `.map` / `.bak` dropped on it is opened directly. |
-| `bin/mohaa_map_launcher.py` | The launcher. `MapApp` subclasses `mohaa_launcher.App` and changes only what differs for maps: the `maps/` tree, opening and building, the map details panel, the map options in the menus, the privacy notice's wording (`_PRIVACY_SWAPS`), and its config / log / output names. What both programs share (the updater, the WebView2 folder, `PRIVACY_TEXT`, `VERSION`) stays in `mohaa_launcher.py`. |
+| `RUN -- Medal of Honor Viewer.bat` (`.sh`) | The entry point both programs share: press 1 (or Enter) in its menu for the Map Viewer. Same checks as for the Model Viewer (Python 3.8+ with tkinter, Pillow, the embedded-pane packages, WebView2) and the same installer, plus the map viewer's own scripts. A `.bsp` / `.map` / `.bak` dropped on it skips the menu and opens directly. |
+| `bin/mohaa_map_launcher.py` | The launcher. `MapApp` subclasses `mohaa_launcher.App` and changes only what differs for maps: the `maps/` tree, opening and building, the map details panel (one scrolling column, shared with the Model Viewer as `make_info_pane`, with Rebuild / Browser / .map buttons: `info_button`), the map options in the menus, the privacy notice's wording (`_PRIVACY_SWAPS`), and its config / log / output names. What both programs share (the updater, the WebView2 folder, `PRIVACY_TEXT`, `VERSION`) stays in `mohaa_launcher.py`. |
 | `bin/mohaa_map_view.py` | Map builder. Decompiles a `.bsp`, scans the `.map`, resolves textures through the shaders, builds the placed models, collects the entity definitions and writes `<stem>_bsp_view.html` / `<stem>_map_view.html` (`<stem>_bak_view.html` for a `.bak`). |
 | `bin/mohaa_map_page.py` | The viewer page template (`HTML_TEMPLATE`): HTML, CSS and the WebGL2 viewer. |
 | `bin/mohaa_bsp.py` | `.bsp` reader and decompiler; also reads the BSP tree and vis data, tessellates curved patches as the renderer does, and reads the game's `.pth` AI path files (for the game cvars). It also runs on its own, `python mohaa_bsp.py <map.bsp> [out.map]`, but without the paks it can't read texture sizes and assumes 256 x 256, so textures of other sizes get the wrong scale; the launcher's decompile uses the real sizes. |
@@ -194,7 +194,17 @@ run at once.
 - **Lines** (setsize boxes, target links and their arrowheads, facing arrows) are
   hidden behind walls like everything else. With X-ray on, only the selection's own
   outline, box, links and arrow show faintly through walls. Labels are always drawn on
-  top.
+  top: nearest first, never overlapping, named entities out to 2048 units and unnamed
+  ones to 700 (brush entities too, doors and ladders, labelled at the middle of their
+  box; not func_group / detail, nor unnamed lights and static props). Behind a wall they reach 512 / 350: past that a label shows only when the
+  camera can see its spot (checked from 60% of that on, so it can fade): a sight line against the world's shown, solid, opaque brushes (`lblSeen`,
+  `lblBlocked`; detail brushes count, clip and see-through ones don't, nor patches,
+  terrain or brush entities), through a box tree over them and kept until the camera
+  moves 4 units. Each label fades out over the last 40% of its own range (in sight or
+  behind a wall) to nothing at its end. Selected entities are always labelled, fully. A path node with spawnflags
+  names its highest one after its class, `info_pathnode [CORNER_RIGHT]` for COVER +
+  CORNER_RIGHT (`nodeFlagTag`; one name, the more particular kind, so labels stay short),
+  since its outline colour is otherwise the only sign.
 - **Sky.** With Simple Sky off (the default) the sky is drawn as the game draws it: the
   shader's far box (`skyParms env/<name>`, the six `_rt _bk _lf _ft _up _dn` pictures),
   looked up per pixel as `vec_to_st` in `tr_sky.c`, at the far end of the depth range
@@ -251,7 +261,10 @@ run at once.
   finds the nearest sky brush there.
 - **Hide** (Backspace or the Hide button) and **Show all** (Shift+H) go on a stack that
   `Ctrl+Z` (or the Undo button beside Show all) unwinds one step at a time: a Hide shows
-  those things again, a Show all hides again what it showed.
+  those things again, a Show all hides again what it showed. Backspace hides an entity
+  added in Modify too (selected in the view or its list), as its square does, and
+  Ctrl+Z shows it again; **Delete** removes one, as Modify's Delete button does (map
+  entities stay: Delete never takes anything out of the map).
 - **The search box** (Find, `Ctrl+F`) matches entities and textures (`runFind`,
   `findTerms`). Its terms all have to match, and a term with `-` in front leaves out what
   it matches instead.
@@ -337,7 +350,16 @@ run at once.
   exact bounds around its origin; for a `.map`, the bounds of the entity's brushes around
   its origin brush, `origin` key, or brush centre. Point entities use a `setsize` key,
   else the model's `.tik` setsize, else the model's own bounds, else the class box (a
-  game-code class: MOHRadiant's 16-unit stand-in cube).
+  game-code class: MOHRadiant's 16-unit stand-in cube). A model entity's box turns with
+  its angles where the game turns it (`boxTurns`): `EF_LINKANGLES` makes
+  `CM_TransformedBoxTrace` rotate even a `setsize` box by `r.currentAngles`, and
+  ScriptSlave sets it (script_model, script_object, script_origin and the rest), as do
+  Vehicle and VehicleCollisionEntity; a `rotatedbbox` key or script line sets or clears
+  it (`Entity::EventSetRotatedBbox`; the level script's `rotatedbbox` lines are read).
+  Other classes (an Actor, an Animate) keep an unturned box, and the info card's "From"
+  line says so when the entity is turned. A model's own bounds (no setsize anywhere)
+  always turn with it. The card's `absmin` / `absmax`, Fly to, and the area / PVS links
+  use the turned box's world bounds, as `SV_LinkEntity` does (`CalculateRotatedBounds2`).
 - **Point-entity boxes** are coloured the way MOHRadiant's camera colours them (its
   brush drawing in `mohradiant.exe`): the class colour, each side shaded by its facing
   (`SetShadeForPlane`: 0.6 facing x, 0.8 facing y, 1.0 up and down); a `"_color"` key
@@ -492,7 +514,18 @@ run at once.
     without slowing down) draws the connections in the map's `.pth` as
     `DrawAllConnections` (`navigate.cpp`) draws them:
     green both ways, a red arrowhead one way, a red X on a node with none, a blue circle on
-    a DONT_LINK node. The `.pth` is `maps/<map>.pth` in the paks (else beside the file),
+    a DONT_LINK node. Each node with a mark gets a tag saying what it means, the map's
+    and Modify's new ones alike (`drawPathIssues2D`, from the same pass that draws them):
+    "⚠ no paths" (orange, the X), "⚠ N one-way" (red, the arrowheads: the AI can go
+    that way but not come back, a climb past `ai_fallheight`), and for the blue circle
+    either "⊘ DONT_LINK" (blue: the node's own spawnflag 1, unlinked on purpose) or
+    "⚠ duplicate of entity N: not linked" (orange: no such spawnflag, the game set it
+    while loading because the node, dropped to the floor, lands on the very spot of an
+    earlier one, `^~^~^ Duplicate node at (...) not linked` in `PathSearch::LoadNodes`;
+    the earlier one is linked, so routes still end there; m1l1 has two `$friendlynode`s
+    at one origin, entities 111 and 705). A map node's tag sits under its class label, a new
+    node's over it; within `ai_showroutes_distance`, past 350 units only in sight.
+    Modify's own problems (48 paths, cut off, cell full) join the same tag. The `.pth` is `maps/<map>.pth` in the paks (else beside the file),
     unpacked (`CSVG` + LZ77, `lz77.cpp`) and read as `PathSearch::ArchiveLoadNodes` reads
     it, typed (the game's own files) or untyped (OpenMoHAA's); node i is the map's i-th
     `info_pathnode`, and a count mismatch is flagged. A path node's info card lists its
@@ -868,7 +901,14 @@ game, and the page adds what it spawns.
 - **In the page** (`scriptEnts`): the entities with an origin are added after the map's
   own (`MAP.nMap` is where the map's end), marked `C_SCRIPT` on top of their own kind, so
   they are drawn, labelled, linked (a waypoint's `target` chain), found, listed and
-  selected like the map's. **Show → Script ents** (`Ctrl+E`) hides them all. Their info
+  selected like the map's. **Show → Script ents** (`Ctrl+E`) hides them all. A trigger
+  among them with a `setsize` keeps a marker of its class's size (`X.mbox`, `markerBoxOf`),
+  and **Show → Script trigs** (`C_SCRTRIG`, on by default, off in the In-game look)
+  draws its volume as a see-through box in the trigger green with its edges
+  (`drawScriptTrigs`, brighter when selected); its selection box and info card give the
+  whole setsize. The reader keeps the script's own fields of an entity
+  (`local.t.setsize1 = ( ... )`, `LevelScript.fields`), so a later
+  `local.t setsize local.t.setsize1 local.t.setsize2` gets its values. Their info
   card has a Level script section with the spawn line and the lines that placed it, and
   any key it couldn't follow. They have no entity number (the game gives one as the
   script runs), aren't counted in the map's real / simple / static counts, and aren't
@@ -879,7 +919,9 @@ game, and the page adds what it spawns.
   where, the placed entities by class (links), the ones not placed with their line and
   why, the map entities whose target it sets, every `setcvar` (name, value, line; Copy
   gives them as lines) and the `$world` lines (farplane and the like, listed once per
-  line, not applied).
+  line, not applied). **Open .scr** (between Copy and X) and each file's **Open** open the
+  script in the launcher's text editor (a pak's copy is extracted first); in a browser
+  they copy its path.
 - Checked on retail m3l1a (70 of its 76 spawns placed, by `$name.origin` of the map's
   spawn points; its fog lines in `if (getcvar(...) == "1") ... else ...` all listed), on
   the waypoint chain `$("fhe" + local.q).target = $("fhe" + (local.q + 1))` in a `for`
@@ -912,24 +954,29 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
   (green) name deselects it and Shift+click a row's square hides / shows it (its name in
   red while hidden; hidden is only how it is drawn, its AI routes stay). Ctrl+Z undoes a hide or
   show. In the 3D view Shift+click on the selected new entity deselects it, as Esc does
-  (before it closes the map), and Ctrl+click opens its card. N (More info) on a new entity
+  (before it closes the map), and so does a plain click on anything else (a brush, a
+  static prop, the sky), unless it is being edited, trimmed or moved; Ctrl+click opens its card. N (More info) on a new entity
   opens a card of its own: not saved (no entity number until the saved map loads), its
   origin, box and spawnflag names, for a path node the number the saved map gives it
   (after the map's nodes) and its links both ways, its class's description, and its
-  parameters in a box that applies what is typed (its routes follow). To view moves it to where the middle of the
-  view meets the map; Fly to, Delete.
+  parameters in a box that applies what is typed (its routes follow). Eye view puts the
+  camera where it sees from, by the rules Eye view has for the map's entities
+  (`eyeViewFrom`: a node, a player start or an AI 82 units above the floor under it,
+  facing its angles, else its target, else yaw 0); Fly to (also a click on its row once
+  it is selected, so a double-click on the row), Delete. Hotkeys: Alt+M Move, Alt+T Trim
+  origin, Alt+E Edit parameters, Delete; each button's tooltip names its own.
 - **The map's own entities.** Selecting one of the map's point entities (a path node, a
   player start, a script origin...; not brush entities, static props or what the level
   script spawns) gives it a row too, with a hollow square and its entity number ("#251
   map"); new ones have a filled square and "new". Edit parameters, Move, Trim origin and
-  To view work on it the same way. Once its keys differ from the map's the row says
+  Eye view work on it the same way. Once its keys differ from the map's the row says
   "changed" (and stays when something else is selected), the map's own marker is hidden
   and it is drawn see-through where it now is; Restore puts back the map's keys. A
   changed `info_pathnode` (node k of the `.pth`, the map's k-th) has its links worked out
   again, both ways, as a new node's are, and the `.pth`'s links to and from it are left
   out; a node whose classname is changed away from `info_pathnode` loses its links (and
   gets them again if changed back), once Edit parameters is closed.
-- **Edit parameters** (or double-click its row) opens a box, which moves by its title bar
+- **Edit parameters** (Alt+E) opens a box, which moves by its title bar
   and stays where it was left, with the entity as
   the `.bsp`'s entity lump holds it, `"key" "value"` lines in `{ }`. What is typed applies
   a moment later when it reads (an error says why it doesn't): origin, angles, spawnflags,
@@ -1081,7 +1128,8 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
   pitch only while the camera is tilted.
 - A page always opens at the player start. `V` switches cameras, `R` returns to the player start, `B` toggles Full Brightness,
   `K` Simple Sky, `M` Simple models, `J` Sun flare, `0` Lights off, `-` Sun light, `=`
-  Decals, `Y` Weather, `P` Leak trail, `Ctrl+E` Script ents, `L`
+  Decals, `Y` Weather, `P` Leak trail, `I` AI routes, `Ctrl+E` Script ents,
+  `Ctrl+B` Script trigs, `L`
   opens the legend, `` ` `` the game cvars list and `T` switches the theme. The FOV
   slider runs from 60 to 150. Press `H` in the viewer for all of them (Keyboard
   shortcuts, above).

@@ -10,6 +10,17 @@
 #  model's. This module does the same over the loaded paks, falling back to the
 #  built-in table at the bottom (generated from OpenMoHAA's game code).
 # ==============================================================================
+# --- Vendored dependencies (bin/libs on Windows, bin/libs-linux on Linux, bin/libs-mac on macOS)
+import sys
+import os
+_LIBS_NAME = "libs" if sys.platform.startswith("win") else ("libs-mac" if sys.platform == "darwin" else "libs-linux")
+_libs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), _LIBS_NAME)
+if os.path.isdir(_libs_dir) and _libs_dir not in sys.path:
+    sys.path.insert(0, _libs_dir)
+_bin_dir = os.path.dirname(os.path.abspath(__file__))
+if _bin_dir not in sys.path:
+    sys.path.insert(0, _bin_dir)
+import mohaa_common as MC                       # logging, atomic writes, settings, Pillow guard
 import re
 
 # /*QUAKED <classname> (r g b) (minx miny minz) (maxx maxy maxz) FLAG FLAG ...

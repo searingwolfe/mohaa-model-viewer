@@ -17,6 +17,17 @@
 #
 #  Command line:  python mohaa_bsp.py <map.bsp> [out.map]
 # ==============================================================================
+# --- Vendored dependencies (bin/libs on Windows, bin/libs-linux on Linux, bin/libs-mac on macOS)
+import sys
+import os
+_LIBS_NAME = "libs" if sys.platform.startswith("win") else ("libs-mac" if sys.platform == "darwin" else "libs-linux")
+_libs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), _LIBS_NAME)
+if os.path.isdir(_libs_dir) and _libs_dir not in sys.path:
+    sys.path.insert(0, _libs_dir)
+_bin_dir = os.path.dirname(os.path.abspath(__file__))
+if _bin_dir not in sys.path:
+    sys.path.insert(0, _bin_dir)
+import mohaa_common as MC                       # logging, atomic writes, settings, Pillow guard
 import math, os, re, struct, sys
 
 # ------------------------------------------------------------------------------
@@ -74,6 +85,7 @@ def is_decompiled_map(path):
         with open(path, "rb") as f:
             return f.read(len(DECOMPILE_TAG)).decode("latin-1") == DECOMPILE_TAG
     except OSError:
+        MC.swallowed()
         return False
 
 
@@ -977,6 +989,7 @@ def decompile(bsp, tex_size=None, static_classname=None, log=None):
                 try:
                     wh = tex_size(shader)
                 except Exception:
+                    MC.swallowed()
                     wh = None
             if not wh or not wh[0] or not wh[1]:
                 wh = (256, 256)
@@ -1090,6 +1103,7 @@ def decompile(bsp, tex_size=None, static_classname=None, log=None):
             try:
                 cls = static_classname(path)
             except Exception:
+                MC.swallowed()
                 cls = None
         if not cls:
             stem = os.path.splitext(os.path.basename(path.replace("\\", "/")))[0]
@@ -1962,23 +1976,39 @@ def write_bsp_entities(data, added, out_path, src_path=None, replace=None):
     while len(out) % 4:
         out.append(0)
     struct.pack_into("<ii", out, 12 + le * 8, new_ofs, len(payload))
+    # Write a temp file beside the destination, read it back and check it fully, and only
+    # then move it into place: a copy that fails the check never reaches out_path (an
+    # earlier copy there is kept as .bak).
+    out_path = os.path.abspath(out_path)
     tmp = out_path + ".tmp"
     with open(tmp, "wb") as f:
         f.write(out)
-    os.replace(tmp, out_path)
-    # check what was written
-    with open(out_path, "rb") as f:
-        d2 = f.read()
-    _v2, l2, _le = _bsp_header(d2)
-    for i in range(len(lumps)):
-        if i == le:
-            continue
-        a, b = lumps[i], l2[i]
-        if a != b or data[a[0]:a[0] + a[1]] != d2[b[0]:b[0] + b[1]]:
-            raise BspError("checking the new file: lump %d differs" % i)
-    back = parse_entity_string(bsp_entity_text(d2))
-    if len(back) != len(old) + len(new):
-        raise BspError("checking the new file: its entities didn't read back")
+        f.flush()
+        os.fsync(f.fileno())
+    try:
+        with open(tmp, "rb") as f:
+            d2 = f.read()
+        if d2 != bytes(out):
+            raise BspError("checking the new file: it did not read back byte for byte")
+        _v2, l2, _le = _bsp_header(d2)
+        for i in range(len(lumps)):
+            if i == le:
+                continue
+            a, b = lumps[i], l2[i]
+            if a != b or data[a[0]:a[0] + a[1]] != d2[b[0]:b[0] + b[1]]:
+                raise BspError("checking the new file: lump %d differs" % i)
+        back = parse_entity_string(bsp_entity_text(d2))
+        if len(back) != len(old) + len(new):
+            raise BspError("checking the new file: its entities didn't read back")
+        if os.path.exists(out_path):
+            MC.make_backup(out_path)
+        os.replace(tmp, out_path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            MC.swallowed("temp file already gone")
+        raise
     return old_time, stamp, before, after, len(back)
 
 
@@ -2002,18 +2032,30 @@ def main(argv):
     try:
         bsp = load(src)
     except (OSError, BspError) as e:
-        print("error: %s" % e)
+        print("error: %s" % e, file=sys.stderr)
         return 2
     try:
         text, stats = decompile(bsp, log=print)
     except (struct.error, IndexError) as e:
-        print("error: %s looks damaged: %s" % (os.path.basename(src), e))
+        print("error: %s looks damaged: %s" % (os.path.basename(src), e), file=sys.stderr)
         return 3
-    with open(dst, "w", encoding="latin-1", errors="replace", newline="\n") as f:
-        f.write(text)
+    MC.atomic_write_text(dst, text, encoding="latin-1", errors="replace", newline="\n")
     print("wrote %s" % dst)
     return 0
 
+def run_logged(argv, app_name, entry):
+    """Entry point for a child build: start logging (output/logs/<app_name>.log, nothing
+    extra on stderr, whose lines the launcher shows in red), record the command line and
+    the result, and log any uncaught exception with its traceback before re-raising it.
+    Returns entry(argv)'s exit code."""
+    MC.setup_logging(app_name, console_level=None)
+    MC.install_crash_hooks(app_name)
+    lg = MC.get_logger(app_name)
+    lg.info("start: %s", " ".join(repr(a) for a in argv[1:]))
+    code = entry(argv)
+    lg.info("exit code %s", code)
+    return code
+
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(run_logged(sys.argv, "mohaa_bsp", main))

@@ -7,6 +7,7 @@ architecture, and the engine details that took the longest to get right.
 |---|---|
 | [CHANGELOG.md](CHANGELOG.md) | Page revisions of both viewers (`VIEWER_REV`, `MAP_VIEWER_REV`), cache-floor bumps, installer changes, and notable fixes with the behaviour they replaced |
 | [project-overview.md](project-overview.md) | Goals, repository layout, how a model is built, caching and versions, known issues and open work |
+| [hardening-notes.md](hardening-notes.md) | How the code is hardened (logs, atomic writes, settings recovery, vendored packages, the updater, the RUN files), the decisions behind it, deviations from the standard, and what is still open |
 | [development-workflow.md](development-workflow.md) | Checks to run before shipping (both viewers), values that must change together, how engine references are cited, batch-file pitfalls |
 | [engine-notes.md](engine-notes.md) | Format, skeleton, level of detail and hit location, TikiScript, shader and WebView2 findings |
 | [emitter-commands.md](emitter-commands.md) | Every `.tik` emitter keyword the Model Viewer understands and what it does |

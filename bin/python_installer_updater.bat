@@ -7,8 +7,8 @@ REM                                      and the MOHAA Map Viewer
 REM
 REM  Finds the newest usable Python, or downloads one that supports this Windows
 REM  version and CPU, then installs the packages both viewers use (they need the
-REM  same ones). "RUN -- Medal of Honor Model Viewer.bat" and "RUN -- Medal of Honor
-REM  Map Viewer.bat" offer to run this when they can't find a suitable Python,
+REM  same ones). "RUN -- Medal of Honor Viewer.bat", which starts either of them,
+REM  offers to run this when it can't find a suitable Python,
 REM  passing /fromrun so it returns without the closing pause; it can also be run
 REM  on its own to update Python's packages.
 REM
@@ -20,11 +20,20 @@ REM   * Paths are passed to PowerShell as arguments, never pasted into quoted
 REM     strings, so an apostrophe in a user path cannot break the command.
 REM   * Every multi-command "if" body is parenthesised. In cmd, & separates
 REM     commands, so "if X cmd1 & cmd2" would run cmd2 unconditionally.
-REM   * The download is pinned to TLS 1.2 and the installer's Authenticode
-REM     signature is verified before it runs.
+REM   * TLS 1.2 is ADDED to PowerShell's allowed protocols (old Windows 7 / 8.1
+REM     PowerShell lacks it), never pinned, so TLS 1.3 is used where available. The
+REM     download is tried 3 times with a growing wait, and the installer's
+REM     Authenticode signature is verified before it runs.
 REM   * Microsoft Store execution aliases are skipped, never deleted.
+REM   * Packages go into bin\libs (vendored), never into Python's own folders; the
+REM     checks and installs are done by bin\mohaa_envcheck.py.
+REM   * One pause, at the very end (none when called with /fromrun). Every failure
+REM     jumps to :end with EXIT_CODE=1.
+REM   * The Windows version is read here, in batch, because no Python exists yet at
+REM     that point; everything after Python is found is done in Python.
 REM ============================================================================
 
+set "EXIT_CODE=0"
 set "FROMRUN="
 if /i "%~1"=="/fromrun" set "FROMRUN=1"
 
@@ -37,7 +46,7 @@ set MIN_MAJOR=3
 set MIN_MINOR=8
 
 REM Scratch file for reading one line of Python output (see :consider).
-set "U_OUT=%TEMP%\mohaa_setup_check.txt"
+set "U_OUT=%TEMP%\mohaa_setup_%RANDOM%%RANDOM%.txt"
 
 REM ---------------------------------------------------------------------------
 REM  DETECT WINDOWS VERSION  ->  highest Python that will install on it
@@ -121,7 +130,7 @@ if not "!TARGET_VERSION!"=="LATEST" goto HAVE_VERSION
 
 echo Asking python.org for the current release...
 set LATEST_VERSION=
-for /f "delims=" %%V in ('powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try{$h=(Invoke-WebRequest -Uri 'https://www.python.org/downloads/' -UseBasicParsing).Content; if($h -match 'Download Python (\d+\.\d+\.\d+)'){$Matches[1]}}catch{}" 2^>nul') do set LATEST_VERSION=%%V
+for /f "delims=" %%V in ('powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; try{$h=(Invoke-WebRequest -Uri 'https://www.python.org/downloads/' -UseBasicParsing).Content; if($h -match 'Download Python (\d+\.\d+\.\d+)'){$Matches[1]}}catch{}" 2^>nul') do set LATEST_VERSION=%%V
 
 if not defined LATEST_VERSION (
     echo Could not reach python.org. Falling back to a known-good release.
@@ -138,32 +147,41 @@ set INSTALLER=%TEMP%\python-!TARGET_VERSION!!ARCHSUFFIX!.exe
 if exist "!INSTALLER!" del /f /q "!INSTALLER!" >nul 2>&1
 
 echo Downloading...
-powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try{Invoke-WebRequest -Uri $args[0] -OutFile $args[1] -UseBasicParsing; exit 0}catch{Write-Host ('   ' + $_.Exception.Message); exit 1}" "!INSTALL_URL!" "!INSTALLER!"
-if errorlevel 1 (
-    echo.
-    echo Download failed. Install Python !TARGET_VERSION! by hand from:
-    echo   https://www.python.org/downloads/
-    pause
-    exit /b 1
-)
-if not exist "!INSTALLER!" (
-    echo Download produced no file. Aborting.
-    pause
-    exit /b 1
-)
+powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; $ok=$false; for($i=0; $i -lt 3; $i++){ try{ Invoke-WebRequest -Uri $args[0] -OutFile $args[1] -UseBasicParsing -TimeoutSec 300; $ok=$true; break } catch { Write-Host ('   attempt ' + ($i+1) + ' of 3 failed: ' + $_.Exception.Message); Start-Sleep -Seconds ([math]::Pow(2,$i)) } }; if($ok){exit 0}else{exit 1}" "!INSTALL_URL!" "!INSTALLER!"
+if errorlevel 1 goto download_failed
+if not exist "!INSTALLER!" goto download_empty
+goto verify_installer
+
+:download_failed
+echo.
+echo [ERROR] Download failed. Install Python !TARGET_VERSION! by hand from:
+echo         https://www.python.org/downloads/
+set "EXIT_CODE=1"
+goto end
+
+:download_empty
+echo [ERROR] The download produced no file. Aborting.
+set "EXIT_CODE=1"
+goto end
+
+:verify_installer
 
 REM Only run the installer if it carries a valid Python Software Foundation signature.
 echo Verifying the installer's digital signature...
 powershell -NoProfile -Command "$s=Get-AuthenticodeSignature -FilePath $args[0]; if($s.Status -ne 'Valid'){Write-Host ('   signature status: ' + $s.Status); exit 1}; $subj=$s.SignerCertificate.Subject; Write-Host ('   signed by: ' + $subj); if($subj -notmatch 'Python Software Foundation'){exit 1}; exit 0" "!INSTALLER!"
-if errorlevel 1 (
-    echo.
-    echo REFUSING TO RUN: the downloaded installer is not validly signed by the
-    echo Python Software Foundation. It has been deleted. Please install Python
-    echo yourself from https://www.python.org/downloads/
-    del /f /q "!INSTALLER!" >nul 2>&1
-    pause
-    exit /b 1
-)
+if errorlevel 1 goto bad_signature
+goto run_installer
+
+:bad_signature
+echo.
+echo [ERROR] REFUSING TO RUN: the downloaded installer is not validly signed by the
+echo         Python Software Foundation. It has been deleted. Please install Python
+echo         yourself from https://www.python.org/downloads/
+del /f /q "!INSTALLER!" 1>nul 2>&1
+set "EXIT_CODE=1"
+goto end
+
+:run_installer
 
 REM A per-user install needs no admin rights, but the py launcher defaults to an
 REM all-users install, which does; InstallLauncherAllUsers=0 keeps it per-user too.
@@ -178,13 +196,14 @@ REM yet, but the per-user install folders (Python3*) are searched directly.
 echo.
 echo Looking for the new Python...
 call :search
-if not defined BEST_PY (
-    echo.
-    echo ERROR: Python was installed but could not be located afterwards.
-    echo Close this window, open a NEW one, and run this script again.
-    pause
-    exit /b 1
-)
+if defined BEST_PY goto found_new
+echo.
+echo [ERROR] Python was installed but could not be located afterwards.
+echo         Close this window, open a NEW one, and run this script again.
+set "EXIT_CODE=1"
+goto end
+
+:found_new
 set "PYTHON_EXE=!BEST_PY!"
 echo Installed: !PYTHON_EXE!
 
@@ -196,48 +215,27 @@ echo.
 echo Using interpreter: !PYTHON_EXE!
 echo.
 echo Updating pip...
-"!PYTHON_EXE!" -m ensurepip --upgrade >nul 2>&1
-"!PYTHON_EXE!" -m pip install --upgrade pip setuptools wheel
+"!PYTHON_EXE!" -m ensurepip --upgrade 1>nul 2>&1
+"!PYTHON_EXE!" -m pip install --upgrade pip
+if errorlevel 1 echo [WARN] pip could not be updated; continuing with the installed pip.
 
+REM Packages are vendored into bin\libs by mohaa_envcheck.py: Pillow 10.3+ (required;
+REM older Pillow has known decoder vulnerabilities and the viewer decodes images from
+REM untrusted .pk3s) and, on Windows 8.1+, the optional embedded 3D pane packages. Run
+REM on its own, this script refreshes them (--upgrade); from a RUN file it only fills in
+REM what is missing or too old.
+set "UPG=--upgrade"
+if defined FROMRUN set "UPG="
 echo.
-echo Installing Pillow ^(required: MOHAA textures are .tga, only Pillow decodes them^)...
-REM Enforce a minimum version, not just "import PIL": older Pillow releases have
-REM known decoder vulnerabilities, and the viewer decodes images from untrusted .pk3s.
-"!PYTHON_EXE!" -m pip install --upgrade "Pillow>=10.3.0"
-if errorlevel 1 (
-    echo    retrying as a per-user install...
-    "!PYTHON_EXE!" -m pip install --user --upgrade "Pillow>=10.3.0"
-)
-"!PYTHON_EXE!" -c "import PIL,sys;v=tuple(int(x) for x in PIL.__version__.split('.')[:2]);sys.exit(0 if v>=(10,3) else 1)" >nul 2>&1
-if errorlevel 1 (
-    echo.
-    echo WARNING: Pillow is missing or older than 10.3. Textures may not load, and
-    echo older Pillow versions have known image-decoder vulnerabilities. Try:
-    echo     "!PYTHON_EXE!" -m pip install --upgrade "Pillow>=10.3.0"
-) else (
-    echo    Pillow OK.
-)
-
-REM Optional embedded 3D pane, offered on Windows 8.1 and newer like the RUN .bat
-REM files; older systems skip it and use the browser fallback.
-if !WINMAJOR! GEQ 10 goto DO_WEBVIEW
-if !WINMAJOR! EQU 6 if !WINMINOR! GEQ 3 goto DO_WEBVIEW
-echo.
-echo Skipping the embedded 3D pane: it needs Windows 8.1 or newer.
-echo Models and maps will open in your default browser instead ^(fully supported^).
+"!PYTHON_EXE!" "%~dp0mohaa_envcheck.py" deps "%~dp0libs" --embed !UPG!
+if errorlevel 1 goto packages_failed
 goto DONE
 
-:DO_WEBVIEW
+:packages_failed
 echo.
-echo Installing the optional embedded 3D viewer pane...
-echo ^(if this fails the launchers still work - models and maps open in your browser^)
-"!PYTHON_EXE!" -m pip install pythonnet "pywebview==4.4.1" tkwebview2
-"!PYTHON_EXE!" -c "import tkwebview2" >nul 2>&1
-if errorlevel 1 (
-    echo    Not installed - the browser fallback will be used.
-) else (
-    echo    Embedded viewer OK.
-)
+echo [ERROR] Pillow could not be installed into bin\libs ^(see the lines above^).
+set "EXIT_CODE=1"
+goto end
 
 :DONE
 echo.
@@ -245,15 +243,21 @@ echo =====================================
 echo  Setup complete
 echo  Interpreter: !PYTHON_EXE!
 echo =====================================
-if defined FROMRUN exit /b 0
+if defined FROMRUN goto end
 echo.
 echo Your PATH was not modified by this script. If "python" is not recognised in
 echo a new Command Prompt, either re-run Python's installer and tick
-echo "Add python.exe to PATH", or just use "RUN -- Medal of Honor Model Viewer.bat"
-echo or "RUN -- Medal of Honor Map Viewer.bat", which find the interpreter on their own.
+echo "Add python.exe to PATH", or just use "RUN -- Medal of Honor Viewer.bat",
+echo which finds the interpreter on its own.
+
+REM The single exit point: one pause (skipped when a RUN file called us), then the code.
+:end
+if exist "%U_OUT%" del "%U_OUT%" 1>nul 2>&1
+if defined FROMRUN exit /b !EXIT_CODE!
 echo.
+if not "!EXIT_CODE!"=="0" echo [ERROR] Setup did not finish ^(exit code !EXIT_CODE!^).
 pause
-exit /b 0
+exit /b !EXIT_CODE!
 
 REM ===========================================================================
 REM  :search

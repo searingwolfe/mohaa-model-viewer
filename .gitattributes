@@ -1,0 +1,6 @@
+# Line endings, kept as each file needs them whatever Git's settings on the machine:
+# the .bat files are stored byte for byte (CRLF, as tools/make_launchers.py writes them;
+# cmd misreads labels and "goto" in a batch file with LF only), the .sh files always LF
+# (bash fails on a CR at the end of a line).
+*.bat -text
+*.sh  text eol=lf

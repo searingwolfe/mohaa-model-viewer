@@ -32,6 +32,17 @@
 #           [--vfs=<path inside the paks>] [--outdir=<folder>] [--cache=<folder>]
 #           [--texsize=256] [--theme=light|dark] [--no-models] [--decompile-only] [--no-open]
 # ==============================================================================
+# --- Vendored dependencies (bin/libs on Windows, bin/libs-linux on Linux, bin/libs-mac on macOS)
+import sys
+import os
+_LIBS_NAME = "libs" if sys.platform.startswith("win") else ("libs-mac" if sys.platform == "darwin" else "libs-linux")
+_libs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), _LIBS_NAME)
+if os.path.isdir(_libs_dir) and _libs_dir not in sys.path:
+    sys.path.insert(0, _libs_dir)
+_bin_dir = os.path.dirname(os.path.abspath(__file__))
+if _bin_dir not in sys.path:
+    sys.path.insert(0, _bin_dir)
+import mohaa_common as MC                       # logging, atomic writes, settings, Pillow guard
 import base64, gzip, hashlib, io, json, math, os, re, struct, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -43,16 +54,18 @@ import mohaa_entdefs as ME
 try:
     import mohaa_textures as MTX         # pak file system (Vfs) and .tik $include expansion
 except Exception:                         # pragma: no cover - shipped together
+    MC.swallowed()
     MTX = None
 try:
     import mohaa_view as MV               # .skd / .skc / .tik readers shared with the model viewer
 except Exception:                         # pragma: no cover
+    MC.swallowed()
     MV = None
 
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 78
+MAP_VIEWER_REV = 94
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
 INDEX_VERSION = 10
@@ -80,7 +93,7 @@ def log(*a):
     try:
         sys.stdout.flush()
     except Exception:
-        pass
+        MC.swallowed()
 
 
 # ==============================================================================
@@ -912,7 +925,12 @@ MAP_VIEWER_KEYS = {
             _kx("N", "more info on the selection", ("N", "info")),
             _kx("Ctrl+C", "over the 3D view: copy the point under the cursor as ( x y z ) (not the camera's place)",
                 ("Ctrl+C", "copy point", "copy the point under the cursor as ( x y z )")),
-            _kx("Backspace", "hide the selection", ("Backspace", "hide")),
+            _kx("Backspace", "hide the selection (an entity added in Modify too)", ("Backspace", "hide")),
+            _kx("Delete", "remove the entity added in Modify that is selected (map entities stay)", ("Delete", "remove")),
+            _kx("Alt+M|T|E", "Modify, its selected entity: Move · Trim origin · Edit parameters",
+                ("Alt+M", "Move", "the selected entity follows the mouse; a click puts it down"),
+                ("Alt+T", "Trim origin", "move it by the trim step with W A S D, Space and C"),
+                ("Alt+E", "Edit parameters", "its keys as the entity lump holds them")),
             _kx("Shift+H", "show everything hidden", ("Shift+H", "show all")),
             _kx("Ctrl+Z", "undo the last hide or show-all (again for the one before)", ("Ctrl+Z", "undo")),
             _kx("Ctrl+F or /", "find: class, targetname, key, texture", ("Ctrl+F", "find"), ("/", "find")),
@@ -960,6 +978,10 @@ MAP_VIEWER_KEYS = {
                 ("Ctrl+G", "Foliage", "show / hide the foliage clips")),
             _kx("Ctrl+E", "Script ents: show / hide the entities the level script spawns (waypoints, script "
                 "models, actors... placed where its lines say)", ("Ctrl+E", "Script", "show / hide the level script's entities")),
+            _kx("Ctrl+B", "Script trigs: show / hide the volumes (boxes) of the triggers the level script spawns",
+                ("Ctrl+B", "Script trigs", "show / hide the level script's trigger volumes")),
+            _kx("I", "AI routes on / off: the connections the AI can walk between path nodes (ai_showroutes)",
+                ("I", "AI routes")),
             _kx("Ctrl+A", "show every group (All)", ("Ctrl+A", "All")),
             _kx("G", "In-game look: hide what the game never draws, with the game's light, sky and sun flare",
                 ("G", "in-game")),
@@ -1012,7 +1034,7 @@ def _legend_thumb(data, size):
     (mime, bytes, average colour, has alpha) form. A cut-out picture (an alpha channel
     with both see-through and solid parts, such as the tree in commontreeshadow) is laid
     on grey, so its shape shows."""
-    from PIL import Image
+    Image = MC.pil_image()          # Pillow >= 10.3, pixel limit set (mohaa_common)
     im = Image.open(io.BytesIO(data))
     im.load()
     if im.mode in ("RGBA", "LA", "PA") or "transparency" in im.info:
@@ -1055,6 +1077,7 @@ def legend_thumbs(vfs, shaders, cache=None, size=48):
                 try:
                     val = _legend_thumb(data, size) if data else None
                 except Exception:
+                    MC.swallowed()
                     val = None
                 if val and cache:
                     cache.put(ckey, val)
@@ -1107,9 +1130,9 @@ def _image_dims(data):
 def _have_pil():
     """Is Pillow installed? (Without it the map draws untextured.)"""
     try:
-        import PIL  # noqa: F401
-        return True
+        return MC.pil_status()[0]   # Pillow present AND at the security floor
     except Exception:
+        MC.swallowed()
         return False
 
 
@@ -1117,7 +1140,7 @@ def encode_image(data, max_dim, keep_alpha):
     """Decode a texture file, shrink it to max_dim and re-encode it for the page.
     Returns (mime, bytes, (avg r, g, b) in 0..1, has_alpha) or None. Opaque pictures
     become JPEG; ones whose alpha matters (fences, foliage, windows) stay PNG."""
-    from PIL import Image
+    Image = MC.pil_image()          # Pillow >= 10.3, pixel limit set (mohaa_common)
     im = Image.open(io.BytesIO(data))
     im.load()
     if max(im.size) > max_dim:
@@ -1149,6 +1172,7 @@ class TextureCache:
             try:
                 os.makedirs(folder, exist_ok=True)
             except OSError:
+                MC.swallowed()
                 self.folder = None
 
     def _path(self, key):
@@ -1168,6 +1192,7 @@ class TextureCache:
             meta = json.loads(raw[4:4 + hl].decode("utf-8"))
             return meta["mime"], raw[4 + hl:], tuple(meta["avg"]), meta["alpha"]
         except Exception:
+            MC.swallowed()
             return None
 
     def put(self, key, val):
@@ -1177,12 +1202,9 @@ class TextureCache:
         mime, data, avg, alpha = val
         meta = json.dumps({"mime": mime, "avg": list(avg), "alpha": alpha}).encode("utf-8")
         try:
-            tmp = self._path(key) + ".part"
-            with open(tmp, "wb") as f:
-                f.write(struct.pack("<I", len(meta)) + meta + data)
-            os.replace(tmp, self._path(key))
+            MC.atomic_write_bytes(self._path(key), struct.pack("<I", len(meta)) + meta + data)
         except OSError:
-            pass
+            MC.swallowed()
 
 
 # ==============================================================================
@@ -1221,7 +1243,7 @@ def build_indexes(vfs, paks, cache_dir=None, say=log):
             ed.class_for_tik = blob["class_for_tik"]
             return blob["shaders"], ed
         except Exception:
-            pass
+            MC.swallowed()
     t0 = time.time()
     shaders = {}
     names = sorted(k for k in vfs.names() if k.endswith(".shader"))
@@ -1231,6 +1253,7 @@ def build_indexes(vfs, paks, cache_dir=None, say=log):
             try:
                 parse_shaders(data.decode("latin-1", "replace"), shaders)
             except Exception as e:
+                MC.swallowed()
                 say("(shader file %s skipped: %s)" % (k, e))
     ed = ME.EntityDefs()
     ed.scan_vfs(vfs)
@@ -1240,12 +1263,9 @@ def build_indexes(vfs, paks, cache_dir=None, say=log):
             os.makedirs(cache_dir, exist_ok=True)
             blob = {"shaders": shaders, "defs": ed.defs, "tik_for_class": ed.tik_for_class,
                     "class_for_tik": ed.class_for_tik}
-            tmp = path + ".part"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(blob, f)
-            os.replace(tmp, path)
+            MC.atomic_write_text(path, json.dumps(blob))
         except Exception:
-            pass
+            MC.swallowed()
     return shaders, ed
 
 
@@ -1301,6 +1321,7 @@ class TextureTable:
             val = encode_image(data, self.max_dim, want_alpha) if data else None
             self.decoded += 1
         except Exception:
+            MC.swallowed()
             val = None
         if val and self.cache:
             self.cache.put(ckey, val)
@@ -1652,6 +1673,7 @@ class ModelBuilder:
             try:
                 m = self._build(path)
             except Exception as e:
+                MC.swallowed()
                 m = None
                 self.failed[path] = str(e)[:160]
             if m:
@@ -1682,6 +1704,7 @@ class ModelBuilder:
         try:
             anims = MV.parse_tik_animations(txt, every=True)
         except Exception:
+            MC.swallowed()
             anims = []
         if not anims:
             return {}, None
@@ -1705,12 +1728,13 @@ class ModelBuilder:
                 f.write(data)
             skc = MV.parse_skc(tmp)
         except Exception:
+            MC.swallowed()
             return {}, None
         finally:
             try:
                 os.remove(tmp)
             except OSError:
-                pass
+                MC.swallowed()
         bounds = None
         fb = skc.get("fbounds") or []
         if idle and fb:
@@ -1739,17 +1763,19 @@ class ModelBuilder:
             try:
                 classname = MV.parse_tik_classname(txt)
             except Exception:
+                MC.swallowed()
                 classname = None
             try:
                 for skd, pairs in MTX.parse_tik_setup(txt).items():
                     for sname, sh in pairs:
                         shader_map.setdefault(sname.lower(), sh)
             except Exception:
-                pass
+                MC.swallowed()
             # Surfaces the .tik switches off at spawn (LOD stand-ins, broken variants).
             try:
                 nodraw_ops = MV.parse_tik_static_nodraw(txt)
             except Exception:
+                MC.swallowed()
                 nodraw_ops = []
             setup_path = parts[0][0] or tik_dir
             skds = []
@@ -1786,6 +1812,7 @@ class ModelBuilder:
         try:
             wR, wT = MV.compute_world(skd["bones"], channels)
         except Exception:
+            MC.swallowed()
             wR, wT = MV.compute_world(skd["bones"], {})
         pos = []
         uvs = []
@@ -2001,6 +2028,7 @@ def sky_boxes(texs, blobs, vfs):
                 try:
                     enc = encode_image(data, SKY_MAX_DIM, False) if data else None
                 except Exception:
+                    MC.swallowed()
                     enc = None
                 if not enc:
                     faces = None
@@ -2126,7 +2154,7 @@ def lens_flare_def(text, which):
 def _png_image(data, max_dim):
     """A picture re-encoded as PNG (a flare's smooth glow would show JPEG's blocks),
     no bigger than max_dim."""
-    from PIL import Image
+    Image = MC.pil_image()          # Pillow >= 10.3, pixel limit set (mohaa_common)
     im = Image.open(io.BytesIO(data))
     im.load()
     if max(im.size) > max_dim:
@@ -2159,6 +2187,7 @@ def _flare_picture(name, vfs, shaders, blobs):
     try:
         mime, raw = _png_image(data, SUN_FLARE_MAX_DIM)
     except Exception:
+        MC.swallowed()
         return None
     return [blobs.add(raw), mime, src, dst]
 
@@ -2241,7 +2270,7 @@ def lit_payload(bsp, stats, texs, blobs, shaders, vfs, ents, model_of, models, s
     nlm = bsp.lightmap_count()
     if not nlm or not _have_pil():
         return None
-    from PIL import Image
+    Image = MC.pil_image()          # Pillow >= 10.3, pixel limit set (mohaa_common)
     page = MB.LIGHTMAP_SIZE * MB.LIGHTMAP_SIZE * 3
 
     def shader_info(name):
@@ -2440,6 +2469,7 @@ def rain_payload(vfs, vpath):
     try:
         txt = vfs.read(k).decode("latin-1", "replace")
     except Exception:
+        MC.swallowed()
         return None
     txt = re.sub(r"/\*.*?\*/", " ", txt, flags=re.S)
     found = None
@@ -2470,6 +2500,7 @@ def _shader_rgb_consts(vfs, names):
         try:
             txt = _strip_comments(vfs.read(k).decode("latin-1", "replace"))
         except Exception:
+            MC.swallowed()
             continue
         for m in re.finditer(r"(?m)^\s*(\S+)\s*\{", txt):
             name = m.group(1).lower()
@@ -2866,6 +2897,7 @@ def leak_payload(vfs, vpath, src, src_time, say=log):
 #   - "spawn <class or model> [key value ...]" (ScriptThread::SpawnEntity), with the
 #     properties the following lines give the same entity: "<ent>.origin = ( x y z )",
 #     "<ent> origin ( x y z )", angles, angle, targetname, target, model, scale, setsize,
+#     rotatedbbox (whether its box turns with its angles: the page's boxTurns),
 #     the entity named as "local.x", "level.x", "$targetname" or "$(expression)";
 #   - "<map entity>.target = ..." on an entity of the map (a map node joined to the
 #     script's own);
@@ -2882,7 +2914,7 @@ _SCR_TOKEN = re.compile(r'"((?:[^"\\]|\\.)*)"|(-?(?:\d+\.?\d*|\.\d+)(?![\w.]))|(
                         r'|(==|!=|<=|>=|&&|\|\||\+\+|--|[-+*/=(){}\[\];,<>!%&|.])')
 _SCR_LABEL = re.compile(r'^\s*([A-Za-z_][\w]*)((?:\s+(?:local|group)\.[\w]+)*)\s*:\s*$')
 _SCR_PROPS = {"origin", "angles", "angle", "targetname", "target", "model", "scale", "setsize", "spawnflags",
-              "classname"}
+              "classname", "rotatedbbox"}
 _SCR_NOT_SPAWN = {"waittill", "waittilltrigger", "thread", "waitthread", "exec", "waitexec", "goto", "end"}
 _SCR_NULL = ("null",)
 # the level's rain settings (Level::SetRain*: CS_RAIN_* configstrings, cg.rain in the client)
@@ -2972,6 +3004,8 @@ class LevelScript:
         self.level = {}           # level.x variables (shared by every file)
         self.local = {}           # local.x variables of the thread (label) being read
         self.vars = {}            # variable name -> index in self.ents
+        self.fields = {}          # entity ref -> {field: value}: the script's own fields
+                                  # ("local.t.setsize1 = ( 0 -430 -500 )"), read back later
         self.tn = {}              # targetname -> index in self.ents (the last spawned)
         self.map_tn = {}          # targetname -> map entity index
         self.map_tn_all = {}      # targetname -> every map entity of it
@@ -3513,6 +3547,9 @@ class LevelScript:
         """A property of ("ent", script entity) or ("map", map entity)."""
         if ref is None:
             return None
+        f = self.fields.get(ref)
+        if f and prop in f and prop not in _SCR_PROPS:
+            return f[prop]
         if ref[0] == "ent":
             return self._prop(self.ents[ref[1]], prop)
         if ref[0] == "map":
@@ -3649,6 +3686,14 @@ class LevelScript:
         " prop value ..."."""
         prop = prop.lower()
         if prop not in _SCR_PROPS:
+            # a field of the script's own on the entity (".setsize1 = ( ... )"): not a key
+            # of it, but kept, so a later line that reads it ("setsize local.t.setsize1
+            # local.t.setsize2") gets its value
+            if assign:
+                val, i = self._or(T, i)
+                if op:
+                    val = self._binop(self._refprop(ref, prop), op, val)
+                self.fields.setdefault(ref, {})[prop] = val
             return
         if prop == "setsize" and not assign:
             a, i = self._add(T, i)
@@ -4065,7 +4110,7 @@ def script_payload(vfs, vpath, src, paks, ents, say=log):
                     with open(c, "rb") as f:
                         return f.read().decode("latin-1", "replace"), c
                 except OSError:
-                    pass
+                    MC.swallowed()
         if vfs is not None and rel.lower() in vfs.index:
             zi, real = vfs.index[rel.lower()]
             return vfs.read(rel.lower()).decode("latin-1", "replace"), "%s (%s)" % (real, os.path.basename(vfs.zips[zi].filename))
@@ -4153,10 +4198,7 @@ def write_html(path, title, b64, info, theme=None):
     # One pass, so a substituted value is never scanned again for another token.
     html = re.sub(r"__(?:TITLE_JS|TITLE|DATA|REV|INFO|THEME|KEYS_CSS|KEYS_JS|KEYS)__",
                   lambda m: repl[m.group(0)], HTML_TEMPLATE)
-    tmp = path + ".part"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(html)
-    os.replace(tmp, path)
+    MC.atomic_write_text(path, html, newline="\n")
 
 
 def page_name(src_name):
@@ -4247,8 +4289,7 @@ def build(src, args):
         map_out = MB.output_map_path(outdir, ostem)
         if os.path.basename(map_out) != ostem + ".map":
             log("(%s.map in that folder isn't one this program wrote, so it's left alone)" % ostem)
-        with open(map_out, "w", encoding="latin-1", errors="replace", newline="\n") as f:
-            f.write(text)
+        MC.atomic_write_text(map_out, text, encoding="latin-1", errors="replace", newline="\n")
         log("wrote %s" % map_out)
         bspinfo = {"version": bsp.version, "bounds": {str(k): [list(v[0]), list(v[1])] for k, v in stats["bounds"].items()},
                    "firstStatic": stats["first_static"], "aligned": stats["aligned"], "faces": stats["faces"],
@@ -4275,6 +4316,7 @@ def build(src, args):
     try:
         scr = script_payload(vfs, vpath, src, paks, ents)
     except Exception as e:
+        MC.swallowed()
         log("! level script left out: %s" % e)
         scr = None
     scr_deps = (scr or {}).pop("_deps", [])
@@ -4350,6 +4392,7 @@ def build(src, args):
         try:
             lit = lit_payload(bsp, stats, texs, blobs, shaders, vfs, ents, model_of, mb.models if mb else [])
         except Exception as e:           # a damaged lighting lump only costs the lit view
+            MC.swallowed()
             log("! in-game lighting left out: %s" % e)
         if lit:
             log("lighting packed in %.1f s" % (time.time() - t0))
@@ -4359,16 +4402,19 @@ def build(src, args):
         try:
             vis = vis_payload(bsp, stats, texs, blobs)
         except Exception as e:           # a damaged tree only costs r_showtris
+            MC.swallowed()
             log("! r_showtris left out: %s" % e)
     try:
         paths = paths_payload(vfs, vpath, src, blobs)
     except Exception as e:
+        MC.swallowed()
         log("! AI paths left out: %s" % e)
         paths = None
     # the permanent decals (.dcl) and the leak trail (.lin) beside the map
     try:
         dcl = dcl_payload(vfs, vpath, src, texs, blobs)
     except Exception as e:
+        MC.swallowed()
         log("! decals left out: %s" % e)
         dcl = None
     try:
@@ -4376,6 +4422,7 @@ def build(src, args):
         # its .bsp after the .lin (and the light stage much later)
         leak = leak_payload(vfs, vpath, src, os.path.getmtime(src) if kind == "map" else None)
     except Exception as e:
+        MC.swallowed()
         log("! leak trail left out: %s" % e)
         leak = None
     # the light grid (r_light_showgrid) and the rain's reach (cg_rain_drawcoverage)
@@ -4384,14 +4431,17 @@ def build(src, args):
         try:
             lgrid = lightgrid_payload(bsp, blobs)
         except Exception as e:
+            MC.swallowed()
             log("! light grid left out: %s" % e)
     try:
         rain = rain_payload(vfs, vpath)
     except Exception:
+        MC.swallowed()
         rain = None
     try:
         weather = weather_payload(vfs, texs, scr)
     except Exception as e:
+        MC.swallowed()
         log("! weather left out: %s" % e)
         weather = None
     # the sun flare: the worldspawn's keys as the renderer reads them (a .bsp's entity
@@ -4400,6 +4450,7 @@ def build(src, args):
         sun = sun_payload(MB.parse_entity_string(bsp.entity_text) if bsp is not None else [e["kv"] for e in ents],
                           vfs, shaders, blobs)
     except Exception as e:
+        MC.swallowed()
         sun = {"none": "The sun flare couldn't be read: %s" % e}
     if "d" in sun:
         seen = None
@@ -4407,6 +4458,7 @@ def build(src, args):
             try:
                 seen = bsp.sun_leafs(vis["nl"])
             except Exception:
+                MC.swallowed()
                 seen = None
             if seen is not None:
                 vis["sun"] = blobs.add(bytes(seen))
@@ -4521,9 +4573,22 @@ def main(argv):
             import webbrowser, pathlib
             webbrowser.open(pathlib.Path(os.path.abspath(res["html"])).as_uri())
         except Exception:
-            pass
+            MC.swallowed()
     return 0
+
+def run_logged(argv, app_name, entry):
+    """Entry point for a child build: start logging (output/logs/<app_name>.log, nothing
+    extra on stderr, whose lines the launcher shows in red), record the command line and
+    the result, and log any uncaught exception with its traceback before re-raising it.
+    Returns entry(argv)'s exit code."""
+    MC.setup_logging(app_name, console_level=None)
+    MC.install_crash_hooks(app_name)
+    lg = MC.get_logger(app_name)
+    lg.info("start: %s", " ".join(repr(a) for a in argv[1:]))
+    code = entry(argv)
+    lg.info("exit code %s", code)
+    return code
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(run_logged(sys.argv, "mohaa_map_view", main))

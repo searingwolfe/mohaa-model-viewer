@@ -10,6 +10,17 @@
 #  Usage:
 #     python3 mohaa_view.py model.skd [--anim base.skc] [--no-open] [--3dviewer]
 # ==============================================================================
+# --- Vendored dependencies (bin/libs on Windows, bin/libs-linux on Linux, bin/libs-mac on macOS)
+import sys
+import os
+_LIBS_NAME = "libs" if sys.platform.startswith("win") else ("libs-mac" if sys.platform == "darwin" else "libs-linux")
+_libs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), _LIBS_NAME)
+if os.path.isdir(_libs_dir) and _libs_dir not in sys.path:
+    sys.path.insert(0, _libs_dir)
+_bin_dir = os.path.dirname(os.path.abspath(__file__))
+if _bin_dir not in sys.path:
+    sys.path.insert(0, _bin_dir)
+import mohaa_common as MC                       # logging, atomic writes, settings, Pillow guard
 import sys, os, struct, glob, json, re, webbrowser, math, subprocess, pathlib, base64
 
 def _cap(b,n,rec,what,path):
@@ -499,7 +510,7 @@ def skd_lod_control(skd, skd_path):
     try:
         for fn in os.listdir(d):
             if fn.lower()==want and os.path.isfile(os.path.join(d,fn)): lp=os.path.join(d,fn); break
-    except OSError: pass
+    except OSError: MC.swallowed()
     if lp:
         try:
             b=open(lp,"rb").read()
@@ -507,7 +518,7 @@ def skd_lod_control(skd, skd_path):
                 f=struct.unpack_from("<12f",b,0)
                 return {"min":f[0],"max":f[1],"curve":[[f[2+2*i],f[3+2*i]] for i in range(5)],
                         "src":os.path.basename(lp)}
-        except OSError: pass
+        except OSError: MC.swallowed()
     # Default curve (tiki_skel.cpp:800-826): pos 0/.5/.8/.95/1, val 0 then lodIndex[1] three
     # times, then lodIndex[i] stepping i down from 10 while lodIndex[i] > lodIndex[3]; index 10
     # is numBoxes, usually 0, so far away goes back to full detail.
@@ -885,7 +896,7 @@ def find_tag_bones(skd_path,bone_names):
     folder=os.path.dirname(os.path.abspath(skd_path)); blob=""
     for tik in glob.glob(os.path.join(glob.escape(folder),"*.tik")):
         try: blob+=open(tik,"r",encoding="latin-1",errors="replace").read()+"\n"   # match the VFS codec
-        except OSError: pass
+        except OSError: MC.swallowed()
     referenced=set()
     for nm in bone_names:
         if nm and re.search(r"(?<![\w])"+re.escape(nm)+r"(?![\w])",blob):
@@ -1227,7 +1238,7 @@ def parse_map_bounds(path):
     d = dot(p0, n), inside when dot(n, x) <= d. setsize is the raw collision hull, so no
     load_scale is applied. Returns [[minx,miny,minz],[maxx,maxy,maxz]]."""
     try: txt=open(path,encoding="latin-1",errors="replace").read()
-    except OSError: return None
+    except OSError: MC.swallowed(); return None
     # parse brushes by brace depth: entity = depth 1, each brush = depth 2
     brushes=[]; depth=0; cur=None
     for line in txt.splitlines():
@@ -1603,7 +1614,7 @@ def tik_anim_fx(ta, emitters):
             _sc=1.0
             if len(argv)>=4:
                 try: _sc=float(argv[3])
-                except Exception: _sc=1.0
+                except Exception: MC.swallowed(); _sc=1.0
             attach.append({"at":c["at"],"model":argv[1].strip('"'),
                            "tag":argv[2].strip('"'),"scale":_sc})
             continue
@@ -1712,8 +1723,7 @@ def write_obj(path,bones,surfaces,wR,wT,tagset):
         vbase+=6
     # Names are latin-1 from the .skd; pin UTF-8 so a non-ASCII byte can't fail under a
     # non-UTF-8 locale codec.
-    with open(path,"w",encoding="utf-8",errors="replace") as f:
-        f.write("\n".join(lines)+"\n")
+    MC.atomic_write_text(path,"\n".join(lines)+"\n",errors="replace")
 
 # ---------------------------------------------------------------------------
 # Per-animation pose solving, shared by the full-page build and the launcher's on-demand
@@ -1914,7 +1924,7 @@ def build_payload(skd,anims_data,base_channels,referenced,convention,wT_payload,
                     try:
                         _st=morph_track(parse_skc(_sib),_mnames)
                         if _st: _rec["mw"]=resample_mw(_st["frames"],len(_rec["frames"]))
-                    except Exception: pass
+                    except Exception: MC.swallowed()
         anims.append(_rec)
     tags=[]
     for bi,bn in enumerate(bones):
@@ -2488,7 +2498,7 @@ def write_html(path,title,payload,theme=None):
     # ONE pass, so a substituted value can never be re-scanned as another token - a model
     # named "__DATA__" must not splice the whole payload into the <title>.
     html=re.sub(r"__(?:TITLE_JS|TITLE|DATA|REV|THEME|KEYS_CSS|KEYS_JS|KEYS)__",lambda m:repl[m.group(0)],_HTML_TEMPLATE)
-    open(path,"w",encoding="utf-8").write(html)
+    MC.atomic_write_text(path,html)
 
 # Max number of the .tik's own animations baked into the page; the rest are built on
 # first click into the cache folder beside the HTML. Overridable with --animpreload=<n>.
@@ -7957,7 +7967,7 @@ def pick_base_anim(skc_files, skd, model_stem):
     parsed=[]
     for f in skc_files:
         try: parsed.append((f,parse_skc(f)))
-        except Exception: pass
+        except Exception: MC.swallowed()
     if not parsed: return None,[]
     def overlap(d):
         return len({n.rsplit(" ",1)[0] for n in d["names"]} & skel)
@@ -7988,6 +7998,7 @@ def open_file(path):
         # drive letters and on '#', '%' or non-ASCII in the path.
         else: webbrowser.open(pathlib.Path(os.path.abspath(path)).as_uri())
     except Exception as e:
+        MC.swallowed()
         print(f"  (could not auto-open: {e})")
 
 
@@ -8038,7 +8049,7 @@ def main(argv):
         # emitter / effect tik: parse its particle emitters and resolve its skelmodel
         # (placed next to the tik by the launcher) so we get a still frame to anchor them.
         try: _tt=open(skd_path,"r",encoding="latin-1",errors="replace").read()   # match the VFS codec
-        except OSError: _tt=""
+        except OSError: MC.swallowed(); _tt=""
         emitters=parse_tik_emitters(_tt)
         # the tik's animations{} section: every named anim alias, its .skc, and its
         # per-anim client (tagspawn/originspawn bursts) / server (surface +/-nodraw)
@@ -8131,14 +8142,14 @@ def main(argv):
     def _lodctl(_sk,_p):
         _sk["meshName"]=os.path.basename(_p)
         try: _sk["lodctl"]=skd_lod_control(_sk,_p)
-        except Exception: _sk["lodctl"]=None
+        except Exception: MC.swallowed(); _sk["lodctl"]=None
         return _sk
     _lodctl(skd,skd_path)
     if extra_skds:
         merged=[skd]
         for ep in extra_skds:
             try: merged.append(_lodctl(parse_skd(ep),ep))
-            except Exception as e: print(f"- could not load part {os.path.basename(ep)}: {e}")
+            except Exception as e: MC.swallowed(); print(f"- could not load part {os.path.basename(ep)}: {e}")
         if len(merged)>1:
             skd=merge_skds(merged)
             print(f"- assembled {len(merged)} parts (body + {len(merged)-1} attached) "
@@ -8186,6 +8197,7 @@ def main(argv):
         try:
             _ad=parse_skd(_atbuild)
         except Exception as _e:
+            MC.swallowed()
             print(f"! attach {_atkey}: {_e}"); return 1
         # `--attachpart=<file.skd>` (repeatable): the other skelmodels the .tik lists (a
         # player/human is body + head + hands + hat), merged by bone name like the main build.
@@ -8194,7 +8206,7 @@ def main(argv):
             _amerge=[_ad]
             for _pp in _aparts:
                 try: _amerge.append(parse_skd(_pp))
-                except Exception as _e: print(f"  (attach part {os.path.basename(_pp)} unusable: {_e})")
+                except Exception as _e: MC.swallowed(); print(f"  (attach part {os.path.basename(_pp)} unusable: {_e})")
             if len(_amerge)>1:
                 _ad=merge_skds(_amerge)
                 print(f"- attach assembled {len(_amerge)} parts -> {_ad['numBone']} bones, "
@@ -8215,6 +8227,7 @@ def main(argv):
                     print(f"- attach bind pose: {os.path.basename(_aidle)} "
                           f"({_ai['numChan']} channels)")
             except Exception as _e:
+                MC.swallowed()
                 print(f"  (attach idle pose unusable: {_e})")
         # Report bind-pose coverage: unposed bones keep an identity rotation, which on a
         # character reads as the mesh folding in on itself rather than as missing data.
@@ -8263,6 +8276,7 @@ def main(argv):
                     _atex={str(k).lower():v for k,v in
                            json.load(open(_a2.split("=",1)[1],encoding="utf-8")).items()}
                 except Exception as _e:
+                    MC.swallowed()
                     print(f"  (attach texture manifest unusable: {_e})")
         if not _atex:
             print(f"- attach textures: none resolved ({len(_asr)} surface(s) draw untextured)")
@@ -8304,8 +8318,7 @@ def main(argv):
               "tags":[b["name"] for b in _abones]}
         os.makedirs(_atout,exist_ok=True)
         _jp=os.path.join(_atout,"at"+_atkey+".js")
-        with open(_jp,"w",encoding="utf-8") as _f:
-            _f.write("MOHAA_ATTACH("+json.dumps(_atkey)+","+json.dumps(_rec,separators=(",",":"))+");\n")
+        MC.atomic_write_text(_jp,"MOHAA_ATTACH("+json.dumps(_atkey)+","+json.dumps(_rec,separators=(",",":"))+");\n")
         _sz=[round(_hi2[k]-_lo[k],2) for k in range(3)]
         print(f"- attach {_rec['n']}: {len(_av)} verts, {len(_atris)} tris, "
               f"{len(_asr)} surface(s), size {_sz[0]}x{_sz[1]}x{_sz[2]} "
@@ -8324,7 +8337,7 @@ def main(argv):
                     # "v" is the animation's server{} frame-command block, kept verbatim by
                     # build_anim_catalog; the sidecar rebuilds its surface toggles from it.
                     if e.get("v"): _acmd[e.get("id")]=e.get("v")
-            except Exception as _e: print(f"  (catalog unreadable: {_e})")
+            except Exception as _e: MC.swallowed(); print(f"  (catalog unreadable: {_e})")
         os.makedirs(_aout,exist_ok=True)
         _hi,_lc=anim_solver_ctx(skd["bones"])
         _skel={b["name"] for b in skd["bones"]}
@@ -8340,6 +8353,7 @@ def main(argv):
                       f"({_md['numChan']} channels, {_mc} on this skeleton)")
                 if not _mc: _mv=None
             except Exception as _e:
+                MC.swallowed()
                 print(f"  (movement slot unusable: {_e})")
         _ok=0
         for _id in _abuild:
@@ -8349,6 +8363,7 @@ def main(argv):
                 print(f"! {_nm}: .skc not found ({_ref or _id})"); continue
             try: _d=parse_skc(_sp)
             except Exception as _e:
+                MC.swallowed()
                 print(f"! {_nm}: {_e}"); continue
             _cov=len({n.rsplit(" ",1)[0] for n in _d["names"]} & _skel)
             _mn=skd.get("morphNames") or []
@@ -8360,8 +8375,7 @@ def main(argv):
                 _fx=anim_sidecar_fx(_acmd.get(_id))
                 if _fx: _rec["fx"]=_fx
                 _jp=os.path.join(_aout,"a"+_id+".js")
-                with open(_jp,"w",encoding="utf-8") as _f:
-                    _f.write("MOHAA_ANIM("+json.dumps(_id)+","+json.dumps(_rec,separators=(",",":"))+");\n")
+                MC.atomic_write_text(_jp,"MOHAA_ANIM("+json.dumps(_id)+","+json.dumps(_rec,separators=(",",":"))+");\n")
                 print(f"- built {_nm}: {len(_mt['frames'])} frames, FACIAL MORPH track "
                       f"({_mt['matched']}/{len(_mn)} targets) -> {os.path.basename(_jp)} "
                       f"({os.path.getsize(_jp)//1024} KB)")
@@ -8401,6 +8415,7 @@ def main(argv):
                                   if len(_st["frames"])!=len(_rec["frames"]) else "")
                             _mt=_st
                     except Exception as _e:
+                        MC.swallowed()
                         print(f"    (facial sibling {os.path.basename(_sib)} unusable: {_e})")
             if _face:
                 _rec["mw"]=_face
@@ -8409,8 +8424,7 @@ def main(argv):
             _fx=anim_sidecar_fx(_acmd.get(_id))
             if _fx: _rec["fx"]=_fx
             _jp=os.path.join(_aout,"a"+_id+".js")
-            with open(_jp,"w",encoding="utf-8") as _f:
-                _f.write("MOHAA_ANIM("+json.dumps(_id)+","+json.dumps(_rec,separators=(",",":"))+");\n")
+            MC.atomic_write_text(_jp,"MOHAA_ANIM("+json.dumps(_id)+","+json.dumps(_rec,separators=(",",":"))+");\n")
             print(f"- built {_nm}: {len(_rec['frames'])} frames, {_cov}/{len(_skel)} bones "
                   f"-> {os.path.basename(_jp)} ({os.path.getsize(_jp)//1024} KB)")
             if _fx:
@@ -8506,6 +8520,7 @@ def main(argv):
     if _acp:
         try: animcat=json.load(open(_acp,"r",encoding="utf-8",errors="replace"))
         except Exception as e:
+            MC.swallowed()
             print(f"  (animation catalog unreadable: {e})"); animcat=None
     _hascat=bool(animcat and animcat.get("anims"))
 
@@ -8523,7 +8538,7 @@ def main(argv):
     if tikanims and _hascat:
         for _ta in tikanims:
             try: _f=tik_anim_fx(_ta,emitters)
-            except Exception: _f=None
+            except Exception: MC.swallowed(); _f=None
             if _f: animfx_map[_ta["name"]]=_f
         if animfx_map:
             print(f"- {len(animfx_map)} .tik animation(s) carry frame commands "
@@ -8543,7 +8558,7 @@ def main(argv):
             d=None
             if hit:
                 try: d=parse_skc(hit)
-                except Exception: d=None
+                except Exception: MC.swallowed(); d=None
             _cache[bn]=(d,hit)
             return d,hit
         _new=[]; _missing=[]
@@ -8606,7 +8621,7 @@ def main(argv):
                 _d=None
                 if os.path.isfile(_sp):
                     try: _d=parse_skc(_sp)
-                    except Exception: _d=None
+                    except Exception: MC.swallowed(); _d=None
                 if _d is None or not (chan_bones(_d)&skel_names):
                     # The engine keeps the alias even when its .skc is bad or absent (TIKI_ParseAnimations,
                     # tiki_parse.cpp:451-470) and still runs its frame commands, so hold a 1-frame static.
@@ -8729,6 +8744,7 @@ def main(argv):
             try:
                 textures={str(k).lower():v for k,v in json.load(open(a.split("=",1)[1],encoding="utf-8")).items()}
             except Exception as e:
+                MC.swallowed()
                 print(f"  (could not load textures manifest: {e})")
     if textures:
         n_tex=sum(1 for s in skd["surfaces"] if textures.get(s["name"].lower()))
@@ -8740,7 +8756,7 @@ def main(argv):
         for a in argv[1:]:
             if a.startswith("--emittertex="):
                 try: spritemap={str(k).lower():v for k,v in json.load(open(a.split("=",1)[1],encoding="utf-8")).items()}
-                except Exception as e: print(f"  (could not load emitter sprites: {e})")
+                except Exception as e: MC.swallowed(); print(f"  (could not load emitter sprites: {e})")
         if spritemap:
             ns=0
             for e in emitters:
@@ -8832,6 +8848,7 @@ def main(argv):
             # A bare .skd has no .tik and so no idle: the pose it opened in stands in.
             _idd=base_pick[1]; _isrc=os.path.basename(base_pick[0])
     except Exception as _e:
+        MC.swallowed()
         print(f"  (idle bounds unavailable: {_e})"); _idd=None
     if _idd and _idd.get("fbounds"):
         _fb=_idd["fbounds"]; _fr=_idd.get("frad") or [0.0]
@@ -8858,5 +8875,19 @@ def main(argv):
             open_file(html_path)
     return 0
 
+def run_logged(argv, app_name, entry):
+    """Entry point for a child build: start logging (output/logs/<app_name>.log, nothing
+    extra on stderr, whose lines the launcher shows in red), record the command line and
+    the result, and log any uncaught exception with its traceback before re-raising it.
+    Returns entry(argv)'s exit code."""
+    MC.setup_logging(app_name, console_level=None)
+    MC.install_crash_hooks(app_name)
+    lg = MC.get_logger(app_name)
+    lg.info("start: %s", " ".join(repr(a) for a in argv[1:]))
+    code = entry(argv)
+    lg.info("exit code %s", code)
+    return code
+
+
 if __name__=="__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(run_logged(sys.argv, "mohaa_view", main))

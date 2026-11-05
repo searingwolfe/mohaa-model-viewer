@@ -7,7 +7,10 @@ beyond Python 3, Node.js and a headless browser.
 
 1. **Static checks.** `python -m py_compile` (or `ast.parse`) on every `bin/*.py` file.
    Extract each `<script>` block from `_HTML_TEMPLATE` in `mohaa_view.py` and from
-   `HTML_TEMPLATE` in `mohaa_map_page.py` and run `node --check` on it.
+   `HTML_TEMPLATE` in `mohaa_map_page.py` and run `node --check` on it. Then the
+   hardening checks in `tests/` (they need tkinter): `test_hardening.py`,
+   `check_batch_files.py`, `check_privacy_sync.py`, `check_init_attrs.py` and
+   `fuzz_parsers.py bin 1`; each prints OK or what failed, and exits nonzero on failure.
 2. **Runtime check.** Static checks miss temporal-dead-zone errors (a `const` read before
    its line runs) and most behaviour. Build a real page and load it headlessly
    (Playwright, or jsdom with stubbed canvas/`requestAnimationFrame`); run the launcher
@@ -173,13 +176,16 @@ beyond Python 3, Node.js and a headless browser.
 | Map page output (mohaa_map_page.py, or the payload mohaa_map_view.py packs) | `MAP_VIEWER_REV` (mohaa_map_view.py) and `MAP_VIEWER_REV_REQUIRED` (mohaa_map_launcher.py) to the same number, plus a line in [CHANGELOG.md](CHANGELOG.md) |
 | The cached shader / entity-definition index | `INDEX_VERSION` (mohaa_map_view.py) |
 | A release | `VERSION` (mohaa_launcher.py) and `docs/version.txt`, then tag the commit `v<version>` (the updater downloads that tag). Both viewers ship together. |
-| The privacy notice | `docs/PRIVACY.md` and `PRIVACY_TEXT` (mohaa_launcher.py), with the date; then check every left-hand text in `_PRIVACY_SWAPS` (mohaa_map_launcher.py) still matches |
+| The privacy notice | `PRIVACY_TEXT` (mohaa_launcher.py), with the date, then `python tests/check_privacy_sync.py --write` to copy it into `docs/PRIVACY.md`; the same check (without `--write`) fails if any left-hand text in `_PRIVACY_SWAPS` (mohaa_map_launcher.py) no longer matches |
 | Viewer hotkeys | One table per viewer feeds both its page's `H` window and the launcher's `F1` window: `VIEWER_KEYS` (mohaa_view.py) and `MAP_VIEWER_KEYS` (mohaa_map_view.py); bump that viewer's page rev so cached pages pick it up. The launchers' own keys are `KEYS_LAUNCHER` (mohaa_launcher.py) and `MAP_KEYS_LAUNCHER` (mohaa_map_launcher.py). `kx_check(table)` (mohaa_view.py) lists any chord that names no key. A new key on a Display or Show button also goes in that button's label or tooltip |
 | The keyboard map's look or behaviour | Both versions: the page's (`KEYS_JS` / `KEYS_CSS`, mohaa_view.py, used by both viewer pages) and the launcher's (`KeyMapWindow`, mohaa_launcher.py), then both viewers' page revs |
 | The Map Viewer's legend | `LEGEND` (mohaa_map_view.py) only: the page and the launcher's Help > Legend both read it |
 | The Model Viewer's game cvars | `CVAR_DEFAULTS` and `CVAR_ROWS` in the page's script (`_HTML_TEMPLATE`, mohaa_view.py); data a cvar needs from the model goes in `build_payload` (`game`, `lods`, `normals`, a surface's `lc` / `li`, an animation's `rad`), so `VIEWER_REV` goes up. A cvar must do nothing at its default |
 | The Map Viewer's game cvars | `CVAR_DEFAULTS` and `CVAR_ROWS` in the page's script (mohaa_map_page.py); a cvar that draws something gets `LEGEND` rows (a `lines` swatch), and data it needs from the `.bsp` or the paks goes in the build's payload (`vis_payload`, `paths_payload`), so the page rev goes up |
-| Package requirements | `docs/requirements.txt`, both RUN .bat files and `python_installer_updater.bat` (`Pillow>=10.3.0`, `pywebview==4.4.1`) |
+| Package requirements | `REQUIRED` / `OPTIONAL_EMBED` in `bin/mohaa_envcheck.py` (what the RUN files install), `PILLOW_MIN` in `bin/mohaa_common.py` (the run-time floor) and `docs/requirements.txt` (`Pillow>=10.3.0`, `pywebview==4.4.1`) |
+| A RUN launcher (.bat or .sh) | The generator template (see [hardening-notes.md](hardening-notes.md)), so the Model and Map files stay twins; then `python tests/check_batch_files.py` |
+| A file the RUN launchers require | `PROGRAMS` (per program) or `COMMON` (needed before the menu) in `tools/make_launchers.py`, then run it |
+| An attribute set in `App.__init__` | The same in `MapApp.__init__` (it repeats App's start-up); `python tests/check_init_attrs.py` lists any gap |
 
 ## Engine references
 
@@ -238,6 +244,16 @@ the window closing instantly; run it from a Command Prompt to see the message.
   to a temp file and read that back with `set /p` (`:consider` in the .bat files does).
 - Each side of a pipe runs in a new cmd without delayed expansion, so `echo !VAR! | find`
   sees the literal text `!VAR!`. Use a `%`-expanded value, such as `%~1`, on a pipe.
+- CRLF line endings on every line: cmd mis-parses LF-only files, most visibly when a
+  `goto` / `call` looks for a label. Two of the three `.bat` files were LF-only before
+  1.0.001.
+- Never put `>` inside a double-quoted string, even in `echo` or `set`: write `^>` or move
+  the logic into Python. Redirections are written `1>"file"`.
+- One `pause`, at the very end; no `timeout`. Every failure sets `EXIT_CODE` and jumps to
+  `:end`.
+- Version checks, installs and anything with real branching live in Python
+  (`mohaa_envcheck.py`); a `.bat` only finds Python, calls it, and pauses.
+- `python tests/check_batch_files.py` checks the first three rules at the byte level.
 
 ## Handy tools
 

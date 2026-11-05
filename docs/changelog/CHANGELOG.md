@@ -1433,3 +1433,297 @@ Changes to `python_installer_updater.bat` unless noted.
   say what was copied, with the value: "Camera's origin ( ... ) copied to the clipboard"
   (Copy pos), "Camera's angles ( ... )" (Copy ang), "Mouse cursor's origin ( ... )"
   (Ctrl+C over the 3D view).
+- Map Viewer page rev 79 (`MAP_VIEWER_REV` 79, `MAP_VIEWER_REV_REQUIRED` 79): the level script
+  card has an **Open .scr** button between Copy and X, and each row of its Files list an
+  **Open** button. In the launcher a script on disk opens in the text editor (Options ->
+  Open with); one in a pak is extracted first, as the tree's Open does
+  (`mohaa-open-scr` message, `MapApp._open_scr`). In a browser the button copies the
+  script's path instead.
+- Both launchers: the details pane at the bottom right is one scrolling column (title,
+  stats, the Re-open (now Rebuild) / Browser / .map buttons, then the tag list) with a scrollbar that is
+  always there, so nothing is cut off at the default size. The buttons sit above the list
+  and are compact; the pane starts 300 px wide (`INFO_PANE_WIDTH`). The mouse wheel scrolls
+  it anywhere over the pane (`make_info_pane`, shared by both programs).
+- Map Viewer page rev 80 (`MAP_VIEWER_REV` 80, `MAP_VIEWER_REV_REQUIRED` 80): a model
+  entity's box (selection, hover, the setsize-box lines) turns with its angles where the
+  game turns it. In MOHAA, unlike Quake 3, `CM_TransformedBoxTrace` rotates even a
+  `setsize` box by the entity's angles once `EF_LINKANGLES` is set, which ScriptSlave
+  (script_model and the rest), Vehicle and VehicleCollisionEntity do and `rotatedbbox`
+  sets or clears. So a script_model barbwire turned 45 degrees with `setsize ( -47 -140 0 )
+  ( 47 350 1000 )` now gets its box along the wire, not along X / Y. A model with no setsize
+  is boxed by its own bounds turned with it, so a turned higgins boat's box fits the boat
+  instead of the X / Y box around it. Classes the game doesn't turn (Actor, Animate...)
+  keep an unturned box, and the info card says so. `absmin` / `absmax`, Fly to and the
+  area / PVS links use the turned box's world bounds. The level script's `rotatedbbox`
+  lines are read (`_SCR_PROPS`).
+- Both launchers' details pane: **Re-open** is now **Rebuild**. Re-open loaded the same
+  page into the pane again, which looked like nothing happened; Rebuild builds what the
+  pane shows again, ignoring the saved HTML, as right-click > Rebuild does
+  (`App._rebuild_shown`: the last build with the one-shot `force` option, the open page
+  closed first so the new one really loads). The buttons have icons drawn with Pillow (a
+  hammer, a globe for **Browser**, a page for the file button; `button_icon`, drawn
+  rather than typed since Tk on older Pythons can't show symbols past the Basic
+  Multilingual Plane). The Model Viewer gets a **.tik** button, as the Map Viewer's **.map**:
+  it opens the model's .tik in the Text Editor. The buttons are a little tighter
+  (`Info.Tool.TButton`), never narrower than their text (a cut "Re-open" before), and
+  wrap onto a second row when the pane is too narrow for one; the stats line wraps to
+  the pane's width.
+- Both launchers: the bottom row (Output | details) starts 130 px tall instead of 210
+  (`BOTTOM_ROW_HEIGHT`), and its sash drags down to 26 px (`BOTTOM_ROW_MIN`, was 130),
+  where only the "Output" label and the details' title show, side by side. Saved sash
+  positions now carry a layout number (`PANES_LAYOUT` 2): a bottom-row height saved by
+  an earlier version is dropped once, so the new default shows; later drags are kept.
+- Both launchers: **Browse...** opens the file picked, as File > Open File... (Ctrl+Shift+O)
+  does; Open Viewer stays for a path typed into the bar. Only a picked file opens: Cancel
+  no longer re-runs the path already in the bar (`_browse` returns the pick, "" on
+  Cancel), and a file of the wrong kind (All files) gets the usual "File must be..." line.
+- Map Viewer page rev 81 (`MAP_VIEWER_REV` 81, `MAP_VIEWER_REV_REQUIRED` 81): an entity
+  added in Modify is let go of when a click in the view picks something else, a brush, a
+  static prop or the sky, as a map entity is. It stayed selected (see-through, its
+  buttons live) because the Modify list keeps its own selection when the click picks
+  something it doesn't take. Shift+click (adding to the selection), Ctrl+Shift+click
+  (reading a face) and an entity being edited, trimmed or moved keep it.
+- Map Viewer page rev 82 (`MAP_VIEWER_REV` 82, `MAP_VIEWER_REV_REQUIRED` 82): labels
+  behind walls show only half as far. In sight they keep their range (2048 units named,
+  700 unnamed); past 1024 / 350 a label needs a clear sight line from the camera to its
+  spot through the world's shown, solid, opaque brushes (detail included; clip,
+  see-through, patches, terrain and brush entities don't hide labels). The brushes sit
+  in a box tree (`lblOccluders`) and each sight line is kept until the camera moves, so
+  a crowded room costs about 2 ms when the camera moves (m3l1b's bunker: 135 labels past
+  half range, 4 of them in sight).
+- Map Viewer page rev 83 (`MAP_VIEWER_REV` 83, `MAP_VIEWER_REV_REQUIRED` 83): a path
+  node's label names its highest spawnflag: `info_pathnode [COVER]`, `[CORNER_LEFT]`,
+  `[CORNER_RIGHT]`, `[SNIPER]`, `[CRATE]`, `[CONCEALMENT]`, `[DUCK]` (`nodeFlagTag`).
+  Only one, so COVER + CORNER_RIGHT reads `[CORNER_RIGHT]` (a corner node is a cover node
+  anyway) and the label stays short. Its outline was the only sign of its kind before.
+- Map Viewer page rev 84 (`MAP_VIEWER_REV` 84, `MAP_VIEWER_REV_REQUIRED` 84): named
+  labels behind walls reach 512 units (was 1024; unnamed stay 350), and every label fades
+  out over the last 40% of its own range to nothing at its end, in sight (2048 / 700) or
+  behind a wall alike. Before, a label stayed at least 40% opaque and one behind a wall
+  vanished at once at its limit. The sight check starts at 60% of the wall range so
+  the fade is smooth.
+- Map Viewer page rev 85 (`MAP_VIEWER_REV` 85, `MAP_VIEWER_REV_REQUIRED` 85): brush
+  entities without a targetname are labelled (func_rotatingdoor, func_ladder, trigger_*
+  and the rest), at the unnamed range, 700 in sight and 350 behind a wall. Before, only
+  named ones (or the selection) were. The label sits at the middle of the entity's box,
+  moving with a door that opens, not on its origin (a door's hinge, often in the wall).
+  func_group and detail stay unlabelled, being part of the world.
+- Map Viewer page rev 86 (`MAP_VIEWER_REV` 86, `MAP_VIEWER_REV_REQUIRED` 86): while
+  ai_showroutes draws the AI routes, every path node with a mark gets a tag saying what
+  it means, the map's own nodes as well as Modify's new ones: "⚠ no paths" (orange; the
+  red X, no connection the AI can take), "⚠ N one-way" (red; the red arrowheads, ways
+  the AI can go but not come back, a climb past ai_fallheight), "DONT_LINK" (blue; the
+  blue circle, a node its spawnflag keeps unlinked on purpose). Before, only Modify's new
+  and changed nodes had tags. A map node's tag sits just under its class label; within
+  ai_showroutes_distance, past 350 units only when in sight, as the labels. The tags
+  come from the pass that draws the marks (`buildRoutes`), so they always agree.
+- Map Viewer page rev 87 (`MAP_VIEWER_REV` 87, `MAP_VIEWER_REV_REQUIRED` 87): the blue
+  circle's tag tells its two causes apart. With the node's own DONT_LINK spawnflag it
+  reads "⊘ DONT_LINK" (blue, on purpose). Without it the game set the flag itself while
+  loading: dropped to the floor, the node lands on the very spot of an earlier one
+  (`^~^~^ Duplicate node at (...) not linked`, `PathSearch::LoadNodes`), so it reads
+  "⚠ duplicate of entity N $name: not linked" (orange), naming the node the game keeps
+  (`nodeDupOf`, `nodeName`). The routes that seem to end at the circle are that earlier
+  node's. m1l1 has one: entities 111 and 705 are both `$friendlynode` at
+  ( -5824 768 448 ). A new node put on another's spot in Modify gets the same tag.
+
+- Map Viewer page rev 88 (`MAP_VIEWER_REV` 88, `MAP_VIEWER_REV_REQUIRED` 88): triggers
+  the level script spawns get their volumes. The reader kept only the keys it knows, so a
+  setsize given through fields of the script's own (`local.minefield.setsize1 = ( 0 -430
+  -500 )`, `.setsize2`, then `local.minefield setsize local.minefield.setsize1
+  local.minefield.setsize2`) wasn't worked out and the trigger was a small cube; now any
+  `<entity>.<field> = value` is kept (`LevelScript.fields`, `+=` too) and read back by
+  later lines. A new **Show → Script trigs** button (`C_SCRTRIG`, on by default, off in the
+  In-game look) draws each such trigger's setsize as a see-through box in the trigger
+  green with its edges (`drawScriptTrigs`); under Script ents the trigger stays a small
+  marker of its class's size (`markerBoxOf`), and selecting it outlines the whole volume.
+  Tested with m3l1b's 11 respawned `$minefield` triggers.
+- Map Viewer page rev 94 (`MAP_VIEWER_REV` 94, `MAP_VIEWER_REV_REQUIRED` 94): Modify gets
+  hotkeys for its selected entity, **Alt+M** Move, **Alt+T** Trim origin, **Alt+E** Edit
+  parameters (every plain letter already has a job), each button's tooltip naming its own
+  on a line of its own (Delete's: the Delete key). **Eye view** replaces To view (Move does
+  its job better now): the camera where the entity sees from, by the map's entities' Eye
+  view rules (`eyeViewFrom`, shared with `eyeView`), facing yaw 0 when it has neither
+  angles nor a target. A click on the selected (green) row in Modify's list, so the second
+  click of a double-click, does **Fly to**; a double-click no longer opens Edit parameters
+  (Alt+E does). The keyboard list (H, F1) has the Alt keys.
+- Map Viewer page rev 93 (`MAP_VIEWER_REV` 93, `MAP_VIEWER_REV_REQUIRED` 93): the keys the
+  map's things take work on entities added in Modify too: **Backspace** hides the selected
+  one (as its square in the list does; Ctrl+Z shows it again) and lets go of it, beside
+  hiding the map's selection as before; **Delete** removes it, as Modify's Delete button
+  does, and selects nothing after (so a second press can't take the next one). Delete
+  leaves the map's own entities alone and says so. The keyboard list (H, F1) has both.
+- Map Viewer page rev 92 (`MAP_VIEWER_REV` 92, `MAP_VIEWER_REV_REQUIRED` 92): a plain click on
+  an entity added in Modify selects only it: the map's selected brushes and entities are let
+  go, as a plain click on anything does. Before, they stayed selected beside it (only the
+  other way round was fixed, rev 81). Shift+click still adds it and keeps them.
+- Map Viewer page rev 90-91 (`MAP_VIEWER_REV` 91, `MAP_VIEWER_REV_REQUIRED` 91): hotkeys for
+  the two Show buttons that had none. **I** turns AI routes (ai_showroutes) on and off,
+  as its button does (on a map with no paths it says why); **Ctrl+B** (trigger boxes) shows
+  or hides Script trigs. Shift now counts in a Ctrl or Alt combination (it used to be
+  ignored there, so Ctrl+Shift+X was Ctrl+X); on its own it is still part of the key
+  (Shift+G, `$`). The buttons, the keyboard list (H, F1) and the docs show them.
+- Both launchers: closing one maximized no longer drops its bottom row to its least
+  height when it opens again. The layout saved the sashes' places in the window (the
+  bottom row's sash 683 pixels down in a maximized window), and the window opens at its
+  normal size, where that is past the bottom. Now it saves the sizes of the panes that
+  don't stretch, the bottom row's height (`bottomH`) and the details pane's width
+  (`infoW`), measured back from the window's far edge however big it opens, and whether
+  the window was maximized (`zoomed`), which it is again on the next start. The tree's
+  width is kept as before. A layout saved before (`PANES_LAYOUT` 3) keeps the tree and
+  gives the defaults for the rest.
+- Map Viewer page rev 89 (`MAP_VIEWER_REV` 89, `MAP_VIEWER_REV_REQUIRED` 89): Show's **All**
+  (`Ctrl+A`) sits on the line of AI routes, at the end of the Show buttons and in their
+  style, instead of on a row of its own.
+- One launcher per system for both programs: **`RUN -- Medal of Honor Viewer.bat`**
+  (Windows) and **`RUN -- Medal of Honor Viewer.sh`** (Linux and macOS) replace the four
+  `RUN -- Medal of Honor Model/Map Viewer .bat/.sh`. They open with a short title and a
+  menu: **1** Map Viewer, **2** Model Viewer, or Up / Down and Enter (1 is selected at
+  first); Q or Esc quits. The menu is `bin/mohaa_envcheck.py menu` (exit 11 / 12, 10 to
+  quit), so it works alike on every system: `msvcrt` keys on Windows, the terminal in
+  cbreak mode elsewhere (restored however it ends), reverse video for the selection where
+  the console takes ANSI codes (Windows 10+ switched on with
+  `ENABLE_VIRTUAL_TERMINAL_PROCESSING`), else one updated "Selected:" line; with no
+  keyboard (input piped in) a plain prompt. A `.bsp` / `.map` / `.bak` or `.skd` / `.tik`
+  dropped on the launcher (or passed to the `.sh`) skips the menu and opens in its
+  program. Python is found first, since both need it, with one message for both. The
+  `.sh` reopens itself in a terminal when double-clicked in a Linux file manager (in
+  Terminal on macOS) and is bash 3.2 compatible (macOS's bash; no `${a,,}`). Both are
+  generated by `tools/make_launchers.py`, which also removes the old four from the
+  project; the in-app updater backs up and removes them too, once an update is in place
+  (`UPDATE_RETIRED`). The privacy notice names the new `.bat` (one fewer
+  `_PRIVACY_SWAPS`), and the README, `docs/requirements.txt` and the installer's
+  messages follow.
+
+## 1.0.001 hardening pass (November 2026)
+
+A review against publicly hardened, standard coding practices (fail loud, atomic writes, vendored
+dependencies, batch-file discipline) found seven bugs and a set of rule gaps; all are
+fixed here. Page output is unchanged, so `VIEWER_REV` / `MAP_VIEWER_REV` stay at 80 / 78.
+Design decisions and what was deliberately left out: [hardening-notes.md](hardening-notes.md).
+
+Bugs fixed:
+
+- **Half-extracted pak files were reused forever.** `_extract_one` wrote straight to the
+  final path and treated any file larger than 0 bytes as cached, so an extract cut short
+  by a crash or a kill left a short `.skd` / `.tga` / `.skc` that every later run reused.
+  Extraction now streams to a temp file, must match the entry's declared size, and moves
+  into place atomically; a cached copy is reused only when its size matches the entry.
+- **Settings could be wiped without a word.** Both launchers wrote their JSON settings
+  straight over the live file and ignored every error; a damaged file (half-written, or
+  hand-edited with `C:\...` paths) loaded as `{}` and the next save replaced it with
+  defaults, losing the pak list. Settings are now written atomically with a `.bak`; on load
+  a damaged file is repaired (backslash paths), restored from the `.bak`, or kept aside as
+  `.corrupt-<date>`, and the Output pane says which.
+- **The updater could leave a mixed-version install and report success.** Files were copied
+  over the program in place, a file that failed to copy was skipped silently, there was no
+  backup, and a missing release tag quietly installed whatever was on `main`. Now: retried
+  HTTPS download with a size cap, every zip CRC tested, the downloaded `docs/version.txt`
+  must equal the version offered, the replaced files are first copied to
+  `output/previous-versions/<n>/` (with `changelog.txt`), each new file is verified before
+  it moves into place, and any failure restores the files already replaced. The locked-file
+  swap after a restart is a small Python helper instead of a generated `.bat` (which lost
+  non-ASCII paths and only ran on Windows); a restart that can't start now says so instead
+  of closing the window.
+- **Errors in the window vanished.** Under `pythonw` there is no stderr, and nothing
+  installed `report_callback_exception`, so an exception in any button, menu, key or timer
+  callback left no trace, and a crash at start-up looked like nothing happening (exit code
+  0). Callback errors are now logged with their traceback and shown in red; a start-up
+  failure shows a message box, is logged, and exits with code 1.
+- **Model builds could crash on non-ASCII file names (Windows).** The Map launcher ran its
+  builds with `PYTHONIOENCODING=utf-8`; the Model launcher's three build calls didn't, so a
+  child printing a name outside the Windows code page raised `UnicodeEncodeError`. Every
+  child build now uses `mohaa_common.child_env()` (UTF-8 output, vendored libs on
+  `PYTHONPATH`) and decodes as UTF-8.
+- **Two attachment builds at once could swap settings.** Overlapping attach-to-bone builds
+  shared `self._attach_*` and one `_attach` folder, so one model's parts, idle animation or
+  scale could end up in the other's build. Attachment builds now run one at a time.
+- **Save as .bsp checked its file after putting it in place.** A copy that failed the
+  read-back check was already sitting under the chosen name. The check now runs on the temp
+  file, and only a verified copy replaces the destination (an earlier copy is kept as
+  `.bak`).
+- **The embedded pane fell back to the browser** ("'EdgeChrome' object has no attribute
+  'web_view'"). tkwebview2 3.5.0 needs pywebview 4.4.1's `EdgeChrome.web_view` (pywebview 5
+  renamed it), but installing tkwebview2 let pip put the newest pywebview over the pinned
+  one in `bin/libs`, and the check only read the version in the metadata, where a stale
+  `pywebview-4.4.1.dist-info` could sit beside newer code. `mohaa_envcheck.py` now treats
+  "==" as an exact pin (another version, or a second version's `.dist-info`, is replaced
+  and the stale metadata deleted), checks the installed pywebview code itself for
+  `self.web_view`, and installs tkwebview2 with `--no-deps`. The next launch repairs a
+  folder that has the wrong pywebview.
+- **Every package could keep an old install record.** pip `--target` leaves an older
+  version's `.dist-info` beside the new one on any upgrade, not only pywebview's, and the
+  version reader could pick the old one and reinstall on every launch. It now reads the
+  newest, reinstalls a package that has more than one, and after each pip run deletes the
+  extra records of every package (dependencies pip re-resolved, like pythonnet, included).
+- **`except ...: MC.swallowed(); pass`.** The `pass` after the call did nothing; 167 of them
+  are gone from the five modules that had them (no change in behaviour).
+- **The RUN window stayed open beside the program, and its text was lost when it closed.**
+  It now closes by itself once the program's window is open (`mohaa_envcheck.py start`
+  runs the launcher with `pythonw.exe` and waits for its ready signal; a program that stops
+  first leaves the window open with what it printed, and one pause). Its text, pip's output
+  included, is saved in `output/logs/run_map.log` / `run_model.log` and shown at the top of
+  the Output pane. The Output pane also prints "saved <path>" whenever the program saves a
+  file (settings, pak lists, Save as .bsp / .map...; not temp files, caches or logs), and
+  the RUN window prints "wrote <package> into <libs>" after each install.
+
+Rule gaps closed:
+
+- New `bin/mohaa_common.py`, imported by every script: rotating logs in `output/logs/`
+  (one per program part), `swallowed()` to log a deliberately handled exception (first five
+  tracebacks per call site, then a count), crash hooks for the main thread and worker
+  threads, atomic writes (temp file, fsync, read-back SHA-256, `os.replace`, optional
+  `.bak`), damage-tolerant settings, the Pillow floor, HTTP with retries and backoff, and
+  the child-process environment.
+- Every broad `except` that doesn't re-raise (about 380 handlers, mostly
+  `except Exception: pass`) now calls `MC.swallowed()` first, so its traceback reaches the
+  log; behaviour is otherwise unchanged. A pak that fails to open, and a failed
+  `mohaa_textures` import, are logged as warnings / errors instead of being skipped silently.
+- Every file the programs write goes through the atomic writers (pages, `.obj`, sidecar
+  `.js`, decompiled `.map`, caches, manifests, catalogues, settings, the shared pak list).
+- Pillow 10.3 is enforced at run time on every platform (`mohaa_common.pil_image()`), not
+  only by the Windows installer, and images over 8192 x 8192 pixels are refused.
+- Vendored packages: a per-OS libs folder beside the scripts (`bin/libs`, `bin/libs-linux`,
+  `bin/libs-mac`) is put first on `sys.path` by every script. The RUN files install into it
+  with `python -m pip install --target`, through the new `bin/mohaa_envcheck.py`, which
+  verifies each package by importing it in a fresh process (and reinstalls one that no
+  longer imports, e.g. after a Python update).
+- Importing `mohaa_launcher` no longer creates `output/`, sets environment variables or
+  copies files; that moved to `init_runtime()`. `globals().update(...)` for the theme was
+  replaced by an explicit `set_palette()`. The silent `hasattr(MTX, "build_shader_props")`
+  fallback is gone.
+- Options menu: **Open log folder** and **Reset settings...** (both viewers). The console
+  log keeps the previous launch's copy (`.prev`).
+- Child builds (`mohaa_view.py`, `mohaa_map_view.py`, `mohaa_bsp.py`) log their command line,
+  exit code and any crash to their own log; `mohaa_bsp.py`'s command line prints errors to
+  stderr.
+- Privacy notice dated 4 November 2026 (`PRIVACY_TEXT`, `docs/PRIVACY.md`): six stored
+  things, adding the program logs and the previous-versions folder, the settings `.bak`, and
+  the `.sh` scripts. `docs/PRIVACY.md` had drifted from the program's text (it carried a
+  map-grid phrase the program didn't show); it is now generated from `PRIVACY_TEXT`, and the
+  grid moved into the Map Viewer's own wording, where it belongs (`mohaaMapViewerGrid`).
+- `tests/`: `test_hardening.py` (27 regression tests), `check_batch_files.py`,
+  `check_privacy_sync.py`, `check_init_attrs.py`, `fuzz_parsers.py`.
+
+Windows scripts (.bat) and new Linux / macOS scripts (.sh):
+
+- `RUN -- Medal of Honor Map Viewer.bat` and `python_installer_updater.bat` were LF-only;
+  all three `.bat` files are now CRLF, byte-checked by `tests/check_batch_files.py`.
+- One `pause`, at the very end, in every `.bat` (there were three or five, plus a
+  `timeout /t 3`); every failure sets `EXIT_CODE` and jumps to `:end`. The RUN files run the
+  launcher with `python.exe` and wait, so the window shows how it finished, instead of
+  starting `pythonw.exe` and closing.
+- Package checks and installs moved from batch into `mohaa_envcheck.py` (no more
+  `"Pillow>=10.3.0"` or `v>=(10,3)` inside quoted batch strings); packages go into `bin\libs`
+  instead of Python's own folders or `--user`.
+- Scratch files are unique per run (`%RANDOM%`), so two launchers started together can't
+  read each other's answer.
+- `python_installer_updater.bat`: TLS 1.2 is added to PowerShell's protocols instead of
+  being the only one allowed, the Python download is tried three times with a growing wait,
+  and the packages go into `bin\libs` (refreshed with `--upgrade` when run on its own).
+- New `RUN -- Medal of Honor Model Viewer.sh` / `... Map Viewer.sh` for Linux and macOS:
+  find Python 3.8+ with tkinter, vendor Pillow into `bin/libs-linux` (`bin/libs-mac`), start
+  the launcher, pause once when run in a terminal. `--target` works where pip refuses
+  system-wide installs (Ubuntu / Kubuntu 23.04+, PEP 668).
+- All four RUN files are generated from one template, so the Model and Map twins can't
+  drift apart.

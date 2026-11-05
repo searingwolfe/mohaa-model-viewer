@@ -38,38 +38,49 @@ self-contained HTML pages that open in the launcher's embedded 3D pane or in any
 * Without the embedded pane, HTML pages auto-open in your browser. The Map Viewer needs WebGL 2 to work,
   which every current browser has, but the Model Viewer falls back to a 2D renderer without WebGL.
 
-The packages are listed in [`docs/requirements.txt`](docs/requirements.txt). On Windows,
-the RUN `.bat` files check for all of these and install what's missing.
+The packages are listed in [`docs/requirements.txt`](docs/requirements.txt). The RUN files
+(`.bat` on Windows, `.sh` on Linux and macOS) check for all of these and install what's
+missing **into the program's own `bin` folder** (`bin\libs`, `bin/libs-linux` or
+`bin/libs-mac`), never into Python itself, so nothing else on your PC is changed and the
+program keeps working when other software updates Python's packages.
 
 ## Windows
 
 * Click the green `<> Code` button and choose `Download ZIP`. <br>
 Extract the `mohaa-model-viewer-main` folder anywhere on your PC.
 
-* Start a viewer with its RUN `.bat`, or drag a file onto the `.bat` to open that file
-straight away:
-  * **`RUN -- Medal of Honor Model Viewer.bat`** for models (`.skd` / `.tik`);
-  * **`RUN -- Medal of Honor Map Viewer.bat`** for maps (`.bsp` / `.map` / `.bak`).
+* Start either program with **`RUN -- Medal of Honor Viewer.bat`**. A menu asks which one:
+  press **1** for the **Map Viewer** (`.bsp` / `.map` / `.bak`) or **2** for the **Model
+  Viewer** (`.skd` / `.tik`), or move with Up / Down and press Enter (the Map Viewer is
+  selected at first); Q or Esc quits. Drag a file onto the `.bat` to skip the menu and
+  open it straight away in the program for its kind.
 
-  Before opening its launcher, each one:
+  Before opening the program, it:
   1. looks for **Python 3.8 or newer with tkinter**. If there isn't one, it asks whether
-     to install it now: **Y** runs `bin\python_installer_updater.bat` (below), **N** closes
-     the window so you can install Python yourself from
+     to install it now: **Y** runs `bin\python_installer_updater.bat` (below), **N** stops
+     so you can install Python yourself from
      [python.org](https://www.python.org/downloads/) (tick "tcl/tk" in the installer);
-  2. installs **Pillow** if it's missing (required for textures);
-  3. installs the **embedded 3D pane** packages if they're missing (optional; on
-     Windows 8.1 and newer);
-  4. tells you if the Microsoft Edge WebView2 Runtime is missing, in which case pages
+  2. shows the menu (unless a file was dropped on it);
+  3. installs **Pillow** into `bin\libs` if it's missing or older than 10.3 (required for
+     textures), and checks that it really loads;
+  4. installs the **embedded 3D pane** packages into `bin\libs` if they're missing
+     (optional; on Windows 8.1 and newer);
+  5. tells you if the Microsoft Edge WebView2 Runtime is missing, in which case pages
      open in your browser.
 
-  The `.bat` file then opens the launcher and its own window closes.
+  The `.bat` window then starts the program and closes by itself as soon as its window is
+  open. Everything it printed (the Python it found, the package checks, pip's output) is
+  saved in `output\logs\run_map.log` / `run_model.log` and shown at the top of the
+  program's Output pane. If the program can't start, the `.bat` window stays open, shows
+  what went wrong and waits for a key press. (The full record is in `output\logs\`.) The
+  Output pane also says each time the program saves a file ("saved <path>").
 
 * **`bin\python_installer_updater.bat`** installs a Python that suits your Windows
 version and CPU (Windows 7 → 3.8, Windows 8/8.1 → 3.11, Windows 10/11 → latest) for
 your user account only, so it normally needs no administrator rights. It verifies the
-installer's Authenticode signature before running it, then installs the packages. The
-RUN `.bat` files offer to run it for you, and you can also run it on its own to update
-the packages. <br>
+installer's Authenticode signature before running it, then installs the packages into
+`bin\libs`. The RUN `.bat` offers to run it for you, and you can also run it on its
+own to refresh the packages to their newest versions. <br>
 It deliberately **does not modify your `PATH`**: Python's own installer handles that,
 and hand-editing the registry `PATH` is how environments often get broken.
 
@@ -84,16 +95,33 @@ Each viewer remembers its own list.
 
 ## macOS and Linux
 
-```sh
-brew install python-tk           # macOS (or use the python.org installer, which bundles Tk)
-sudo apt install python3-tk      # Debian / Ubuntu / Mint
-sudo dnf install python3-tkinter # Fedora / RHEL
-sudo pacman -S tk                # Arch
+Python's Tk toolkit is often a separate package; install it once:
 
-pip3 install "Pillow>=10.3.0"
-python3 bin/mohaa_launcher.py        # the Model Viewer
-python3 bin/mohaa_map_launcher.py    # the Map Viewer
+```sh
+sudo apt install python3-tk python3-pip   # Debian / Ubuntu / Kubuntu / Mint
+sudo dnf install python3-tkinter          # Fedora / RHEL
+sudo pacman -S tk                         # Arch
+brew install python-tk                    # macOS (or use the python.org installer, which bundles Tk)
 ```
+
+Then start either program with **`RUN -- Medal of Honor Viewer.sh`**, from a terminal
+(Konsole, GNOME Terminal, macOS Terminal ...) or a Linux file manager (it opens a terminal
+for itself if it has none). The same menu asks which one: **1** Map Viewer, **2** Model
+Viewer, or Up / Down and Enter. Give it a file to skip the menu:
+
+```sh
+./"RUN -- Medal of Honor Viewer.sh"                     # the menu
+./"RUN -- Medal of Honor Viewer.sh" maps/obj_team2.bsp  # straight into the Map Viewer
+./"RUN -- Medal of Honor Viewer.sh" models/dog.tik      # straight into the Model Viewer
+```
+
+Like the `.bat`, it finds Python 3.8+ with tkinter and installs Pillow into
+`bin/libs-linux` (`bin/libs-mac` on macOS) with `python -m pip install --target`. That
+works on distributions that refuse system-wide `pip` installs (Ubuntu and Kubuntu 23.04
+and newer), and it avoids Ubuntu 24.04's packaged Pillow 10.2, which is below the 10.3
+security floor. If the `.sh` file won't start, make it executable:
+`chmod +x "RUN -- Medal of Honor Viewer.sh"`. On macOS, Finder opens a double-clicked
+`.sh` in a text editor, so start it from Terminal.
 
 The embedded 3D pane is Windows-only. Everywhere else, pages open in your default
 browser: same viewer, same output.
@@ -102,9 +130,10 @@ browser: same viewer, same output.
 
 Close both programs (each deletes its temporary workspace when it closes; File →
 `Clear %temp% files` removes any left behind by a crash), then delete the folder.
-Everything the programs keep is inside it, in `output/`
-(see [Where Your Files Go](#where-your-files-go-1)). Python and its packages stay
-installed; remove Python from Windows Settings → Apps if nothing else needs it.
+Everything the programs keep is inside it: settings, logs and pages in `output/`
+(see [Where Your Files Go](#where-your-files-go-1)) and the Python packages in `bin/libs*`.
+Python itself stays installed; remove it from Windows Settings → Apps if nothing else
+needs it.
 
 # MOHAA .tik Model Viewer
 
@@ -112,8 +141,8 @@ A browser-based 3D asset viewer aiming at exact in-game visual parity across eve
 type the engine ships: skeletal models, animations, vehicles, weapons, projectiles,
 static props, and the particle emitters and FX effects that existing tools do not handle.
 
-Start it with **`RUN -- Medal of Honor Model Viewer.bat`** (or drag a `.skd` / `.tik`
-onto it), load your `.pk3` archives, browse the model tree, and open any `.skd` or `.tik`
+Start it with **`RUN -- Medal of Honor Viewer.bat`** and press **2** (or drag a `.skd` /
+`.tik` onto it), load your `.pk3` archives, browse the model tree, and open any `.skd` or `.tik`
 in a self-contained HTML viewer with animation playback, tag display, texture resolution
 through the shader chain, and live particle effects.
 
@@ -207,8 +236,8 @@ opened in a plain browser shows everything already built into it.
 A `.map` source opens directly. It's a modern, view-only stand-in for MOHRadiant: nothing
 is ever written back to a map.
 
-Start it with **`RUN -- Medal of Honor Map Viewer.bat`** (or drag a `.bsp` / `.map` / `.bak`
-onto it), add your `.pk3` paks, and open any map from the `maps/` tree (`dm`, `obj`, the
+Start it with **`RUN -- Medal of Honor Viewer.bat`** and press **1** (or drag a `.bsp` /
+`.map` / `.bak` onto it), add your `.pk3` paks, and open any map from the `maps/` tree (`dm`, `obj`, the
 single-player levels), or a loose `.bsp` / `.map` / `.bak` from disk with File → `Open File...`.
 
 ## Why this exists
@@ -268,7 +297,11 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
   too), script models and origins, actors, placed where its lines say, with the threads it
   runs read for the entity they run on (a bipod spawned under each gun). The map's stats line opens the list, with
   its `setcvar` and `$world` lines. Scripts are found as the game finds them: a loose
-  `main/maps/<map>.scr` before the paks.
+  `main/maps/<map>.scr` before the paks. A trigger the script spawns with a `setsize`
+  (also one given through fields of the script's own, `local.t.setsize1 = ( ... )` then
+  `local.t setsize local.t.setsize1 local.t.setsize2`) is a small marker under Script
+  ents, and **Show → Script trigs** draws its volume, see-through like a trigger brush
+  (hidden by the In-game look).
 * **Open door** (`O`) opens and closes doors as the game does.
 * **Run exploder** sets off an exploder's `#set` as `global/exploder.scr` does: the
   building goes and its chunks fly toward their targets, land and sink away. **Reset
@@ -330,9 +363,18 @@ the map's own entities).
 # Updating
 
 **Help → Check for updates** (in either launcher) compares your version with the latest
-one in this repository and, if you choose, downloads the new version's files, copies them
-over the program folder, and restarts. Both viewers update together, since they share the
-folder. Your settings and built pages in `output/` are left alone.
+one in this repository and, if you choose, downloads the new version, installs it over the
+program folder, and restarts. Both viewers update together, since they share the folder.
+Your settings and built pages in `output/` and the packages in `bin/libs*` are left alone.
+
+The update is checked before anything changes: the download must be undamaged and must
+really be the version offered. Every file it replaces is copied first to
+`output/previous-versions/<n>/` (one numbered folder per update, listed in
+`output/previous-versions/changelog.txt`), and if any file can't be written, the files
+already replaced are put back and the update reports what failed. Files the new version
+no longer has (such as the old per-program RUN launchers, now one `RUN -- Medal of Honor
+Viewer` file per system) are copied there too, then removed. To go back a version,
+copy a numbered folder's contents over the program folder.
 
 # Where Your Files Go
 
@@ -342,10 +384,25 @@ folder. Your settings and built pages in `output/` are left alone.
 | Console log | `output/output_console.log` | `output/output_console_map.log` |
 | Built pages | `output/models/`, mirroring the pak's folders; files opened from disk go to `output/standalone/` | `output/maps/`, with each decompiled `.map` beside its page; files opened from disk go to `output/maps_standalone/` |
 | Scratch space | a `mohaaview_*` folder in your system temp folder | a `mohaamap_*` folder in your system temp folder |
+| Program logs | `output/logs/mohaa_launcher.log` and `mohaa_view.log` (page builds) | `output/logs/mohaa_map_launcher.log` and `mohaa_map_view.log` (page builds) |
+| Settings backups | `mohaa_viewer_config.json.bak` beside the settings | `mohaa_map_viewer_config.json.bak` beside the settings |
+| Previous versions | `output/previous-versions/<n>/` (written by Help → Check for updates, shared) | (same) |
+| Python packages | `bin/libs` (Windows), `bin/libs-linux` (Linux), `bin/libs-mac` (macOS), shared | (same) |
 
 `output/` is the folder next to `bin/` (in a flat / portable install, the scripts' own
 folder). The built-pages folder can be changed under Options. On Windows, the embedded
 pane also keeps its browser files in `output/webview2/`.
+
+The logs are a timestamped record of what each part did, including every error with its
+technical details (each file is capped at 2 MB, with five older copies kept). **Options →
+Open log folder** shows them; please attach the relevant one when you report a bug. The
+console log keeps the previous launch's copy with `.prev` in its name.
+
+Settings are saved safely: each save keeps the previous file as `.bak`. If a settings file
+is ever damaged (or hand-edited with `C:\...` paths, which JSON can't hold), the program
+repairs it, or restores the `.bak`, or sets the damaged file aside as `.corrupt-<date>`,
+and says which in the Output pane. **Options → Reset settings...** forgets every saved
+choice, including the pak list the two viewers share (keeping `.bak` copies), and restarts the program.
 
 **File → Clear built models** (or **Clear built maps**) and **Clear %temp% files** remove
 the built pages and the scratch space. Clear built maps deletes only the pages and `.map`
@@ -359,17 +416,18 @@ reporting, and nothing is ever checked or sent automatically. Everything happens
 machine.
 
 They use the network only when you ask: **Help → Check for updates** reads a small version
-file from this repository and, if you choose, downloads the newer files from GitHub. (On
-Windows, the RUN `.bat` files also install missing Python packages from pypi.org, and the
-Python installer they offer downloads Python from python.org if you say yes.) Full
+file from this repository and, if you choose, downloads the newer files from GitHub. (The
+RUN files also install missing Python packages from pypi.org into `bin/libs*`, and on
+Windows the Python installer they offer downloads Python from python.org if you say yes.) Full
 notice: [`PRIVACY.md`](docs/PRIVACY.md), or **Help → Privacy & Legal** inside either
 program.
 
 `.pk3` files are ordinary ZIP archives, and downloaded ones, like downloaded maps, should
 be treated as untrusted input. Both programs are hardened accordingly: archive paths are
 confined to their workspace, model and `.bsp` headers are bounds-checked, parsers are
-protected against decompression and expansion bombs, and generated pages escape game-file
-text and carry a restrictive Content-Security-Policy.
+protected against decompression and expansion bombs (oversized images included), Pillow
+older than the 10.3 security floor is refused, and generated pages escape game-file text
+and carry a restrictive Content-Security-Policy.
 
 Found a hole? See [`SECURITY.md`](docs/SECURITY.md). **Please report privately, not in a
 public issue**, and please don't attach copyrighted game assets to reports.
@@ -405,7 +463,19 @@ the [Map Viewer notes](docs/changelog/map-viewer.md): the decompiler, the page, 
 game's lighting, the cameras and known limits, with notes on
 [doors](docs/changelog/doors-notes.md) and the
 [game cvars](docs/changelog/game-cvars-candidates.md). The source code cites the exact
-OpenMoHAA files and lines it follows.
+OpenMoHAA files and lines it follows. How the code is hardened (logging, atomic writes,
+settings recovery, the vendored packages, the updater) and the decisions behind it are in
+[hardening notes](docs/changelog/hardening-notes.md).
+
+Checks to run before shipping, from the project folder (they need tkinter):
+
+```sh
+python tests/test_hardening.py      # regression tests for the hardening pass
+python tests/check_batch_files.py   # CRLF, no ">" inside quotes, a single pause
+python tests/check_privacy_sync.py  # PRIVACY.md = PRIVACY_TEXT = _PRIVACY_SWAPS
+python tests/check_init_attrs.py    # MapApp.__init__ keeps up with App.__init__
+python tests/fuzz_parsers.py bin 1  # corrupted-input fuzz of every file parser
+```
 
 # Contact & Credits
 

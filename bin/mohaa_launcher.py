@@ -7,7 +7,18 @@
 #  WebView2 pane (or the default browser). Loaded paks and preferences persist
 #  between sessions. Expects mohaa_view.py and mohaa_textures.py alongside.
 # ==============================================================================
-import sys, os, re, subprocess, threading, queue, glob, json, zipfile, tempfile, shutil, hashlib
+# --- Vendored dependencies (bin/libs on Windows, bin/libs-linux on Linux, bin/libs-mac on macOS)
+import sys
+import os
+_LIBS_NAME = "libs" if sys.platform.startswith("win") else ("libs-mac" if sys.platform == "darwin" else "libs-linux")
+_libs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), _LIBS_NAME)
+if os.path.isdir(_libs_dir) and _libs_dir not in sys.path:
+    sys.path.insert(0, _libs_dir)
+_bin_dir = os.path.dirname(os.path.abspath(__file__))
+if _bin_dir not in sys.path:
+    sys.path.insert(0, _bin_dir)
+import mohaa_common as MC                       # logging, atomic writes, settings, Pillow guard
+import sys, os, re, subprocess, threading, queue, glob, json, zipfile, tempfile, shutil, hashlib, logging, time
 # Some Linux distros package Tk separately; exit with install instructions rather
 # than a bare ImportError.
 try:
@@ -24,9 +35,15 @@ except ImportError as _tkerr:
     sys.stderr.write("\nMOHAA viewer: Python's Tk GUI toolkit is missing (%s).\n"
                      "Install it with one of:\n%s\n\n"%(_tkerr,_hint))
     raise SystemExit(2)
+LOG=MC.get_logger("launcher")       # module logger (self._log is the Output pane widget)
+_MTX_ERR=""                                # why mohaa_textures failed to import, if it did
 try:
     import mohaa_textures as MTX           # texture resolution over the loaded paks
-except Exception:
+except Exception as _mtx_e:
+    # Not fatal (models still build, untextured), but never silent: the reason is logged
+    # here and shown in the Output pane by _prepare_indexes.
+    LOG.error("mohaa_textures could not be imported; models will load untextured", exc_info=True)
+    _MTX_ERR="%s: %s"%(type(_mtx_e).__name__,_mtx_e)
     MTX=None
 
 # Optional embedded viewer: Edge WebView2 inside the Tk window (Windows only).
@@ -38,6 +55,7 @@ if sys.platform.startswith("win"):
     try:
         from tkwebview2.tkwebview2 import WebView2 as WEBVIEW2, have_runtime as _WV_HAVE_RT
     except Exception as _e:
+        MC.swallowed()
         _WEBVIEW_ERR=str(_e)
 
 # Hide the console windows of child processes (Python probes, viewer builds); needed
@@ -58,7 +76,20 @@ THEMES={
 # Module-level colour names used throughout the UI; apply_theme() re-points them at the
 # active palette.
 BG=PANEL=LINE=TXT=DIM=ACCENT=TAG_C=ORIGIN=BONE_C=BTN_BG=BTN_HOV=ERR_C=WARN_C=SEL_BG=TIP_BG=TIP_TXT=ENTRY_BG=""
-globals().update(THEMES["dark"])
+
+def set_palette(name):
+    """Point the module-level colour names (BG, PANEL, ...) at the named palette.
+
+    name: a key of THEMES; anything else selects "dark". Returns the palette dict.
+    Written out name by name (no globals() tricks) so every colour's origin is visible."""
+    global BG,PANEL,LINE,TXT,DIM,ACCENT,TAG_C,ORIGIN,BONE_C,BTN_BG,BTN_HOV,ERR_C,WARN_C,SEL_BG,TIP_BG,TIP_TXT,ENTRY_BG
+    p=THEMES.get(name) or THEMES["dark"]
+    BG=p["BG"]; PANEL=p["PANEL"]; LINE=p["LINE"]; TXT=p["TXT"]; DIM=p["DIM"]
+    ACCENT=p["ACCENT"]; TAG_C=p["TAG_C"]; ORIGIN=p["ORIGIN"]; BONE_C=p["BONE_C"]
+    BTN_BG=p["BTN_BG"]; BTN_HOV=p["BTN_HOV"]; ERR_C=p["ERR_C"]; WARN_C=p["WARN_C"]
+    SEL_BG=p["SEL_BG"]; TIP_BG=p["TIP_BG"]; TIP_TXT=p["TIP_TXT"]; ENTRY_BG=p["ENTRY_BG"]
+    return p
+set_palette("dark")
 
 def _mono_family():
     """First installed monospace family. Consolas is Windows-only, and Tk silently
@@ -68,6 +99,7 @@ def _mono_family():
         import tkinter.font as _tkf
         have={f.lower() for f in _tkf.families()}
     except Exception:
+        MC.swallowed()
         return "TkFixedFont"
     for f in ("Consolas","SF Mono","Menlo","DejaVu Sans Mono","Liberation Mono",
               "Ubuntu Mono","Noto Sans Mono","Courier New","Monaco"):
@@ -90,18 +122,18 @@ PRIVACY_SUMMARY=("This program collects nothing and sends nothing, and has no\n"
                  "telemetry. It uses the network only when you check for updates.")
 
 PRIVACY_TEXT = """PRIVACY NOTICE  --  MOHAA Model Viewer
-Last updated: 28 October 2026
+Last updated: 4 November 2026
 
 1. THE SHORT VERSION
    This program does not collect, transmit, sell, share or profile anything.
    It contains no telemetry, no analytics, no crash reporting, no advertising
    and no tracking identifiers, and it never checks for updates on its own. The
    program uses the network only when YOU open Help --> Check for updates, and
-   the Windows startup script only to install missing Python packages (see 3);
+   the startup scripts only to install missing Python packages (see 3);
    everything else happens entirely on your computer.
 
 2. WHAT IS STORED, AND WHERE
-   The program stores four things, all on your own machine, all readable and
+   The program stores six things, all on your own machine, all readable and
    deletable by you at any time:
 
      a) Settings file  --  mohaa_viewer_config.json
@@ -112,25 +144,39 @@ Last updated: 28 October 2026
         Options --> Don't save recent files is on), your chosen output folder,
         theme, window layout, view angles, and the paths of any external
         programs you configured. It contains file paths, which on most systems
-        include your user name.
+        include your user name. The previous copy is kept beside it as a .bak
+        file, and a damaged file is set aside as .corrupt-<date>. Options -->
+        Reset settings... clears it.
 
      b) Console log  --  output_console.log, in the same folder as (a).
-        A copy of the Output pane. Overwritten on each launch. It contains the
-        file paths the program touched, so it too may include your user name.
+        A copy of the Output pane, replaced on each launch (the previous
+        launch's copy is kept with ".prev" in its name). It contains the file
+        paths the program touched, so it too may include your user name.
 
-     c) Working files
+     c) Program logs  --  the "logs" folder inside the folder of (a).
+        A timestamped record of what the program did and of any errors, with
+        their technical details, one file for each part of the program. Each
+        file is capped at 2 MB, with five older copies kept. Like (b) it
+        contains file paths. Options --> Open log folder shows it.
+
+     d) Working files
         A temporary workspace under your system temp folder (mohaaview_*), and
         the generated .html viewers in your chosen output folder. Both are
         removable from File --> Clear built models / Clear %temp% files. On
         Windows, the embedded 3D pane (Microsoft Edge WebView2) also keeps its
         browser files in a "webview2" folder beside (a).
 
-     d) Display choices in the browser
+     e) Display choices in the browser
         The viewer pages remember a few display choices (theme, backdrop colour,
         renderer, placement angles, game cvars) in the browser's local storage.
         The embedded pane runs in private mode and forgets them when the program
         closes; in your own browser they stay with that browser's data for local
         files.
+
+     f) Previous versions  --  the "previous-versions" folder beside (a).
+        When Help --> Check for updates installs a new version, the files it
+        replaces are copied here first, one numbered folder per update, with a
+        changelog.txt listing them. Delete them whenever you like.
 
    None of this is transmitted anywhere. If you want it gone, delete the folders
    above; the program will simply start fresh.
@@ -150,11 +196,12 @@ Last updated: 28 October 2026
        privacy policy, not this one. It happens only when you open that window and
        click to install; nothing is ever checked automatically.
 
-     - On Windows, the startup script (RUN -- Medal of Honor Model Viewer.bat)
-       installs any missing Python packages from pypi.org. If no suitable Python
-       is found and you agree when asked, it runs python_installer_updater.bat,
-       which downloads Python from python.org. Both sites apply their own
-       privacy policies.
+     - The startup script (RUN -- Medal of Honor Viewer.bat, or the .sh
+       file on Linux and macOS) installs any missing Python packages from
+       pypi.org into the program's own bin folder. On Windows, if no suitable
+       Python is found and you agree when asked, it runs
+       python_installer_updater.bat, which downloads Python from python.org.
+       Both sites apply their own privacy policies.
 
    The viewer itself makes no other network requests.
 
@@ -211,23 +258,11 @@ def _write_base_dir():
     """Folder the program writes to (config, console log, default output folders).
 
     If the scripts live in a 'bin' folder (the shipped layout: bin/, docs/, output/), this
-    is the sibling 'output' folder, created if needed. Otherwise (flat/portable install)
-    it is HERE. Falls back to HERE if 'output' can't be created."""
-    try:
-        if os.path.basename(HERE).lower()=="bin":
-            d=os.path.join(os.path.dirname(HERE),"output")
-            os.makedirs(d,exist_ok=True)
-            return d
-    except Exception:
-        pass
-    return HERE
+    is the sibling 'output' folder; otherwise (flat/portable install), or when the parent
+    of 'output' isn't writable, it is HERE. Pure: init_runtime() creates the folder, so
+    importing this module (as mohaa_map_launcher does) has no side effects."""
+    return MC.data_dir()
 DATADIR=_write_base_dir()
-# The embedded pane's WebView2 needs a folder for its browser files. tkwebview2 leaves it
-# unset, so WebView2 would create "pythonw.exe.WebView2" beside Python, which fails in a
-# read-only install such as C:\Program Files and leaves the pane blank. The environment
-# variable overrides that default (Microsoft's documented WEBVIEW2_USER_DATA_FOLDER).
-if sys.platform.startswith("win"):
-    os.environ.setdefault("WEBVIEW2_USER_DATA_FOLDER",os.path.join(DATADIR,"webview2"))
 VIEWER=os.path.join(HERE,"mohaa_view.py")
 # Largest pak entry that is extracted or read into memory; bigger ones are skipped as
 # decompression bombs. Same limit as the pak index (mohaa_textures.Vfs.MAX_ENTRY).
@@ -242,29 +277,218 @@ VIEWER_REV_REQUIRED=80
 # routes the output HTML to a "standalone" folder beside "models" instead of the
 # pak-mirroring tree; the null byte means it can't collide with a real folder name.
 STANDALONE_SUBDIR="\x00standalone"
-# Copy the config from the old flat location (HERE) on first run.
 CONFIG=os.path.join(DATADIR,"mohaa_viewer_config.json")
 # The paks both programs have loaded: one list beside their own settings, so the Model
 # Viewer and the Map Viewer open with the same paks and follow each other's changes.
 PAKS_SHARED=os.path.join(DATADIR,"mohaa_paks.json")
+INFO_PANE_WIDTH=300                  # the bottom-right details pane's default width
+# The bottom row (Output | details): its default height, and the least it can be dragged
+# to, just the "Output" label and the details' title line, which sit level.
+BOTTOM_ROW_HEIGHT=130
+BOTTOM_ROW_MIN=26
+PANES_LAYOUT=3                       # bumped when a saved sash should give way to a new default
+                                     # (3: the bottom row's height and the details pane's width
+                                     # are kept, not where their sashes were in the window)
+_ICONS={}                            # (kind, colour, px) -> PhotoImage, kept alive here
+
+def button_icon(kind,colour,px=14):
+    """A small icon for a details-pane button, drawn with Pillow at 4x and scaled down so
+    its edges are smooth: "rebuild" a hammer, "browser" a globe, "file" a page with lines.
+    Drawn rather than typed because Tk on older Pythons can't show symbols outside the
+    Basic Multilingual Plane (the globe emoji is one). None when Pillow can't draw it."""
+    key=(kind,colour,px)
+    if key in _ICONS: return _ICONS[key]
+    try:
+        Image=MC.pil_image()
+        from PIL import ImageDraw, ImageTk
+    except ImportError:
+        MC.swallowed(); return None
+    S=px*4; lw=max(2,S//9)
+    img=Image.new("RGBA",(S,S),(0,0,0,0)); d=ImageDraw.Draw(img)
+    c=colour
+    if kind=="browser":
+        m=lw//2+1; r=(S-2*m)/2; cx=cy=S/2
+        d.ellipse([m,m,S-m,S-m],outline=c,width=lw)
+        d.ellipse([S*0.32,m,S*0.68,S-m],outline=c,width=max(2,lw*3//4))
+        d.line([m,cy,S-m,cy],fill=c,width=max(2,lw*3//4))
+        for f in (-0.5,0.5):
+            y=cy+f*r; hw=(r*r-(f*r)**2)**0.5
+            d.line([cx-hw,y,cx+hw,y],fill=c,width=max(2,lw*2//3))
+    elif kind=="rebuild":
+        # handle from the bottom left up to the head, the head across it
+        d.line([S*0.14,S*0.86,S*0.58,S*0.42],fill=c,width=int(S*0.14))
+        hx,hy,L,T=S*0.62,S*0.36,S*0.30,S*0.13    # head centre, half-length, half-thickness
+        ux,uy=0.7071,0.7071                       # along the head (across the handle)
+        vx,vy=0.7071,-0.7071                      # along the handle
+        pts=[(hx+ux*L+vx*T,hy+uy*L+vy*T),(hx+ux*L-vx*T,hy+uy*L-vy*T),
+             (hx-ux*L-vx*T,hy-uy*L-vy*T),(hx-ux*L+vx*T,hy-uy*L+vy*T)]
+        d.polygon(pts,fill=c)
+    else:
+        x0,y0,x1,y1,fo=S*0.18,S*0.06,S*0.82,S*0.94,S*0.24
+        d.line([(x0,y0),(x1-fo,y0),(x1,y0+fo),(x1,y1),(x0,y1),(x0,y0)],fill=c,width=lw,joint="curve")
+        d.line([(x1-fo,y0),(x1-fo,y0+fo),(x1,y0+fo)],fill=c,width=max(2,lw*2//3))
+        for f in (0.45,0.62,0.79):
+            d.line([x0+S*0.13,S*f,x1-S*0.13,S*f],fill=c,width=max(2,lw*2//3))
+    try:
+        im=ImageTk.PhotoImage(img.resize((px,px),Image.LANCZOS))
+    except Exception:
+        MC.swallowed(); return None
+    _ICONS[key]=im
+    return im
+
+def info_button(app,kind,text,command,tip):
+    """A details-pane button with its icon (button_icon) left of the text, sized to the
+    pane's small font."""
+    try:
+        import tkinter.font as _tkf
+        px=max(10,_tkf.Font(font=FONT_SMALL).metrics("linespace")-2)
+    except Exception:
+        MC.swallowed(); px=14
+    ic=button_icon(kind,TXT,px)
+    kw={"image":ic,"compound":"left"} if ic else {}
+    return app._mkbtn(app._reopen_bar,text=text,command=command,tip=tip,**kw)
+
+def make_info_pane(app,parent,title,tip):
+    """The bottom-right details pane, shared by both programs: one scrollable column with
+    the title, the stats line, the Rebuild / Browser / .tik (.map) buttons and the list, so a
+    small pane scrolls as a whole instead of hiding the list's scrollbar or the buttons.
+    Sets app._info_title, _info_stats, _reopen_bar, _tag_text, _info_canvas and
+    app._info_refit() (call it after the list changes: it fits the list to its lines and
+    the scroll area to the column). Returns the pane's frame."""
+    info=ttk.Frame(parent,style="Panel.TFrame",width=INFO_PANE_WIDTH); info.pack_propagate(False)
+    sb=ttk.Scrollbar(info,orient="vertical")
+    cv=tk.Canvas(info,bg=PANEL,highlightthickness=0,borderwidth=0,yscrollincrement=18,yscrollcommand=sb.set)
+    sb.configure(command=cv.yview)
+    sb.pack(side="right",fill="y"); cv.pack(side="left",fill="both",expand=True)
+    inner=ttk.Frame(cv,style="Panel.TFrame")
+    win=cv.create_window(0,0,window=inner,anchor="nw")
+    def _flow():
+        # the buttons left to right, a new row when the next doesn't fit the pane's width
+        # (place, so a narrow pane wraps them instead of cutting the last one off)
+        bar=app._reopen_bar; avail=max(1,cv.winfo_width()-20); gap=4
+        x=y=rowh=0
+        for w in bar.winfo_children():
+            if w.winfo_manager()=="pack": w.pack_forget()
+            rw,rh=w.winfo_reqwidth(),w.winfo_reqheight()
+            if x and x+rw>avail: x=0; y+=rowh+3; rowh=0
+            w.place(x=x,y=y); x+=rw+gap; rowh=max(rowh,rh)
+        h=y+rowh
+        if int(bar.cget("height") or 0)!=max(1,h): bar.configure(height=max(1,h))
+    def _fit(_e=None):
+        try:
+            cw=max(1,cv.winfo_width())
+            cv.itemconfigure(win,width=cw)
+            app._info_stats.configure(wraplength=max(60,cw-24))
+            _flow()
+            cv.configure(scrollregion=(0,0,cw,max(inner.winfo_reqheight(),cv.winfo_height())))
+        except tk.TclError:
+            MC.swallowed()
+    inner.bind("<Configure>",_fit); cv.bind("<Configure>",_fit)
+    def _wheel(e):
+        if inner.winfo_reqheight()>cv.winfo_height():
+            up=getattr(e,"num",0)==4 or getattr(e,"delta",0)>0
+            cv.yview_scroll(-3 if up else 3,"units")
+        return "break"
+    def _bind_wheel(w):
+        for seq in ("<MouseWheel>","<Button-4>","<Button-5>"): w.bind(seq,_wheel)
+    app._info_title=ttk.Label(inner,text=title,style="Panel.TLabel",foreground=DIM)
+    app._info_title.pack(anchor="w",padx=10,pady=(8,2))
+    app._info_stats=ttk.Label(inner,text="",style="PanelDim.TLabel",wraplength=INFO_PANE_WIDTH-40,justify="left")
+    app._info_stats.pack(anchor="w",padx=10,pady=(0,4))
+    app._reopen_bar=ttk.Frame(inner,style="Panel.TFrame",height=1); app._reopen_bar.pack(fill="x",padx=10,pady=(0,6))
+    # read-only Text so the list can be selected and copied, coloured per kind, with a
+    # right-click menu; as tall as its lines, so the column scrolls, not the Text
+    app._tag_text=tk.Text(inner,bg=PANEL,fg=TXT,insertbackground=TXT,font=FONT_SMALL,relief="flat",height=1,
+                          wrap="none",state="disabled",highlightthickness=0,cursor="arrow")
+    app._tag_text.pack(fill="x",padx=6,pady=(0,6))
+    app._tag_text.bind("<Button-3>",app._show_tag_menu)
+    app._tip(app._tag_text,tip)
+    app._info_canvas=cv
+    def _refit():
+        try:
+            t=app._tag_text
+            n=int(t.index("end-1c").split(".")[0])
+            t.configure(height=max(1,n))
+            for w in app._reopen_bar.winfo_children():
+                _bind_wheel(w)
+                # compact buttons, at least as wide as their text (a negative width is a
+                # minimum, so a wider glyph or the icon never cuts the text), so Rebuild,
+                # Browser and .map / .tik fit side by side in the pane's default width (a
+                # narrower pane wraps them: _flow)
+                try: w.configure(style="Info.Tool.TButton",width=-len(str(w.cget("text"))))
+                except tk.TclError: MC.swallowed()
+            inner.update_idletasks(); _fit(); inner.update_idletasks(); _fit()
+        except tk.TclError:
+            MC.swallowed()
+    app._info_refit=_refit
+    for w in (cv,inner,app._info_title,app._info_stats,app._reopen_bar,app._tag_text): _bind_wheel(w)
+    return info
+
+def open_console_mirror(path):
+    """Open the Output-pane mirror file for writing (line-buffered), first moving last
+    session's copy to <name>.prev.log. Returns the file object, or None (logged) if the
+    folder isn't writable."""
+    try:
+        if os.path.isfile(path):
+            os.replace(path,os.path.splitext(path)[0]+".prev.log")
+    except OSError:
+        LOG.warning("could not keep the previous %s",path,exc_info=True)
+    try:
+        return open(path,"w",encoding="utf-8",buffering=1)
+    except OSError:
+        LOG.error("could not open %s; the Output pane is not mirrored this session",path,exc_info=True)
+        return None
+
 def read_shared_paks():
     """The shared pak list, or None when neither program has written one yet."""
     try:
         with open(PAKS_SHARED,encoding="utf-8") as f: v=json.load(f)
         ps=v.get("pk3s") if isinstance(v,dict) else None
         return [p for p in ps if isinstance(p,str)] if isinstance(ps,list) else None
-    except Exception: return None
+    except Exception: MC.swallowed(); return None
 def write_shared_paks(paths):
+    """Save the shared pak list (atomic write, .bak kept). Returns True on success; a
+    failure is logged (the other program just won't follow this change)."""
     try:
-        tmp=PAKS_SHARED+".tmp"
-        with open(tmp,"w",encoding="utf-8") as f: json.dump({"pk3s":list(paths)},f,indent=2)
-        os.replace(tmp,PAKS_SHARED)
-    except Exception: pass
-if not os.path.exists(CONFIG):
+        MC.atomic_write_json(PAKS_SHARED,{"pk3s":list(paths)},backup=True)
+        return True
+    except (OSError,ValueError,TypeError):
+        LOG.error("could not save the shared pak list %s",PAKS_SHARED,exc_info=True)
+        return False
+
+_runtime_ready=False
+def init_runtime(app_name="mohaa_launcher"):
+    """One-time start-up for a launcher process: create the output folder, start logging
+    and the crash hooks, point WebView2 at its data folder and migrate an old flat config.
+
+    app_name: log file stem (output/logs/<app_name>.log). Idempotent. Returns the log path.
+    Kept out of module import so mohaa_map_launcher can import this module freely."""
+    global _runtime_ready
+    if _runtime_ready: return MC.setup_logging(app_name)
     try:
+        MC.ensure_dir(DATADIR)
+    except OSError as e:
+        if sys.stderr is not None: sys.stderr.write("[ERROR] can't create %s: %s\n"%(DATADIR,e))
+    logpath=MC.setup_logging(app_name)
+    MC.install_crash_hooks(app_name)
+    LOG.info("=== %s %s starting (Python %s, %s) ===",app_name,VERSION,sys.version.split()[0],sys.platform)
+    if _MTX_ERR: LOG.error("textures disabled: %s",_MTX_ERR)
+    # The embedded pane's WebView2 needs a folder for its browser files. tkwebview2 leaves it
+    # unset, so WebView2 would create "pythonw.exe.WebView2" beside Python, which fails in a
+    # read-only install such as C:\Program Files and leaves the pane blank. The environment
+    # variable overrides that default (Microsoft's documented WEBVIEW2_USER_DATA_FOLDER).
+    if sys.platform.startswith("win"):
+        os.environ.setdefault("WEBVIEW2_USER_DATA_FOLDER",os.path.join(DATADIR,"webview2"))
+    # Copy the config from the old flat location (HERE) on first run.
+    if not os.path.exists(CONFIG):
         _old=os.path.join(HERE,"mohaa_viewer_config.json")
-        if os.path.isfile(_old): shutil.copyfile(_old,CONFIG)
-    except Exception: pass
+        if os.path.isfile(_old):
+            try:
+                shutil.copy2(_old,CONFIG); LOG.info("migrated %s -> %s",_old,CONFIG)
+            except OSError:
+                LOG.error("could not migrate the old config %s",_old,exc_info=True)
+    _runtime_ready=True
+    return logpath
 
 # ============================================================================
 #  Version + update channel
@@ -274,7 +498,7 @@ if not os.path.exists(CONFIG):
 #  docs/ and the RUN .bat. On each release, bump VERSION here and in docs/version.txt,
 #  then tag the release commit v<version>.
 # ============================================================================
-VERSION="1.0.000"
+VERSION="1.0.001"
 VERSION_LABEL="version "+VERSION
 # GitHub coordinates for the update check. If GitHub can't be reached, the check
 # reports it and changes nothing on disk.
@@ -291,6 +515,49 @@ UPDATE_TAG_FMT="v{version}"
 UPDATE_TAG_ZIP_URL=f"https://codeload.github.com/{GITHUB_OWNER}/{GITHUB_REPO}/zip/refs/tags/{{tag}}"
 UPDATE_ZIP_URL=f"https://codeload.github.com/{GITHUB_OWNER}/{GITHUB_REPO}/zip/refs/heads/{GITHUB_BRANCH}"
 UPDATE_PAGE_URL=f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
+# Largest update zip accepted, and top-level folders an update never writes into (the
+# user's data and the vendored packages).
+UPDATE_MAX_BYTES=200*1024*1024
+UPDATE_SKIP_DIRS={"output","libs","libs-linux","libs-mac",".git","__pycache__"}
+# Files earlier versions shipped that the current one replaces: an update backs them up
+# with the files it replaces (output/previous-versions/<n>/) and then removes them, once
+# everything else is in place. The four RUN launchers became one per system,
+# "RUN -- Medal of Honor Viewer.bat" / ".sh", with a menu for the program.
+UPDATE_RETIRED=("RUN -- Medal of Honor Model Viewer.bat","RUN -- Medal of Honor Map Viewer.bat",
+                "RUN -- Medal of Honor Model Viewer.sh","RUN -- Medal of Honor Map Viewer.sh")
+# The restart helper run after an update whose files were locked: waits for each staged
+# <file>.new to move into place (up to 2 minutes), then starts the launcher again.
+UPDATE_FINISHER_SRC=r"""import json, os, subprocess, sys, time
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+def log(msg):
+    try:
+        with open(cfg["log"], "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except OSError:
+        pass
+pending = list(cfg["staged"])
+deadline = time.time() + 120
+while pending and time.time() < deadline:
+    for d in list(pending):
+        try:
+            os.replace(d + ".new", d); pending.remove(d); log("installed " + d)
+        except OSError as e:
+            last = e
+    if pending:
+        time.sleep(0.5)
+for d in pending:
+    log("FAILED to install " + d + " (still locked); the new copy is " + d + ".new")
+flags = {"creationflags": 0x08000000} if sys.platform.startswith("win") else {}
+try:
+    subprocess.Popen([cfg["exe"], cfg["launcher"]], **flags); log("restarted " + cfg["launcher"])
+except OSError as e:
+    log("FAILED to restart: %s" % e)
+for p in (sys.argv[1], os.path.abspath(__file__)):
+    try:
+        os.remove(p)
+    except OSError:
+        pass
+"""
 
 def _install_root():
     """Folder the updater refreshes: the parent of bin/ (where the RUN .bat lives) in the
@@ -311,7 +578,7 @@ def find_python():
         if not p: continue
         try:
             if subprocess.run([p,"--version"],capture_output=True,**NOWIN).returncode==0: return p
-        except OSError: pass
+        except OSError: MC.swallowed()
     return None
 
 def _virtual_screen(w):
@@ -324,7 +591,7 @@ def _virtual_screen(w):
             u=ctypes.windll.user32
             x0=u.GetSystemMetrics(76); y0=u.GetSystemMetrics(77)
             return (x0,y0,x0+u.GetSystemMetrics(78),y0+u.GetSystemMetrics(79))
-        except Exception: pass
+        except Exception: MC.swallowed()
     return (0,0,w.winfo_screenwidth(),w.winfo_screenheight())
 
 def _win_dark_menus(dark):
@@ -338,9 +605,9 @@ def _win_dark_menus(dark):
         ux=ctypes.WinDLL("uxtheme.dll")
         ux[135](2 if dark else 3)
         try: ux[104]()
-        except Exception: pass
+        except Exception: MC.swallowed()
         ux[136]()
-    except Exception: pass
+    except Exception: MC.swallowed()
 
 # The keys both viewers' cameras hold, as Windows virtual-key codes: W A S D Q E C Z, Space, the
 # arrows, Shift and Ctrl, and comma / period (the Map Viewer's Radiant-look strafe). See
@@ -356,16 +623,16 @@ def _win_key_reader():
         gaks=ctypes.windll.user32.GetAsyncKeyState
         gaks.argtypes=[ctypes.c_int]; gaks.restype=ctypes.c_short
         return lambda vk:bool(gaks(vk)&0x8000)
-    except Exception: return None
+    except Exception: MC.swallowed(); return None
 KEY_IS_DOWN=_win_key_reader()
 
 def apply_theme(root, name):
     """(Re)apply the named palette to every ttk style. tk widgets that hold raw
     colours are refreshed by App._retheme_widgets() afterwards."""
-    globals().update(THEMES.get(name,THEMES["dark"]))
+    set_palette(name)
     root.configure(bg=BG); st=ttk.Style(root)
     try: st.theme_use("clam")
-    except Exception: pass
+    except Exception: MC.swallowed()
     st.configure(".",background=BG,foreground=TXT,fieldbackground=PANEL,troughcolor=PANEL,
                  selectbackground=SEL_BG,selectforeground=TXT,font=FONT_MONO,borderwidth=0)
     st.configure("TFrame",background=BG); st.configure("Panel.TFrame",background=PANEL)
@@ -384,6 +651,7 @@ def apply_theme(root, name):
     st.configure("Accent.TButton",foreground=ACCENT,bordercolor=ACCENT)
     st.map("Accent.TButton",background=[("active",BTN_HOV),("pressed",SEL_BG)])
     st.configure("Tool.TButton",padding=(6,2),font=FONT_SMALL)
+    st.configure("Info.Tool.TButton",padding=(4,1),font=FONT_SMALL)   # the details pane's buttons
     st.configure("TScrollbar",background=PANEL,troughcolor=BG,arrowcolor=DIM,bordercolor=BG)
     st.configure("Treeview",background=PANEL,fieldbackground=PANEL,foreground=TXT,
                  borderwidth=0,rowheight=20,font=FONT_SMALL)
@@ -410,7 +678,7 @@ def _add_popup_shadow(win):
         sh.configure(bg="#000000")
         sh.attributes("-alpha",0.30)
         try: sh.attributes("-topmost",True)
-        except Exception: pass
+        except Exception: MC.swallowed()
         sh.wm_geometry(f"{win.winfo_width()}x{win.winfo_height()}"
                        f"+{win.winfo_rootx()+3}+{win.winfo_rooty()+3}")
         win.lift(sh)                     # popup above its own shadow
@@ -418,12 +686,13 @@ def _add_popup_shadow(win):
         def _cleanup(e,s=sh,w=win):
             if e.widget is w:
                 try: s.destroy()
-                except Exception: pass
+                except Exception: MC.swallowed()
         win.bind("<Destroy>",_cleanup,add="+")
     except Exception:
+        MC.swallowed()
         try:
             if sh is not None: sh.destroy()
-        except Exception: pass
+        except Exception: MC.swallowed()
 
 def _tip_window(master,text,x,y,wrap=360):
     """One shared look for every floating popup: a borderless Toplevel with a 1px
@@ -431,7 +700,7 @@ def _tip_window(master,text,x,y,wrap=360):
     system font when 'Use old popup windows' is on."""
     tip=tk.Toplevel(master); tip.wm_overrideredirect(True); tip.wm_geometry(f"+{x}+{y}")
     try: tip.attributes("-topmost",True)
-    except Exception: pass
+    except Exception: MC.swallowed()
     if OLD_POPUPS:
         tk.Label(tip,text=text,justify="left",bg="#ffffff",fg="#000000",relief="solid",
                  borderwidth=1,font="TkDefaultFont",padx=6,pady=3,wraplength=wrap).pack()
@@ -459,7 +728,7 @@ class PopupMenu:
         t=tk.Toplevel(self.app); self.top=t
         t.wm_overrideredirect(True)
         try: t.attributes("-topmost",True)
-        except Exception: pass
+        except Exception: MC.swallowed()
         outer=tk.Frame(t,bg=LINE); outer.pack(fill="both",expand=True)
         inner=tk.Frame(outer,bg=PANEL); inner.pack(fill="both",expand=True,padx=1,pady=1)
         for it in self.items: self._row(inner,it)
@@ -498,7 +767,7 @@ class PopupMenu:
             try:
                 w=row.winfo_containing(row.winfo_pointerx(),row.winfo_pointery())
                 if w in parts: return          # moved between the row's own labels
-            except Exception: pass
+            except Exception: MC.swallowed()
             for w in parts: w.configure(bg=PANEL)
         for w in parts:
             w.bind("<Enter>",on_enter); w.bind("<Leave>",on_leave)
@@ -512,7 +781,7 @@ class PopupMenu:
         cb=it.get("command")
         if cb:
             try: cb()
-            except Exception: pass
+            except Exception: MC.swallowed()
     def _open_cascade(self,row,it):
         self.unpost_child()
         items=it.get("items")
@@ -528,7 +797,7 @@ class PopupMenu:
                 try:
                     x0,y0=t.winfo_rootx(),t.winfo_rooty()
                     if x0<=rx<x0+t.winfo_width() and y0<=ry<y0+t.winfo_height(): return True
-                except Exception: pass
+                except Exception: MC.swallowed()
             n=n.child
         return False
     def unpost_child(self):
@@ -538,7 +807,7 @@ class PopupMenu:
         self.unpost_child()
         if self.top:
             try: self.top.destroy()
-            except Exception: pass
+            except Exception: MC.swallowed()
             self.top=None
         if self.parent is None and getattr(self.app,"_open_popup",None) is self:
             self.app._open_popup=None; self.app._popup_owner=None
@@ -563,7 +832,7 @@ class Tooltip:
     def _cancel(self):
         if self._id:
             try: self.w.after_cancel(self._id)
-            except Exception: pass
+            except Exception: MC.swallowed()
             self._id=None
     def _show(self):
         if self.tip or not self.text: return
@@ -571,12 +840,13 @@ class Tooltip:
             x=self.w.winfo_rootx()+12; y=self.w.winfo_rooty()+self.w.winfo_height()+6
             self.tip=_tip_window(self.w,self.text,x,y,wrap=340)
         except Exception:
+            MC.swallowed()
             self.tip=None
     def _hide(self,_e=None):
         self._cancel()
         if self.tip:
             try: self.tip.destroy()
-            except Exception: pass
+            except Exception: MC.swallowed()
             self.tip=None
 
 # ------------------------------------------------------- keyboard shortcuts ---
@@ -708,6 +978,7 @@ class KeyMapWindow:
             r1, g1, b1 = (v // 257 for v in self.app.winfo_rgb(c1))
             r2, g2, b2 = (v // 257 for v in self.app.winfo_rgb(c2))
         except Exception:
+            MC.swallowed()
             return c1
         return "#%02x%02x%02x" % (round(r1 * a + r2 * (1 - a)), round(g1 * a + g2 * (1 - a)), round(b1 * a + b2 * (1 - a)))
 
@@ -741,7 +1012,7 @@ class KeyMapWindow:
         j = self._jobs.pop(name, None)
         if j:
             try: self.w.after_cancel(j)
-            except Exception: pass
+            except Exception: MC.swallowed()
         if fn is not None:
             def run():
                 self._jobs.pop(name, None)
@@ -877,22 +1148,22 @@ class KeyMapWindow:
             x = max(x0, min(x, x1 - w.winfo_reqwidth())); y = max(y0, min(y, y1 - w.winfo_reqheight() - 40))
             w.geometry(f"+{x}+{y}")
         except Exception:
-            pass
+            MC.swallowed()
         w.deiconify()
         if not self.old:
             try: app._apply_titlebar(w)
-            except Exception: pass
+            except Exception: MC.swallowed()
         try: w.grab_set()
-        except Exception: pass
+        except Exception: MC.swallowed()
         self.cv.focus_set()
 
     def close(self):
         for n in list(self._jobs):
             self._after(n, 0, None)
         try: self.w.grab_release()
-        except Exception: pass
+        except Exception: MC.swallowed()
         try: self.w.destroy()
-        except Exception: pass
+        except Exception: MC.swallowed()
         if getattr(self.app, "_keymap", None) is self:
             self.app._keymap = None
 
@@ -1033,7 +1304,7 @@ class KeyMapWindow:
         self._load_tab(i)
         if self.on_tab:
             try: self.on_tab(i)
-            except Exception: pass
+            except Exception: MC.swallowed()
         self._build_cols()
         self._refresh()
 
@@ -1222,6 +1493,7 @@ class KeyMapWindow:
             try:
                 wdg = self.w.winfo_containing(self.w.winfo_pointerx(), self.w.winfo_pointery())
             except Exception:
+                MC.swallowed()
                 wdg = None
             while wdg is not None and wdg is not rf:
                 wdg = getattr(wdg, "master", None)
@@ -1237,7 +1509,7 @@ class KeyMapWindow:
                 if wdg.cget("bg") in (C["panel"], C["hov"], C["on"]):
                     wdg.configure(bg=bg)
             except Exception:
-                pass
+                MC.swallowed()
 
     def _row_hover(self, R):
         if self.hot_row is not None and self.hot_row is not R:
@@ -1304,7 +1576,7 @@ class KeyMapWindow:
                     if cur in (C["txt"], self._mix(C["txt"], C["panel"], 0.5)):
                         wdg.configure(fg=fg)
                 except Exception:
-                    pass
+                    MC.swallowed()
 
     def _on_search(self):
         self.q = self.qvar.get().strip().lower()
@@ -1315,7 +1587,7 @@ class KeyMapWindow:
     def _hide_pop(self):
         if self.pop is not None:
             try: self.pop.destroy()
-            except Exception: pass
+            except Exception: MC.swallowed()
             self.pop = None
 
     def _show_pop(self, K):
@@ -1404,7 +1676,7 @@ class KeyMapWindow:
                     if y < top + 4 or y + el.winfo_height() > top + vis - 4:
                         col["cv"].yview_moveto(max(0.0, (y - 30) / h))
                 except Exception:
-                    pass
+                    MC.swallowed()
             self._row_bg(R, C["on"])
             self._after("flash%d" % id(R), 900, lambda R=R: self._row_bg(R, C["hov"] if self.hot_row is R else C["panel"]))
 
@@ -1472,6 +1744,7 @@ class KeyMapWindow:
         try:
             wdg = self.w.winfo_containing(e.x_root, e.y_root)
         except Exception:
+            MC.swallowed()
             wdg = None
         while wdg is not None and not any(wdg is c.get("frame") for c in self.COLS):
             wdg = getattr(wdg, "master", None)
@@ -1483,12 +1756,15 @@ class KeyMapWindow:
 
 class App(tk.Tk):
     def __init__(self, initial_file=None):
+        init_runtime("mohaa_launcher")
         super().__init__()
         init_fonts()          # families() needs a live root; picks a real mono per-OS
         self.title("MOHAA Model Viewer")
         self.geometry("1380x820"); self.minsize(1000,600)
+        self._config_path=CONFIG
         self._cfg=self._load_config(); self._pyexe=find_python()
         self._attach_busy=set()      # attachment keys currently building (see _build_attach)
+        self._attach_lock=threading.Lock()   # one attachment build at a time (_build_attach_work)
         self._attach_parts=[]        # extra skelmodel parts (head/hands/hat) for the build
         self._theme=self._cfg.get("theme","dark")
         if self._theme not in THEMES: self._theme="dark"
@@ -1497,14 +1773,11 @@ class App(tk.Tk):
         self._log_q=queue.Queue(); self._drop_paths=[]
         self._status_base="Ready"; self._pak_suffix=""    # status-bar left cell = "<state>  --  N pak(s)"
         self._upd_state=None; self._upd_dl_btn=None        # Check-for-updates window state
-        # Mirror every Output-pane line to output_console.log in DATADIR. Truncated on each
-        # launch and line-buffered so a crash still leaves the log; skipped if not writable.
-        self._logfile=None
-        try:
-            self._logfile=open(os.path.join(DATADIR,"output_console.log"),"w",
-                               encoding="utf-8",buffering=1)
-        except Exception:
-            self._logfile=None
+        # Mirror every Output-pane line to output_console.log in DATADIR (the previous
+        # session's copy is kept as output_console.prev.log), line-buffered so a crash still
+        # leaves it. The full, timestamped record is output/logs/mohaa_launcher.log.
+        self._logfile=open_console_mirror(os.path.join(DATADIR,"output_console.log"))
+        self._startup_extras()       # the RUN window's text, "saved <file>" lines, window-open signal
         self._pk3_paths=[]; self._tmp=None; self._animroot=None
         self._vfs=None; self._SH=None; self._TI=None; self._GS=None; self._PROPS=None; self._ED=None; self._tex_ready=False; self._tex_gen=0
         self._tree_entry={}
@@ -1583,6 +1856,7 @@ class App(tk.Tk):
         self.bind("<FocusOut>",self._popup_focus_out,add="+")
         _win_dark_menus(self._theme=="dark")
         self._build_menu(); self._build_ui(); self._bind_hotkeys(); self._poll_log()
+        self._show_startup_notices()
         self.after(150,self._enable_win_drop)
         self.after(250,self._apply_titlebar)
         self.protocol("WM_DELETE_WINDOW",self._on_close)
@@ -1597,9 +1871,15 @@ class App(tk.Tk):
         if initial_file: self.after(350,lambda:self._load(initial_file))
 
     # ------------------------------------------------------------- config ---
-    def _load_config(self):
-        try: return json.load(open(CONFIG,encoding="utf-8"))
-        except Exception: return {}
+    def _load_config(self, path=None):
+        """This program's settings as a dict ({} on first run).
+
+        A damaged file is repaired (hand-typed backslash paths), restored from its .bak, or
+        set aside as .corrupt-<date>; what happened is kept in self._cfg_notice and shown in
+        the Output pane once the window is up (see mohaa_common.load_settings)."""
+        cfg,notice=MC.load_settings(path or CONFIG)
+        self._cfg_notice=notice
+        return cfg
     @staticmethod
     def _norm_angle(x):
         """Fold one placement angle into [0,360), rounded to the viewer's 3 decimals. Whole
@@ -1617,7 +1897,7 @@ class App(tk.Tk):
         the same rotation. Any angle is kept (the dial's pencil editor accepts arbitrary values).
         An unchanged triple is ignored so dragging doesn't rewrite the config on every detent."""
         try: v=[float(x) for x in str(raw).split(",")[:3]]
-        except Exception: return
+        except Exception: MC.swallowed(); return
         if len(v)!=3: return
         # Reject NaN/inf: they survive the modulo, and json would write a bare NaN that strict
         # JSON readers (including the browser) reject.
@@ -1634,12 +1914,63 @@ class App(tk.Tk):
             v=[float(x) for x in v]
             if not all(-1e9<x<1e9 for x in v): return None
             v=[self._norm_angle(x) for x in v]
-        except Exception: return None
+        except Exception: MC.swallowed(); return None
         return v if any(v) else None
 
-    def _save_config(self):
-        try: json.dump(self._cfg,open(CONFIG,"w",encoding="utf-8"),indent=2)
-        except Exception: pass
+    def _save_config(self, path=None):
+        """Write the settings atomically, keeping the previous file as .bak.
+
+        Returns True on success. A failure is logged with its traceback and reported in the
+        Output pane (the setting then only lasts for this session)."""
+        path=path or CONFIG
+        try:
+            MC.atomic_write_json(path,self._cfg,backup=True)
+            return True
+        except (OSError,ValueError,TypeError) as e:
+            LOG.error("could not save settings %s",path,exc_info=True)
+            if getattr(self,"_log_q",None) is not None:
+                self._log_q.put(("err",f"Could not save settings ({os.path.basename(path)}): {e}"))
+            return False
+
+    def _reset_settings(self):
+        """Options --> Reset settings...: forget every remembered choice (paks, recent files,
+        folders, theme, programs) after a confirmation, keeping the old file as .bak, and
+        restart the program so it starts like a first run."""
+        path=getattr(self,"_config_path",CONFIG)
+        if not messagebox.askyesno("Reset settings",
+                "Forget every saved setting (recent files, output folder, theme, external "
+                "programs) and the loaded-pak list both viewers share, and restart?\n\n"
+                "The current files are kept as .bak copies beside them.",parent=self):
+            return
+        try:
+            for p in (path,PAKS_SHARED):
+                MC.make_backup(p)
+                if os.path.exists(p): os.remove(p)
+        except OSError as e:
+            LOG.error("reset settings failed for %s",path,exc_info=True)
+            self._log_line(f"Could not reset settings: {e}","err"); return
+        LOG.warning("settings reset by the user (%s)",path)
+        self._cfg={}
+        self._restart_program()
+
+    def _show_startup_notices(self):
+        """Put start-up problems in the Output pane: a repaired / lost settings file, a
+        missing or too-old Pillow, a texture module that failed to import."""
+        n=getattr(self,"_cfg_notice",None)
+        if n: self._log_line(n,"err")
+        ok,why=MC.pil_status()
+        if not ok: self._log_line("Textures disabled: "+why,"err")
+        if _MTX_ERR: self._log_line("Textures disabled: mohaa_textures.py failed to load ("+_MTX_ERR+")","err")
+
+    def report_callback_exception(self, exc, val, tb):
+        """Tk calls this for an exception escaping any button, menu, key or timer callback.
+        The default prints to stderr, which pythonw doesn't have, so the error vanished. Here
+        it is logged with its traceback and shown in red in the Output pane."""
+        LOG.critical("error in a window callback: %s: %s",exc.__name__,val,exc_info=(exc,val,tb))
+        try:
+            self._log_line(f"Internal error: {exc.__name__}: {val}  (details: {MC.logs_dir()})","err")
+        except Exception:
+            MC.swallowed()
 
     # ------------------------------------------------------------ menubar ---
     def _mkmenu(self, parent=None, persistent=True):
@@ -1733,7 +2064,10 @@ class App(tk.Tk):
                 _mi("Open Text Editor folder",lambda:self._open_program_folder("text_editor","Text Editor")),
                 _MSEP,
                 _mi("Change Legacy Model Viewer...",lambda:self._change_program("legacy_viewer","Legacy Model Viewer")),
-                _mi("Open Legacy Model Viewer folder",lambda:self._open_program_folder("legacy_viewer","Legacy Model Viewer"))]
+                _mi("Open Legacy Model Viewer folder",lambda:self._open_program_folder("legacy_viewer","Legacy Model Viewer")),
+                _MSEP,
+                _mi("Open log folder",self._open_log_folder),
+                _mi("Reset settings...",self._reset_settings)]
 
     def _menu_items_view(self):
         return [_mi("Expand all folders",lambda:self._expand_all(True)),
@@ -1822,12 +2156,12 @@ class App(tk.Tk):
         if e is not None and getattr(e,"widget",None) not in (self,None): return
         try:
             if self._open_popup is not None: self._open_popup.unpost()
-        except Exception: pass
+        except Exception: MC.swallowed()
         try: self._hide_treetip()
-        except Exception: pass
+        except Exception: MC.swallowed()
         for t in getattr(self,"_tips",()):
             try: t._hide()
-            except Exception: pass
+            except Exception: MC.swallowed()
 
     def _popup_focus_out(self,_e=None):
         """Close menus/tooltips when the launcher loses focus to another application.
@@ -1839,10 +2173,10 @@ class App(tk.Tk):
         def _check():
             try:
                 if self.focus_displayof() is not None: return   # still inside the launcher
-            except Exception: return                            # unknown -> leave it alone
+            except Exception: MC.swallowed(); return                            # unknown -> leave it alone
             self._dismiss_transients()
         try: self.after(60,_check)
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     # ---- housekeeping: built output + %TEMP% workspaces -----------------------
     @staticmethod
@@ -1851,7 +2185,7 @@ class App(tk.Tk):
         for dp,_dn,fn in os.walk(path):
             for f in fn:
                 try: n+=os.path.getsize(os.path.join(dp,f))
-                except OSError: pass
+                except OSError: MC.swallowed()
         return n
 
     @staticmethod
@@ -1867,7 +2201,7 @@ class App(tk.Tk):
     # pointed at one, and require the folder to be named 'models' or 'standalone'.
     def _unsafe_to_wipe(self, d):
         try: d=os.path.abspath(d)
-        except Exception: return "unresolvable path"
+        except Exception: MC.swallowed(); return "unresolvable path"
         parent,leaf=os.path.split(d.rstrip(os.sep))
         if not leaf: return "a drive/filesystem root"
         if os.path.dirname(d.rstrip(os.sep))==d.rstrip(os.sep): return "a drive/filesystem root"
@@ -1891,7 +2225,7 @@ class App(tk.Tk):
             try:
                 d=os.path.abspath(d)
                 if os.path.isdir(d) and d not in roots: roots.append(d)
-            except Exception: pass
+            except Exception: MC.swallowed()
         return roots
 
     def _built_scan(self):
@@ -1906,7 +2240,7 @@ class App(tk.Tk):
                     if f.lower().endswith("_view.html"):
                         fp=os.path.join(dp,f); files.append(fp)
                         try: nb+=os.path.getsize(fp)
-                        except OSError: pass
+                        except OSError: MC.swallowed()
                 for d in list(dn):
                     if d.lower().endswith("_view"):
                         dpp=os.path.join(dp,d); dirs.append(dpp); nb+=self._dir_size(dpp)
@@ -1926,12 +2260,12 @@ class App(tk.Tk):
         """All %TEMP%/mohaaview_* workspaces created by _reload_all, including leftovers from
         earlier or crashed sessions."""
         try: base=tempfile.gettempdir()
-        except Exception: return []
+        except Exception: MC.swallowed(); return []
         out=[]
         try:
             for d in sorted(glob.glob(os.path.join(glob.escape(base),"mohaaview_*"))):
                 if os.path.isdir(d): out.append(d)
-        except Exception: pass
+        except Exception: MC.swallowed()
         return out
 
     def _clear_built_models(self):
@@ -1955,7 +2289,7 @@ class App(tk.Tk):
         # at a deleted page.
         self._last_build=None
         try: self._path_var.set("")
-        except Exception: pass
+        except Exception: MC.swallowed()
         n=0
         for root in roots:
             why=self._unsafe_to_wipe(root)
@@ -1974,7 +2308,7 @@ class App(tk.Tk):
         pc=os.path.join(HERE,"__pycache__")
         if not os.path.isdir(pc): return None
         try: names=os.listdir(pc)
-        except OSError: return None
+        except OSError: MC.swallowed(); return None
         ours=("mohaa_view","mohaa_textures","mohaa_launcher")
         if any(any(nm.startswith(o+".") for o in ours) for nm in names): return pc
         return None
@@ -2017,6 +2351,7 @@ class App(tk.Tk):
                     self._tmp=tempfile.mkdtemp(prefix="mohaaview_")
                     self._animroot=os.path.join(self._tmp,"models")
                 except Exception:
+                    MC.swallowed()
                     self._tmp=None; self._animroot=None
             n+=1
         pn=0
@@ -2026,36 +2361,62 @@ class App(tk.Tk):
         self._log_line("Cleared %%temp%% files: %d workspace folder(s)%s, %s freed."
                        % (n,(" + __pycache__" if pn else ""),self._fmt_bytes(nb)),"ok")
 
+    def _window_zoomed(self):
+        """Whether the window is maximized (Windows / macOS "zoomed", X11 -zoomed)."""
+        try:
+            if self.state()=="zoomed": return True
+        except tk.TclError: MC.swallowed()
+        try: return bool(int(self.attributes("-zoomed")))
+        except (tk.TclError,ValueError): MC.swallowed()
+        return False
+
+    def _zoom_window(self):
+        """Maximize the window, however this platform's Tk does it."""
+        try: self.state("zoomed"); return
+        except tk.TclError: MC.swallowed()
+        try: self.attributes("-zoomed",True)
+        except tk.TclError: MC.swallowed()
+
     def _save_panes(self):
-        """Persist the three sash positions so the layout is restored next launch.
-        Horizontal panes (outer, bottomrow) store the sash X; the vertical pane
-        (rightside) stores the sash Y. Called from _on_close before teardown."""
+        """Persist the layout so it is restored next launch: the tree's width (the outer
+        sash's X), the bottom row's height and the details pane's width (the sizes of the
+        panes that don't stretch, so they fit whatever size the window opens at), and
+        whether the window was maximized. Called from _on_close before teardown."""
         try:
             outer,rightside,bottomrow=self._panes
-            self._cfg["panes"]={"tree":int(outer.sash_coord(0)[0]),
-                                "bottom":int(rightside.sash_coord(0)[1]),
-                                "console":int(bottomrow.sash_coord(0)[0])}
+            self._cfg["panes"]={"v":PANES_LAYOUT,"tree":int(outer.sash_coord(0)[0]),
+                                "bottomH":int(rightside.winfo_height()-rightside.sash_coord(0)[1]),
+                                "infoW":int(bottomrow.winfo_width()-bottomrow.sash_coord(0)[0]),
+                                "zoomed":self._window_zoomed()}
             self._save_config()
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     def _restore_panes(self):
-        """Restore the saved sash positions. The panes are nested (bottomrow in rightside in
-        outer), so place them outermost-first with an update between each; otherwise a sash is
-        laid out against stale geometry. sash_place clamps to each pane's minsize."""
+        """Restore the saved layout. The window is maximized again first if it was closed
+        so; then the panes, outermost first with an update between each (they are nested,
+        bottomrow in rightside in outer, and a sash placed against stale geometry lands
+        wrong). The bottom row's height and the details pane's width are measured from the
+        far edge of the window as it is now. sash_place clamps to each pane's minsize.
+        Positions saved by an earlier layout (PANES_LAYOUT) give way to the defaults: they
+        were sash positions in the window as it was then (closed maximized, they put the
+        bottom row at its least height in a normal window)."""
         p=self._cfg.get("panes")
         if not p: return
         try: outer,rightside,bottomrow=self._panes
-        except Exception: return
+        except Exception: MC.swallowed(); return
+        if p.get("zoomed") and not self._window_zoomed():
+            self._zoom_window()
         self.update_idletasks()
         if "tree" in p:
             try: outer.sash_place(0,int(p["tree"]),0); self.update_idletasks()
-            except Exception: pass
-        if "bottom" in p:
-            try: rightside.sash_place(0,0,int(p["bottom"])); self.update_idletasks()
-            except Exception: pass
-        if "console" in p:
-            try: bottomrow.sash_place(0,int(p["console"]),0); self.update_idletasks()
-            except Exception: pass
+            except Exception: MC.swallowed()
+        if int(p.get("v",1) or 1)<PANES_LAYOUT: return
+        if "bottomH" in p:
+            try: rightside.sash_place(0,0,max(0,rightside.winfo_height()-int(p["bottomH"]))); self.update_idletasks()
+            except Exception: MC.swallowed()
+        if "infoW" in p:
+            try: bottomrow.sash_place(0,max(0,bottomrow.winfo_width()-int(p["infoW"])),0); self.update_idletasks()
+            except Exception: MC.swallowed()
 
     def _toggle_old_popups(self):
         global OLD_POPUPS
@@ -2123,8 +2484,8 @@ class App(tk.Tk):
                                   relief="flat",font=FONT_MONO)
         self._path_entry.pack(side="left",fill="x",expand=True,padx=(10,4),pady=2,ipady=3)
         self._tip(self._path_entry,"Selected model / effect.\nPaste a full path here, pick from the tree,\nor drag a .skd/.tik onto this window.")
-        self._mkbtn(top,text="Browse...",command=self._browse,
-                    tip="Pick a loose .skd model or .tik effect from disk.\n(Ctrl+Shift+O)").pack(side="left",padx=(0,4))
+        self._mkbtn(top,text="Browse...",command=self._browse_and_run,
+                    tip="Pick a loose .skd model or .tik effect from disk and open it.\n(Ctrl+Shift+O)").pack(side="left",padx=(0,4))
         self._mkbtn(top,text="\u25b6 Open Viewer",style="Accent.TButton",command=self._run,
                     tip="Build the HTML viewer for the selected file and show it in the middle pane\n(also runs on double-click / Enter in the tree)").pack(side="left",padx=(0,14))
         self._lines=[tk.Frame(self,bg=LINE,height=1)]; self._lines[0].pack(fill="x",padx=8)
@@ -2216,25 +2577,10 @@ class App(tk.Tk):
         self._tip(self._log,"Build / extraction log.\nRight-click to copy or clear.\nEscape to cancel loading / building.")
 
         # ---- bottom-right: model info (title, surfaces / anims / tags / bones) ------
-        info=ttk.Frame(bottomrow,style="Panel.TFrame",width=270); info.pack_propagate(False)
-        self._info_title=ttk.Label(info,text="No model loaded",style="Panel.TLabel",foreground=DIM)
-        self._info_title.pack(anchor="w",padx=10,pady=(8,2))
-        self._info_stats=ttk.Label(info,text="",style="PanelDim.TLabel",wraplength=245,justify="left")
-        self._info_stats.pack(anchor="w",padx=10,pady=(0,4))
-        # Read-only Text so the list can be selected and copied, coloured per tag/origin/bone,
-        # with a right-click menu.
-        tagwrap=ttk.Frame(info,style="Panel.TFrame"); tagwrap.pack(fill="both",expand=True,padx=6,pady=(0,4))
-        self._tag_text=tk.Text(tagwrap,bg=PANEL,fg=TXT,insertbackground=TXT,font=FONT_SMALL,
-                               relief="flat",height=8,wrap="none",state="disabled",
-                               highlightthickness=0,cursor="arrow")
-        _sb=ttk.Scrollbar(tagwrap,orient="vertical",command=self._tag_text.yview)
-        self._tag_text.configure(yscrollcommand=_sb.set)
-        _sb.pack(side="right",fill="y"); self._tag_text.pack(side="left",fill="both",expand=True)
+        # one scrollable column: title, stats, Rebuild / Browser / .tik, then the list
+        info=make_info_pane(self,bottomrow,"No model loaded",
+                            "Surfaces / anims / tags / bones of the last-built model.\nSelect + copy freely.\nRight-click for Copy all / Select all / Open in Text Editor.")
         self._retheme_tag_text()
-        self._tag_text.bind("<Button-3>",self._show_tag_menu)
-        self._tip(self._tag_text,"Surfaces / anims / tags / bones of the last-built model.\nSelect + copy freely.\nRight-click for Copy all / Select all / Open in Text Editor.")
-        # Re-open buttons sit outside the list so they stay reachable.
-        self._reopen_bar=ttk.Frame(info,style="Panel.TFrame"); self._reopen_bar.pack(fill="x",padx=10,pady=(2,8))
 
         # ---- assemble the panes (add() order = left->right / top->bottom) ----
         # stretch='always' panes absorb extra space when the window grows; 'never' panes keep
@@ -2242,9 +2588,9 @@ class App(tk.Tk):
         outer.add(left,minsize=180,width=300,stretch="never")
         outer.add(rightside,minsize=340,stretch="always")
         rightside.add(upper,minsize=160,stretch="always")
-        rightside.add(bottomrow,minsize=130,height=210,stretch="never")
+        rightside.add(bottomrow,minsize=BOTTOM_ROW_MIN,height=BOTTOM_ROW_HEIGHT,stretch="never")
         bottomrow.add(lf,minsize=220,stretch="always")
-        bottomrow.add(info,minsize=200,width=270,stretch="never")
+        bottomrow.add(info,minsize=200,width=INFO_PANE_WIDTH,stretch="never")
         # Restore saved sash positions once the panes are mapped; the second attempt covers a
         # slow first map.
         self.after(160,self._restore_panes); self.after(480,self._restore_panes)
@@ -2269,7 +2615,7 @@ class App(tk.Tk):
                 self._pak_suffix="" if str(right).strip() in ("","0 paks","0 pak(s)") else right
             self._status_l.configure(text=self._compose_left())
             self._status_r.configure(text=VERSION_LABEL)
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     # ------------------------------------------------------------ theming ---
     def _retheme_tree_tags(self):
@@ -2307,6 +2653,8 @@ class App(tk.Tk):
     def _retheme_tag_text(self):
         t=self._tag_text
         t.configure(bg=PANEL,fg=TXT,insertbackground=TXT,selectbackground=SEL_BG,selectforeground=TXT)
+        cv=getattr(self,"_info_canvas",None)
+        if cv is not None: cv.configure(bg=PANEL)
         for tg,cl in (("thead",DIM),("torigin",ORIGIN),("ttag",TAG_C),("tbone",BONE_C),("tdim",DIM),("ttl",ACCENT)):
             t.tag_config(tg,foreground=cl)
 
@@ -2320,7 +2668,7 @@ class App(tk.Tk):
         try:
             self.clipboard_clear(); self.clipboard_append(self._tag_text.get("1.0","end-1c"))
             self._set_status("Tag/bone list copied to clipboard")
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     def _tag_select_all(self):
         t=self._tag_text
@@ -2332,8 +2680,9 @@ class App(tk.Tk):
             self._log_line("No tag/bone list to open yet - build a model first.","dim"); return
         try:
             base=os.path.join(self._tmp or tempfile.gettempdir(),"tags_bones.txt")
-            open(base,"w",encoding="utf-8").write(txt+"\n")
+            MC.atomic_write_text(base,txt+"\n")
         except Exception as e:
+            MC.swallowed()
             self._log_line(f"Could not write tag list: {e}","err"); return
         self._launch_with("text_editor","text editor","Text Editor",base)
 
@@ -2368,14 +2717,14 @@ class App(tk.Tk):
             wy=self._tree.winfo_pointery()-self._tree.winfo_rooty()
             if not (0<=wx<self._tree.winfo_width()): return
             if self._tree.identify_row(wy)!=row: return
-        except Exception: return
+        except Exception: MC.swallowed(); return
         self._show_treetip(self._treetip_text(row),
                            self._tree.winfo_pointerx()+14,self._tree.winfo_pointery()+14,row)
 
     def _show_treetip(self,text,x,y,row):
         self._hide_treetip()
         try: self._treetip=_tip_window(self,text,x,y,wrap=380)
-        except Exception: self._treetip=None; return
+        except Exception: MC.swallowed(); self._treetip=None; return
         self._treetip_row=row
         self.after(6000,lambda t=self._treetip:(self._hide_treetip() if self._treetip is t else None))
 
@@ -2394,14 +2743,14 @@ class App(tk.Tk):
     def _cancel_treetip_timer(self):
         if self._treetip_after:
             try: self.after_cancel(self._treetip_after)
-            except Exception: pass
+            except Exception: MC.swallowed()
             self._treetip_after=None
 
     def _hide_treetip(self):
         self._cancel_treetip_timer()
         if self._treetip:
             try: self._treetip.destroy()
-            except Exception: pass
+            except Exception: MC.swallowed()
             self._treetip=None; self._treetip_row=None
 
     # ---- output paths mirror the pak's models/ subfolders ----------------------
@@ -2469,12 +2818,12 @@ class App(tk.Tk):
                 for fn in os.listdir(d):
                     if fn.startswith("a") and fn.endswith(".js"):
                         try: os.remove(os.path.join(d,fn)); n+=1
-                        except OSError: pass
+                        except OSError: MC.swallowed()
                 if n: self._log_q.put(("dim","(animation cache rebuilt for viewer rev %s - %d cached file(s) cleared)"%(VIEWER_REV_REQUIRED,n)))
             os.makedirs(d,exist_ok=True)
-            with open(stamp,"w",encoding="utf-8") as f: f.write(str(VIEWER_REV_REQUIRED))
+            MC.atomic_write_text(stamp,str(VIEWER_REV_REQUIRED))
         except Exception:
-            pass
+            MC.swallowed()
 
     def _reuse_ok(self):
         """May this open serve the already-built HTML from the output folder? Not when
@@ -2499,6 +2848,7 @@ class App(tk.Tk):
             self._log_line(f"({os.path.basename(hp)} is from an older viewer build - rebuilding)","dim")
             return False
         except Exception:
+            MC.swallowed()
             return False                     # unreadable cache: rebuild instead
 
     def _open_cached(self, hp, model_path=None, subdir=None):
@@ -2513,7 +2863,7 @@ class App(tk.Tk):
         # builder, whose stdout normally fills it.
         if model_path is not None:
             try: self._update_info(model_path,"",html_path=hp)
-            except Exception: pass
+            except Exception: MC.swallowed()
         self._batch_signal()                             # cache hit counts as a finished step
 
     # ---- external programs (text editor / legacy model viewer) -----------------
@@ -2548,11 +2898,11 @@ class App(tk.Tk):
                       os.path.join(win,"SysWOW64","notepad.exe")):
                 try:
                     if os.path.isfile(c): return c
-                except OSError: pass
+                except OSError: MC.swallowed()
             if alias:
                 try:
                     if os.path.exists(alias) or os.path.lexists(alias): return alias
-                except OSError: pass
+                except OSError: MC.swallowed()
             return ""
         if sys.platform=="darwin":
             return "/usr/bin/open" if os.path.isfile("/usr/bin/open") else ""
@@ -2562,7 +2912,7 @@ class App(tk.Tk):
             try:
                 w=os.path.realpath(w)
                 if os.path.isabs(w) and os.path.isfile(w): return w
-            except OSError: pass
+            except OSError: MC.swallowed()
         return ""
 
     def _program_folder_default(self, key):
@@ -2668,10 +3018,11 @@ class App(tk.Tk):
                              "org.freedesktop.FileManager1.ShowItems",
                              "array:string:file://"+_urlq(sel),"string:"],
                             stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)==0
-                    except Exception: shown=False
+                    except Exception: MC.swallowed(); shown=False
                 if not shown: subprocess.Popen(["xdg-open",d])
             self._log_line(f"{menu_label} folder: {d}","dim")
         except Exception as e:
+            MC.swallowed()
             self._log_line(f"Could not open folder: {e}","err")
 
     def _launch_with(self, key, label, menu_label, filepath):
@@ -2701,6 +3052,7 @@ class App(tk.Tk):
             subprocess.Popen([prog,filepath])
             self._log_q.put(("dim",f"opened with {os.path.basename(prog)}: {os.path.basename(filepath)}"))
         except Exception:
+            MC.swallowed()
             self._log_q.put(("err",f"Error. Please select a valid program for {label} "
                                    f"in Options --> Change {menu_label}..."))
 
@@ -2711,6 +3063,19 @@ class App(tk.Tk):
             self._outdir=d; self._save_opts()
             self._log_line(f"Output folder: {d}","dim")
 
+    def _open_log_folder(self):
+        """Options --> Open log folder: output/logs, where every program keeps its log."""
+        d=MC.logs_dir()
+        try:
+            MC.ensure_dir(d)
+            if sys.platform.startswith("win"): os.startfile(d)
+            elif sys.platform=="darwin": subprocess.Popen(["open",d])
+            else: subprocess.Popen(["xdg-open",d])
+            self._log_line(f"Log folder: {d}","dim")
+        except OSError as e:
+            LOG.error("could not open the log folder %s",d,exc_info=True)
+            self._log_line(f"Could not open the log folder: {e}","err")
+
     def _open_outdir(self):
         try:
             os.makedirs(self._outdir,exist_ok=True)
@@ -2718,6 +3083,7 @@ class App(tk.Tk):
             elif sys.platform=="darwin": subprocess.Popen(["open",self._outdir])
             else: subprocess.Popen(["xdg-open",self._outdir])
         except Exception as e:
+            MC.swallowed()
             self._log_line(f"Could not open output folder: {e}","err")
 
     def _apply_titlebar(self, win=None):
@@ -2743,8 +3109,8 @@ class App(tk.Tk):
                 ux=ctypes.WinDLL("uxtheme.dll")
                 ux[135](2 if self._theme=="dark" else 3)
                 ux[136]()
-            except Exception: pass
-        except Exception: pass
+            except Exception: MC.swallowed()
+        except Exception: MC.swallowed()
 
     def _retheme_widgets(self):
         """Refresh raw-tk widgets that hold palette colours directly."""
@@ -2752,10 +3118,10 @@ class App(tk.Tk):
             self.configure(bg=BG)
             for ln in self._lines:
                 try: ln.configure(bg=LINE)
-                except Exception: pass
+                except Exception: MC.swallowed()
             for pw in getattr(self,"_panes",()):
                 try: pw.configure(bg=LINE)
-                except Exception: pass
+                except Exception: MC.swallowed()
             self._path_entry.configure(bg=PANEL,fg=TXT,insertbackground=TXT,
                                        highlightbackground=LINE,highlightcolor=ACCENT)
             self._log.configure(bg=PANEL,fg=TXT,insertbackground=TXT,highlightbackground=LINE)
@@ -2769,11 +3135,11 @@ class App(tk.Tk):
             for mm in self._menus:
                 try: mm.configure(bg=PANEL,fg=TXT,activebackground=SEL_BG,
                                   activeforeground=ACCENT,disabledforeground=DIM)
-                except Exception: pass
+                except Exception: MC.swallowed()
             # Info-panel colours are baked at render time, so re-render it from the last build.
             if self._last_info:
                 self._update_info(*self._last_info)
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     # ------------------------------------------------------------ hotkeys ---
     def _bind_hotkeys(self):
@@ -2835,7 +3201,7 @@ class App(tk.Tk):
         try:
             x,y=self.winfo_rootx(),self.winfo_rooty()
             return not (x<=xr<=x+self.winfo_width() and y<=yr<=y+self.winfo_height())
-        except Exception: return False
+        except Exception: MC.swallowed(); return False
 
     def _dragout_press(self,e):
         iid=self._tree.identify_row(e.y)
@@ -2851,14 +3217,14 @@ class App(tk.Tk):
             self._set_status("Release outside this window to open a standalone viewer")
         out=self._outside_win(e.x_root,e.y_root)
         try: self._tree.configure(cursor="plus" if out else "")
-        except Exception: pass
+        except Exception: MC.swallowed()
         if out: return "break"        # stop the Treeview auto-scrolling while outside
 
     def _dragout_release(self,e):
         entry,live=self._dragout,self._dragout_live
         self._dragout=None; self._dragout_live=False
         try: self._tree.configure(cursor="")
-        except Exception: pass
+        except Exception: MC.swallowed()
         if not (entry and live): return
         self._set_status("Ready")
         if not self._outside_win(e.x_root,e.y_root): return
@@ -2877,7 +3243,7 @@ class App(tk.Tk):
         iid=""
         try:
             if e.widget is self._tree: iid=self._tree.identify_row(e.y)
-        except Exception: iid=""
+        except Exception: MC.swallowed(); iid=""
         sel=self._tree.selection()
         if iid:
             if not (iid in sel and len(sel)>1):      # right-click inside a multi-selection keeps it
@@ -2970,7 +3336,7 @@ class App(tk.Tk):
                 found={en.lower():None for en in entries}
                 for p in self._pk3_paths:               # later paks override earlier
                     try: zf=zipfile.ZipFile(p)
-                    except Exception: continue
+                    except Exception: MC.swallowed(); continue
                     for n in zf.namelist():
                         if n.lower() in found and not n.endswith("/"):
                             found[n.lower()]=self._extract_one(zf,n)
@@ -2980,6 +3346,7 @@ class App(tk.Tk):
                     if t: self._launch_with(key,label,menu_label,t)
                     else: self._log_q.put(("err",f"Could not find {en} inside the loaded paks"))
             except Exception as ex:
+                MC.swallowed()
                 self._log_q.put(("err",f"Could not open: {ex}"))
         threading.Thread(target=work,daemon=True).start()
 
@@ -3039,7 +3406,7 @@ class App(tk.Tk):
                 target=None
                 for p in self._pk3_paths:               # later paks override earlier
                     try: zf=zipfile.ZipFile(p)
-                    except Exception: continue
+                    except Exception: MC.swallowed(); continue
                     for n in zf.namelist():
                         if n.lower()==entry.lower() and not n.endswith("/"):
                             target=self._extract_one(zf,n)
@@ -3048,6 +3415,7 @@ class App(tk.Tk):
                     self._log_q.put(("err","Could not find that file inside the loaded paks")); return
                 self._launch_with(key,label,menu_label,target)
             except Exception as ex:
+                MC.swallowed()
                 self._log_q.put(("err",f"Could not open: {ex}"))
         threading.Thread(target=work,daemon=True).start()
 
@@ -3070,7 +3438,7 @@ class App(tk.Tk):
         try:
             self.clipboard_clear(); self.clipboard_append(self._log.get("1.0","end-1c"))
             self._set_status("Log copied to clipboard")
-        except Exception: pass
+        except Exception: MC.swallowed()
     def _clear_log(self):
         self._log.configure(state="normal"); self._log.delete("1.0","end"); self._log.configure(state="disabled")
 
@@ -3087,7 +3455,7 @@ class App(tk.Tk):
         p=self._proc
         if p is not None:
             try: p.kill()
-            except Exception: pass
+            except Exception: MC.swallowed()
         if self._batch:                    # cancelling also abandons the rest of a batch
             self._log_line(f"Batch cancelled with {len(self._batch)} file(s) left unbuilt.","err")
             self._batch=[]; self._batch_total=0; self._batch_waiting=False
@@ -3134,7 +3502,7 @@ class App(tk.Tk):
             y=self.winfo_rooty()+(self.winfo_height()-w.winfo_height())//2
             x0,y0,_x1,_y1=_virtual_screen(w)
             w.geometry(f"+{max(x0,x)}+{max(y0,y)}")
-        except Exception: pass
+        except Exception: MC.swallowed()
         self._apply_titlebar(w)
         w.grab_set(); ca.focus_set()
         self.wait_window(w)
@@ -3156,11 +3524,12 @@ class App(tk.Tk):
         try:
             if km is not None and km.w.winfo_exists():
                 km.w.deiconify(); km.w.lift(); km.cv.focus_set(); return
-        except Exception: pass
+        except Exception: MC.swallowed()
         try:
             import mohaa_view as MV
             tabs=self._keymap_tabs()
         except Exception as e:
+            MC.swallowed()
             self._log_line(f"(the keyboard shortcuts need mohaa_view.py: {e})","err"); return
         tab=getattr(self,"_keymap_tab",None)
         if tab is None: tab=0 if self._webview is not None else 1
@@ -3199,7 +3568,7 @@ class App(tk.Tk):
             y=self.winfo_rooty()+(self.winfo_height()-w.winfo_height())//2
             x0,y0,_x1,_y1=_virtual_screen(w)
             w.geometry(f"+{max(x0,x)}+{max(y0,y)}")
-        except Exception: pass
+        except Exception: MC.swallowed()
         if not OLD_POPUPS: self._apply_titlebar(w)
         w.grab_set(); btn.focus_set()
 
@@ -3231,7 +3600,7 @@ class App(tk.Tk):
                 y=self.winfo_rooty()+(self.winfo_height()-w.winfo_height())//2
                 x0,y0,_x1,_y1=_virtual_screen(w)
                 w.geometry(f"+{max(x0,x)}+{max(y0,y)}")
-            except Exception: pass
+            except Exception: MC.swallowed()
             w.grab_set(); btn.focus_set(); return
         w=tk.Toplevel(self); w.title("About"); w.configure(bg=BG)
         w.transient(self); w.resizable(False,False)
@@ -3257,7 +3626,7 @@ class App(tk.Tk):
             y=self.winfo_rooty()+(self.winfo_height()-w.winfo_height())//2
             x0,y0,_x1,_y1=_virtual_screen(w)
             w.geometry(f"+{max(x0,x)}+{max(y0,y)}")
-        except Exception: pass
+        except Exception: MC.swallowed()
         self._apply_titlebar(w)
         w.grab_set(); btn.focus_set()
 
@@ -3275,7 +3644,7 @@ class App(tk.Tk):
     def _open_url(self,url):
         try:
             import webbrowser; webbrowser.open(url)
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     def _check_for_updates(self):
         """Help --> Check for updates: shows the current version and repo link, checks
@@ -3317,20 +3686,18 @@ class App(tk.Tk):
             y=self.winfo_rooty()+(self.winfo_height()-w.winfo_height())//2
             x0,y0,_x1,_y1=_virtual_screen(w)
             w.geometry(f"+{max(x0,x)}+{max(y0,y)}")
-        except Exception: pass
+        except Exception: MC.swallowed()
         if not old: self._apply_titlebar(w)
         w.grab_set()
         def worker():
             try:
-                import urllib.request
-                req=urllib.request.Request(UPDATE_VERSION_URL,headers={"User-Agent":UPDATE_UA})
-                with urllib.request.urlopen(req,timeout=15) as r:
-                    raw=r.read(256).decode("utf-8","replace")
+                raw=MC.http_get(UPDATE_VERSION_URL,UPDATE_UA,timeout=(10,15),max_bytes=4096).decode("utf-8","replace")
                 latest=""
                 for ln in raw.splitlines():
                     if ln.strip(): latest=ln.strip(); break
                 res={"ok":True,"latest":latest} if latest else {"ok":False,"error":"empty version file"}
             except Exception as e:
+                MC.swallowed()
                 res={"ok":False,"error":str(e)}
             self._upd_state=("checked",res)
         threading.Thread(target=worker,daemon=True).start()
@@ -3344,14 +3711,15 @@ class App(tk.Tk):
     def _update_poll(self,w,status_lbl,btnrow):
         try:
             if not w.winfo_exists(): return
-        except Exception: return
+        except Exception: MC.swallowed(); return
         st=self._upd_state
         if st is None or st[0]!="checked":
             self.after(200,lambda:self._update_poll(w,status_lbl,btnrow)); return
         res=st[1]; self._upd_state=None
         if not res.get("ok"):
             status_lbl.configure(text="Couldn't reach GitHub - no update information found.\n"
-                                      "Check your internet connection and try again later.")
+                                      "Check your internet connection and try again later.\n"
+                                      "("+str(res.get("error",""))[:160]+")")
             return
         latest=res["latest"]
         if self._version_tuple(latest)<=self._version_tuple(VERSION):
@@ -3364,7 +3732,7 @@ class App(tk.Tk):
     def _update_install(self,w,status_lbl,btnrow,latest):
         self._upd_latest=latest
         try: self._upd_dl_btn.destroy()
-        except Exception: pass
+        except Exception: MC.swallowed()
         status_lbl.configure(text="Downloading "+latest+" \u2026")
         self._upd_state=None
         def worker():
@@ -3376,7 +3744,7 @@ class App(tk.Tk):
     def _update_poll_install(self,w,status_lbl,btnrow):
         try:
             if not w.winfo_exists(): return
-        except Exception: return
+        except Exception: MC.swallowed(); return
         st=self._upd_state
         if st is None or st[0]!="installed":
             self.after(200,lambda:self._update_poll_install(w,status_lbl,btnrow)); return
@@ -3387,6 +3755,8 @@ class App(tk.Tk):
                                  lambda:self._update_install(w,status_lbl,btnrow,getattr(self,"_upd_latest","")))
             return
         staged=res.get("staged") or []
+        if res.get("backup"):
+            self._log_line("Update: the previous version's files were saved to "+res["backup"],"dim")
         if staged:
             status_lbl.configure(text="Update downloaded. The program will now close and\n"
                                       "reopen to finish installing\u2026")
@@ -3397,95 +3767,197 @@ class App(tk.Tk):
             self._upd_add_button(btnrow,"Restart now",lambda:self._restart_program())
 
     def _update_download_and_apply(self, version=None):
-        """Background worker: download the zip for `version` (its release tag, or the branch
-        head if that tag doesn't exist), extract it and copy every file over the install root
-        (bin/, docs/, the RUN .bat). Locked files are written as <file>.new and returned in
-        'staged' for the restart helper to swap in. Returns a result dict; no Tk calls here."""
-        import urllib.request, urllib.error
+        """Background worker: install release `version` over the program folder.
+
+        Steps, each checked before the next:
+          1. download the release-tag zip (3 tries, backoff); if that tag doesn't exist,
+             the main-branch zip, accepted only if its docs/version.txt says `version`;
+          2. test every zip member's CRC, extract to a temp folder;
+          3. back up every file about to be replaced into
+             output/previous-versions/<n>/ and note it in previous-versions/changelog.txt;
+          4. write each new file as <file>.new beside its target, verify it (SHA-256)
+             against the download, then os.replace it into place. A target Windows keeps
+             locked stays staged as <file>.new for the restart helper;
+          5. if any file fails for another reason, everything already replaced is restored
+             from the backup and the update reports failure.
+        Returns a result dict ("ok", "error", "replaced", "staged", "backup", "branch");
+        makes no Tk calls."""
+        import urllib.error
         root=_install_root()
         tmp=tempfile.mkdtemp(prefix="mohaaupd_")
+        LOG.info("update to %s: install root %s, work folder %s",version,root,tmp)
         try:
             zpath=os.path.join(tmp,"repo.zip")
-            urls=[]
+            used_branch=False
+            if not (version and re.fullmatch(r"[0-9A-Za-z._-]{1,32}",version)):
+                return {"ok":False,"error":"the version file named %r, which isn't a plain version"%(version,)}
             # The version string comes from the network, so only a plain token goes into a URL.
-            if version and re.fullmatch(r"[0-9A-Za-z._-]{1,32}",version):
-                urls.append(UPDATE_TAG_ZIP_URL.format(tag=UPDATE_TAG_FMT.format(version=version)))
-            urls.append(UPDATE_ZIP_URL)
-            for i,url in enumerate(urls):
-                req=urllib.request.Request(url,headers={"User-Agent":UPDATE_UA})
-                try:
-                    with urllib.request.urlopen(req,timeout=90) as r, open(zpath,"wb") as f:
-                        shutil.copyfileobj(r,f)
-                    break
-                except urllib.error.HTTPError as e:
-                    if e.code==404 and i<len(urls)-1: continue      # untagged: use the branch
-                    raise
+            tag_url=UPDATE_TAG_ZIP_URL.format(tag=UPDATE_TAG_FMT.format(version=version))
+            try:
+                MC.http_get(tag_url,UPDATE_UA,timeout=(15,90),dest=zpath,max_bytes=UPDATE_MAX_BYTES)
+            except urllib.error.HTTPError as e:
+                if e.code!=404: raise
+                LOG.warning("release tag for %s not found; trying the %s branch",version,GITHUB_BRANCH)
+                MC.http_get(UPDATE_ZIP_URL,UPDATE_UA,timeout=(15,90),dest=zpath,max_bytes=UPDATE_MAX_BYTES)
+                used_branch=True
             exdir=os.path.join(tmp,"x")
-            with zipfile.ZipFile(zpath) as z: z.extractall(exdir)
+            with zipfile.ZipFile(zpath) as z:
+                bad=z.testzip()
+                if bad: return {"ok":False,"error":"the download is damaged (bad entry: %s)"%bad}
+                z.extractall(exdir)
             tops=[d for d in os.listdir(exdir)
                   if os.path.isdir(os.path.join(exdir,d)) and d!="__MACOSX"]
             src=os.path.join(exdir,tops[0]) if len(tops)==1 else exdir
-            replaced=[]; staged=[]
-            for dp,_dn,files in os.walk(src):
+            if not os.path.isfile(os.path.join(src,"bin","mohaa_launcher.py")):
+                return {"ok":False,"error":"the download doesn't look like this program (no bin/mohaa_launcher.py)"}
+            got=""
+            try:
+                with open(os.path.join(src,"docs","version.txt"),encoding="utf-8") as f:
+                    got=next((ln.strip() for ln in f if ln.strip()),"")
+            except OSError:
+                MC.swallowed("no docs/version.txt in the download")
+            if got!=version:
+                return {"ok":False,"error":"the downloaded files are version %r, not %r; nothing was changed"%(got or "?",version)}
+            # what will be written: every file of the download except folders this program owns
+            plan=[]
+            for dp,dn,files in os.walk(src):
                 rel=os.path.relpath(dp,src)
+                top=rel.replace("\\","/").split("/")[0]
+                if top in UPDATE_SKIP_DIRS: dn[:]=[]; continue
+                dn[:]=[d for d in dn if d not in UPDATE_SKIP_DIRS]
                 for fn in files:
-                    s=os.path.join(dp,fn)
                     rp=fn if rel=="." else os.path.join(rel,fn)
-                    d=os.path.join(root,rp)
+                    plan.append((os.path.join(dp,fn),os.path.join(root,rp),rp.replace("\\","/")))
+            if not plan: return {"ok":False,"error":"nothing to install (empty download?)"}
+            planned={rp for _s,_d,rp in plan}
+            retired=[(os.path.join(root,rp),rp) for rp in UPDATE_RETIRED
+                     if rp not in planned and os.path.isfile(os.path.join(root,rp))]
+            backup=self._update_backup(root,[(d,rp) for _s,d,rp in plan]+retired,version)
+            replaced=[]; staged=[]; failed=[]
+            for s,d,rp in plan:
+                try:
+                    with open(s,"rb") as f: data=f.read()
+                    new=d+".new"
+                    MC.atomic_write_bytes(new,data)
                     try:
-                        os.makedirs(os.path.dirname(d) or root,exist_ok=True)
-                        try:
-                            shutil.copyfile(s,d); replaced.append(rp.replace("\\","/"))
-                        except PermissionError:
-                            shutil.copyfile(s,d+".new"); staged.append(d)
-                    except Exception:
-                        pass
-            if not replaced and not staged:
-                return {"ok":False,"error":"nothing was written (empty download?)"}
+                        os.replace(new,d); replaced.append((d,rp))
+                    except PermissionError:
+                        LOG.warning("%s is in use; staged as %s for the restart",d,new)
+                        staged.append(d)
+                except OSError as e:
+                    LOG.error("update: could not write %s",d,exc_info=True)
+                    failed.append("%s (%s)"%(rp,e))
+            if failed:
+                self._update_rollback(backup,replaced,staged)
+                return {"ok":False,"error":"%d file(s) could not be written, so the update was undone: %s"
+                                            %(len(failed),"; ".join(failed[:4])),"backup":backup}
+            # only now, with every new file in place: the files this version no longer has
+            # (already copied into the backup above)
+            for d,rp in retired:
+                try:
+                    os.remove(d); LOG.info("update: removed %s (no longer part of the program)",rp)
+                except OSError:
+                    LOG.warning("update: could not remove %s",rp,exc_info=True)
             for pc in (os.path.join(root,"bin","__pycache__"),os.path.join(root,"__pycache__")):
-                shutil.rmtree(pc,ignore_errors=True)
-            return {"ok":True,"replaced":replaced,"staged":staged}
+                if os.path.isdir(pc):
+                    shutil.rmtree(pc,onerror=lambda fn,p,ei:LOG.warning("could not remove %s: %s",p,ei[1]))
+            LOG.info("update to %s: %d replaced, %d staged, backup %s%s",version,len(replaced),len(staged),
+                     backup," (from the branch, version file checked)" if used_branch else "")
+            return {"ok":True,"replaced":[rp for _d,rp in replaced],"staged":staged,"backup":backup,"branch":used_branch}
         except Exception as e:
-            return {"ok":False,"error":str(e)}
+            LOG.error("update to %s failed",version,exc_info=True)
+            return {"ok":False,"error":"%s: %s"%(type(e).__name__,e)}
         finally:
-            shutil.rmtree(tmp,ignore_errors=True)
+            shutil.rmtree(tmp,onerror=lambda fn,p,ei:LOG.warning("could not remove %s: %s",p,ei[1]))
+
+    def _update_backup(self, root, targets, new_version):
+        """Copy every existing file in `targets` [(abs path, rel path)] into
+        output/previous-versions/<n>/ (n = next free number), verify each copy's size, and
+        add "<n> - version <old> (replaced by <new> on <date>)" to the changelog.txt there.
+        Returns the backup folder. Raises OSError if any copy fails (nothing is installed)."""
+        base=os.path.join(DATADIR,"previous-versions")
+        MC.ensure_dir(base)
+        nums=[int(d) for d in os.listdir(base) if d.isdigit() and os.path.isdir(os.path.join(base,d))]
+        n=max(nums)+1 if nums else 1
+        dest=os.path.join(base,str(n))
+        os.makedirs(dest)
+        count=0
+        for d,rp in targets:
+            if not os.path.isfile(d): continue
+            b=os.path.join(dest,rp)
+            os.makedirs(os.path.dirname(b),exist_ok=True)
+            shutil.copy2(d,b)
+            if os.path.getsize(b)!=os.path.getsize(d):
+                raise OSError("backup of %s is incomplete"%d)
+            count+=1
+        line="%d - version %s (replaced by %s on %s, %d files)\n"%(n,VERSION,new_version,time.strftime("%Y-%m-%d"),count)
+        log=os.path.join(base,"changelog.txt")
+        old=""
+        if os.path.isfile(log):
+            with open(log,"r",encoding="utf-8",errors="replace") as f: old=f.read()
+        MC.atomic_write_text(log,old+line)
+        LOG.info("backed up %d files to %s",count,dest)
+        return dest
+
+    def _update_rollback(self, backup, replaced, staged):
+        """Undo a partial update: put the backed-up copy of every replaced file back, delete
+        files the update added, and drop staged .new files. Problems are logged."""
+        for d,rp in replaced:
+            b=os.path.join(backup,rp)
+            try:
+                if os.path.isfile(b): shutil.copy2(b,d)
+                else: os.remove(d)                       # the update added this file
+            except OSError:
+                LOG.error("rollback: could not restore %s from %s",d,b,exc_info=True)
+        for d in staged:
+            try: os.remove(d+".new")
+            except OSError: LOG.error("rollback: could not remove %s.new",d,exc_info=True)
+        LOG.warning("update rolled back from %s",backup)
+
+    def _launcher_path(self):
+        """The script a restart runs again (the Map Viewer overrides this)."""
+        return os.path.abspath(__file__)
 
     def _restart_program(self,staged=None):
-        """Start a fresh launcher and close this one. If files were staged as *.new (locked
-        during the update), a one-shot helper .bat waits for this process to exit, swaps them
-        in, then starts the new launcher."""
-        launcher=os.path.abspath(__file__)
+        """Start a fresh launcher and close this one.
+
+        If files were staged as *.new (locked during an update), a small Python helper
+        (written to the temp folder, so it doesn't depend on any staged file) waits for them
+        to unlock, moves them into place, logs to output/logs/mohaa_update.log and then
+        starts the launcher. Python rather than a .bat, so non-ASCII paths survive and it
+        works on every OS. If the new process can't be started, this window stays open and
+        says so instead of vanishing."""
+        launcher=self._launcher_path()
         exe=sys.executable or "pythonw"
         try:
             if staged:
-                pid=os.getpid()
-                lines=["@echo off",
-                       ":wait",
-                       'tasklist /FI "PID eq %d" 2>nul | find "%d" >nul && (ping 127.0.0.1 -n 2 >nul & goto wait)'%(pid,pid)]
-                for d in staged:
-                    lines.append('move /y "%s.new" "%s" >nul'%(d,d))
-                lines.append('start "" "%s" "%s"'%(exe,launcher))
-                lines.append('del "%~f0"')
-                bat=os.path.join(tempfile.gettempdir(),"mohaa_update_swap.bat")
-                with open(bat,"w",encoding="utf-8") as f: f.write("\r\n".join(lines))
-                subprocess.Popen(["cmd","/c",bat],**NOWIN)
+                helper=os.path.join(tempfile.gettempdir(),"mohaa_update_finish_%d.py"%os.getpid())
+                MC.atomic_write_text(helper,UPDATE_FINISHER_SRC)
+                MC.atomic_write_text(helper+".json",json.dumps({"staged":list(staged),"exe":exe,"launcher":launcher,
+                                                                 "log":os.path.join(MC.ensure_dir(MC.logs_dir()),"mohaa_update.log")}))
+                subprocess.Popen([exe,helper,helper+".json"],**NOWIN)
             else:
                 subprocess.Popen([exe,launcher],**NOWIN)
-        except Exception:
-            pass
+        except OSError as e:
+            LOG.error("could not start the restart (%s %s)",exe,launcher,exc_info=True)
+            try: self._log_line(f"Could not restart automatically ({e}). Close this window and start the program again.","err")
+            except Exception: MC.swallowed()
+            return
+        LOG.info("restarting: %s %s",exe,launcher)
         try:
             if getattr(self,"_tmp",None) and os.path.isdir(self._tmp):
                 shutil.rmtree(self._tmp,ignore_errors=True)
-        except Exception: pass
+        except Exception: MC.swallowed()
         try: self.destroy()
-        except Exception: pass
+        except Exception: MC.swallowed()
+        logging.shutdown()
         os._exit(0)
 
     # ------------------------------------------------------------- search ---
     def _on_search(self,_e=None):
         if self._filter_after:
             try: self.after_cancel(self._filter_after)
-            except Exception: pass
+            except Exception: MC.swallowed()
         self._filter_after=self.after(180,self._rebuild_tree)
 
     # --------------------------------------------------------------- paks ---
@@ -3499,16 +3971,16 @@ class App(tk.Tk):
         """Note the shared list's time now, and look again whenever this window gets the
         focus: a change made in the other program meanwhile is taken up here."""
         try: self._paks_seen=os.path.getmtime(PAKS_SHARED)
-        except OSError: self._paks_seen=None
+        except OSError: MC.swallowed(); self._paks_seen=None
         self.bind("<FocusIn>",self._paks_follow,add="+")
     def _paks_changed(self):
         """This program's paks changed: write the shared list for the other one."""
         write_shared_paks(self._pk3_paths)
         try: self._paks_seen=os.path.getmtime(PAKS_SHARED)
-        except OSError: self._paks_seen=None
+        except OSError: MC.swallowed(); self._paks_seen=None
     def _paks_follow(self,_e=None):
         try: t=os.path.getmtime(PAKS_SHARED)
-        except OSError: return
+        except OSError: MC.swallowed(); return
         if t==self._paks_seen: return
         self._paks_seen=t
         ps=read_shared_paks()
@@ -3531,7 +4003,7 @@ class App(tk.Tk):
         for path in paths:
             if not os.path.exists(path): continue
             try: zipfile.ZipFile(path).close()
-            except Exception as e: self._log_line(f"Could not open {os.path.basename(path)}: {e}","err"); continue
+            except Exception as e: MC.swallowed(); self._log_line(f"Could not open {os.path.basename(path)}: {e}","err"); continue
             if path not in self._pk3_paths: self._pk3_paths.append(path); added+=1
         if not added and paths: return
         self._cfg["pk3s"]=self._pk3_paths if self._remember.get() else []
@@ -3566,8 +4038,8 @@ class App(tk.Tk):
                         if low.endswith(".skc") and any(low.startswith(r) for r in roots):
                             self._extract_one(zf,n)
                     zf.close()
-                except Exception: pass
-        except Exception: pass
+                except Exception: MC.swallowed()
+        except Exception: MC.swallowed()
         # Build the texture resolution indexes (shaders + tik skins) across all paks.
         if MTX is None:
             self._log_q.put(("dim","(mohaa_textures.py not found - models will load untextured)")); return
@@ -3575,16 +4047,17 @@ class App(tk.Tk):
             ED={}                                # shader -> qer_editorimage, for missing-map stand-ins
             vfs=MTX.Vfs(paks); SH=MTX.build_shader_index(vfs,ED); TI=MTX.build_tik_index(vfs)
             GS=MTX.build_global_surface_shaders(TI)
-            PROPS=MTX.build_shader_props(vfs) if hasattr(MTX,"build_shader_props") else {}
+            PROPS=MTX.build_shader_props(vfs)   # always present (no silent hasattr fallback)
             if gen!=self._tex_gen: return        # a newer reload superseded this one
             old=self._vfs
             self._vfs=vfs; self._SH=SH; self._TI=TI; self._GS=GS; self._PROPS=PROPS; self._ED=ED; self._tex_ready=True
             if old is not None and hasattr(old,"close"):
                 try: old.close()                  # release the previous reload's pak handles
-                except Exception: pass
+                except Exception: MC.swallowed()
             self._log_q.put(("ok",f"Textures ready: {len(SH)} shaders, {len(TI)} skinned models indexed."))
             self._log_q.put(("status","Textures ready"))
         except Exception as e:
+            MC.swallowed()
             self._log_q.put(("err",f"Texture index failed: {e}"))
 
     # File types the viewer reads from the workspace. Nothing else in a pak is ever written
@@ -3616,23 +4089,36 @@ class App(tk.Tk):
         try:
             rr=os.path.normcase(os.path.realpath(root))
             rt=os.path.normcase(os.path.realpath(target))
-        except OSError: return None
+        except OSError: MC.swallowed(); return None
         if rt!=rr and not rt.startswith(rr+os.sep): return None
         return target
 
     def _extract_one(self, zf, name, force=False):
+        """Extract one pak entry into the workspace and return its path (None if refused).
+
+        The copy is atomic (temp file + os.replace) and its size must equal the entry's
+        declared size, so a crash mid-extract can never leave a short file that later runs
+        mistake for a cached copy. A cached file is reused only when its size matches the
+        entry. zipfile checks the entry's CRC as it reads, so corrupt data raises here."""
         target=self._safe_target(name)
         if target is None:
             self._log_q.put(("dim","(skipped unsafe pak entry: %s)"%name[:120])); return None
-        if not force and os.path.exists(target) and os.path.getsize(target)>0: return target  # cached
         # zipfile stops reading at the entry's declared size, so checking that size bounds
         # what gets written.
         try: size=zf.getinfo(name).file_size
-        except KeyError: return None
+        except KeyError:
+            LOG.warning("pak entry %s vanished from %s",name,getattr(zf,"filename","?")); return None
         if size>PAK_ENTRY_MAX:
             self._log_q.put(("dim","(skipped oversized pak entry: %s)"%name[:120])); return None
-        os.makedirs(os.path.dirname(target),exist_ok=True)
-        with zf.open(name) as src, open(target,"wb") as dst: shutil.copyfileobj(src,dst)
+        if not force and os.path.isfile(target):
+            try:
+                if os.path.getsize(target)==size: return target      # cached, and complete
+                LOG.warning("cached %s is %d bytes, entry is %d: extracting again",
+                            target,os.path.getsize(target),size)
+            except OSError:
+                MC.swallowed("cached copy unreadable; extracting again")
+        with zf.open(name) as src:
+            MC.atomic_write_stream(target,src,expected_size=size)
         return target
 
     def _extract_model_map(self, stem, dest_dir):
@@ -3644,7 +4130,7 @@ class App(tk.Tk):
         want=stem.lower()+".map"; best=None   # (score, data); lower score wins
         for p in self._pk3_paths:
             try: zf=zipfile.ZipFile(p)
-            except Exception: continue
+            except Exception: MC.swallowed(); continue
             try:
                 for n in zf.namelist():
                     if n.endswith("/") or os.path.basename(n).lower()!=want: continue
@@ -3653,14 +4139,14 @@ class App(tk.Tk):
                         try:
                             if zf.getinfo(n).file_size>PAK_ENTRY_MAX: continue
                             best=(score,zf.read(n))
-                        except Exception: continue
+                        except Exception: MC.swallowed(); continue
             finally: zf.close()
         if not best: return None
         try:
             tgt=os.path.join(dest_dir,stem+".map")
-            with open(tgt,"wb") as f: f.write(best[1])
+            MC.atomic_write_bytes(tgt,best[1])
             return tgt
-        except OSError: return None
+        except OSError: MC.swallowed(); return None
 
     def _populate_tree(self, paks):
         """Scan every pak's models/ tree into self._all_files, then build the
@@ -3668,7 +4154,7 @@ class App(tk.Tk):
         skds={}; tiks={}   # relpath -> display (later paks override earlier)
         for p in paks:
             try: names=zipfile.ZipFile(p).namelist()
-            except Exception: continue
+            except Exception: MC.swallowed(); continue
             for n in names:
                 if not n.lower().startswith("models/"): continue
                 if n.endswith("/"): continue
@@ -3772,13 +4258,14 @@ class App(tk.Tk):
                     skd_target=os.path.join(self._tmp, os.path.basename(loose_path))
                     try: shutil.copyfile(loose_path, skd_target)
                     except Exception as e:
+                        MC.swallowed()
                         self._log_q.put(("err",f"Could not read {os.path.basename(loose_path)}: {e}")); return
                 else:
                     prefix="/".join(entry.split("/")[:-1])+"/"; skd_target=None
                     for p in self._pk3_paths:                       # later paks override earlier
                         if bgen!=self._build_gen: return            # Escape: cancelled
                         try: zf=zipfile.ZipFile(p)
-                        except Exception: continue
+                        except Exception: MC.swallowed(); continue
                         for n in zf.namelist():
                             if n.startswith(prefix) and not n.endswith("/"):
                                 t=self._extract_one(zf,n,force=True)
@@ -3804,7 +4291,7 @@ class App(tk.Tk):
                 try:
                     mp=self._extract_model_map(os.path.splitext(os.path.basename(entry))[0], os.path.dirname(skd_target))
                     if mp: self._log_q.put(("dim",f"setsize .map: {os.path.basename(mp)}"))
-                except Exception: pass
+                except Exception: MC.swallowed()
                 # resolve textures -> manifest (if the index is ready)
                 manifest=None
                 if MTX is not None and self._tex_ready and self._vfs is not None and gen==self._tex_gen:
@@ -3818,6 +4305,7 @@ class App(tk.Tk):
                         if nt<ns: self._report_surface_misses(manifest,surfs)
                         if nt==0: manifest=None
                     except Exception as e:
+                        MC.swallowed()
                         self._log_q.put(("dim",f"(texture resolve skipped: {e})")); manifest=None
                 elif MTX is not None and not self._tex_ready:
                     self._log_q.put(("dim","(textures still indexing - opening untextured for now)"))
@@ -3825,6 +4313,7 @@ class App(tk.Tk):
                 self._animcat=None; self._animcat_file=None; self._animcat_for=None
                 self._log_q.put(("load",(skd_target,self._animroot,manifest,None,subdir)))
             except Exception as e:
+                MC.swallowed()
                 self._log_q.put(("err",f"Extract failed: {e}"))
         threading.Thread(target=work,daemon=True).start()
 
@@ -3890,13 +4379,14 @@ class App(tk.Tk):
                     tik_target=os.path.join(self._tmp, os.path.basename(loose_path))
                     try: shutil.copyfile(loose_path, tik_target)
                     except Exception as e:
+                        MC.swallowed()
                         self._log_q.put(("err",f"Could not read {os.path.basename(loose_path)}: {e}")); return
                 else:
                     tik_target=None
                     for p in self._pk3_paths:
                         if bgen!=self._build_gen: return            # Escape: cancelled
                         try: zf=zipfile.ZipFile(p)
-                        except Exception: continue
+                        except Exception: MC.swallowed(); continue
                         for n in zf.namelist():
                             if n.lower()==entry.lower() and not n.endswith("/"):
                                 tik_target=self._extract_one(zf,n,force=True)
@@ -3916,8 +4406,7 @@ class App(tk.Tk):
                         if _cat.get("anims"):
                             _cf=os.path.join(self._tmp,"animcat_"+re.sub(r"[^A-Za-z0-9_.-]","_",
                                              os.path.basename(entry))+".json")
-                            with open(_cf,"w",encoding="utf-8") as _f:
-                                json.dump(_cat,_f,separators=(",",":"))
+                            MC.atomic_write_text(_cf,json.dumps(_cat,separators=(",",":")))
                             self._animcat=_cat; self._animcat_file=_cf; self._animcat_for=tik_target
                             self._log_q.put(("dim",f"animations: {len(_cat['anims'])} unique across "
                                                   f"{len(_cat['nodes'])} menu group(s), {_cat['files']} file(s)"))
@@ -3925,9 +4414,10 @@ class App(tk.Tk):
                                 self._log_q.put(("dim","(unresolved $include: "+", ".join(_cat["missing"][:4])
                                                 +(" ..." if len(_cat["missing"])>4 else "")+")"))
                     except Exception as _e:
+                        MC.swallowed()
                         self._log_q.put(("dim",f"(animation catalogue failed: {_e})"))
                 if MTX is not None: txt=MTX.expand_tik_includes(txt, self._vfs)   # splice $include'd _base.txt (grenades)
-                open(tik_target,"w",encoding="utf-8",errors="replace").write(txt)  # write back so mohaa_view.py sees expanded content
+                MC.atomic_write_text(tik_target,txt,errors="replace")  # write back so mohaa_view.py sees expanded content
                 emitters=MV.parse_tik_emitters(txt)
                 # Anim-level client spawn blocks (tagspawn/originspawn) also reference sprites and
                 # sub-models; collect their params so the sprite resolver covers them.
@@ -3950,13 +4440,13 @@ class App(tk.Tk):
                                 _et=(_rest[0].strip('"').lower() if _rest else "grenade")
                                 _tik=MV._EXPLOSIONEFFECT_TIK.get(_et,MV._EXPLOSIONEFFECT_TIK["grenade"])
                                 anim_prms.append({"model":_tik})
-                except Exception: pass
+                except Exception: MC.swallowed()
                 # init{client{}} `sfx originspawn ( ... )` one-shots (grenexp_water) reference sprites
                 # too.
                 try:
                     for _s in MV.parse_tik_init_sfx(txt):
                         if _s.get("prm"): anim_prms.append(_s["prm"])
-                except Exception: pass
+                except Exception: MC.swallowed()
                 pathhead,skel=MV.parse_tik_setup_head(txt)
                 tik_dir=os.path.dirname(tik_target)
                 manifest=None
@@ -3973,7 +4463,7 @@ class App(tk.Tk):
                 if not data:
                     self._log_q.put(("err","skelmodel is indexed but could not be read")); return
                 skd_out=os.path.join(tik_dir,os.path.basename(skel))
-                with open(skd_out,"wb") as f: f.write(data)
+                MC.atomic_write_bytes(skd_out,data)
                 self._log_q.put(("dim",f"skelmodel: {skel_vfs}"))
                 # 3) pull the skelmodel's sibling .skc (animation), .tik (shaders), .map (the
                 #    world-space clip box the viewer derives setsize from) and .lod (its level of
@@ -3989,7 +4479,7 @@ class App(tk.Tk):
                 if sib: self._log_q.put(("dim",f"+{sib} animation/shader sibling(s)"))
                 # Also fetch the model's .map (setsize source) when it isn't in the skelmodel's folder.
                 try: self._extract_model_map(os.path.splitext(os.path.basename(skel))[0], tik_dir)
-                except Exception: pass
+                except Exception: MC.swallowed()
                 # 4) Extract the .skc for the animations the .tik declares itself, so the page can bake
                 #    them with their per-anim fx. The rest of the catalogue builds on click.
                 try:
@@ -4006,7 +4496,7 @@ class App(tk.Tk):
                             if os.path.exists(_tg): continue
                             _d=self._vfs_read_skc(_e["s"])
                             if _d is None: miss+=1; continue
-                            with open(_tg,"wb") as f: f.write(_d)
+                            MC.atomic_write_bytes(_tg,_d)
                             got+=1
                         if got: self._log_q.put(("dim",f"+{got} animation .skc extracted"
                                                        +(f" ({miss} unresolved)" if miss else "")))
@@ -4028,12 +4518,12 @@ class App(tk.Tk):
                             if not k: continue
                             d=self._vfs.read(k)
                             if d:
-                                with open(tgt,"wb") as f: f.write(d)
+                                MC.atomic_write_bytes(tgt,d)
                                 got+=1
                             if got>=300:
                                 self._log_q.put(("dim","(animation extraction capped at 300 .skc)")); break
                         if got: self._log_q.put(("dim",f"+{got} referenced animation .skc extracted"))
-                except Exception as _e: self._log_q.put(("dim",f"(animation extraction: {_e})"))
+                except Exception as _e: MC.swallowed(); self._log_q.put(("dim",f"(animation extraction: {_e})"))
                 # 4b) The .tik's `idle` animation, the last one loaded as TIKI_InitTiki takes it: the
                 #     viewer sizes the model by its bounds (the game cvar sv_showbboxes) and measures
                 #     its level of detail by its radius. Characters reach it through $include, so it
@@ -4048,13 +4538,13 @@ class App(tk.Tk):
                         if not os.path.exists(_tg):
                             _d=self._vfs_read_skc(_ie.get("s"))
                             if _d is not None:
-                                with open(_tg,"wb") as f: f.write(_d)
-                except Exception: pass
+                                MC.atomic_write_bytes(_tg,_d)
+                except Exception: MC.swallowed()
                 # 5) Extract the other skelmodels this .tik assembles (head, hands, helmet, ...) next to
                 #    it so the viewer merges them into one model, as in-game.
                 part_disk=[skd_out]                          # body first
                 try: all_parts=MV.parse_tik_skelmodels(txt)
-                except Exception: all_parts=[]
+                except Exception: MC.swallowed(); all_parts=[]
                 for (pp,ps) in all_parts[1:]:
                     ps=(ps or "").replace("\\","/").strip().strip('"')
                     pp=(pp or "").replace("\\","/").strip().strip('"')
@@ -4065,7 +4555,7 @@ class App(tk.Tk):
                     pd=self._vfs.read(pv)
                     if not pd: continue
                     pout=os.path.join(tik_dir,os.path.basename(ps))
-                    with open(pout,"wb") as f: f.write(pd)
+                    MC.atomic_write_bytes(pout,pd)
                     part_disk.append(pout)
                     pfolder="/".join(pv.split("/")[:-1])+"/"     # pull that part's sibling .skc too
                     for k in list(self._vfs.names()):
@@ -4088,7 +4578,7 @@ class App(tk.Tk):
                         surfs=[]
                         for pdp in part_disk:
                             try: surfs+=[s["name"] for s in MV.parse_skd(pdp)["surfaces"]]
-                            except Exception: pass
+                            except Exception: MC.swallowed()
                         seen=set(); surfs=[s for s in surfs if not (s in seen or seen.add(s))]
                         manifest=os.path.join(self._tmp,"_tex_"+os.path.basename(entry)+".json")
                         # The opened .tik's own setup decides the skin (bangalore_pulsating, _ghosting and plain
@@ -4102,7 +4592,7 @@ class App(tk.Tk):
                             # the body key the manifest uses.
                             for v in tik_map.values(): allpairs+=v
                             local_TI[skel_vfs]=allpairs; local_TI[skel_vfs.lower()]=allpairs
-                        except Exception: pass
+                        except Exception: MC.swallowed()
                         nt,ns=MTX.write_textures_manifest(self._vfs,skel_vfs,surfs,self._SH,local_TI,manifest,global_surf=self._GS,shader_props=self._PROPS,
                                                           editor_index=self._ED,log=self._log_kind)
                         self._log_q.put(("dim",f"textures: {nt}/{ns} surfaces"))
@@ -4111,6 +4601,7 @@ class App(tk.Tk):
                         if nt<ns: self._report_surface_misses(manifest,surfs,dict(allpairs))
                         if nt==0: manifest=None
                     except Exception as e:
+                        MC.swallowed()
                         self._log_q.put(("dim",f"(texture resolve skipped: {e})")); manifest=None
                 # 7) Resolve each emitter's sprite/sub-model to a billboard texture (setup emitters and
                 #    anim-level spawn blocks), then a second pass for sprites referenced inside flattened
@@ -4129,13 +4620,14 @@ class App(tk.Tk):
                 if emittex:
                     emittex_file=os.path.join(self._tmp,"_emit_"+os.path.basename(entry)+".json")
                     try:
-                        with open(emittex_file,"w",encoding="utf-8") as _ef: json.dump(emittex,_ef)
-                    except Exception: emittex_file=None
+                        MC.atomic_write_text(emittex_file,json.dumps(emittex))
+                    except Exception: MC.swallowed(); emittex_file=None
                     self._log_q.put(("dim",f"emitter sprites: {len(emittex)} resolved"))
                 self._log_q.put(("dim",f"{len(emitters)} particle emitter(s) parsed"))
                 if bgen!=self._build_gen: return                # Escape: cancelled
                 self._log_q.put(("load",(tik_target,self._animroot,manifest,emittex_file,subdir)))
             except Exception as e:
+                MC.swallowed()
                 self._log_q.put(("err",f"Effect extract failed: {e}"))
         threading.Thread(target=work,daemon=True).start()
 
@@ -4167,15 +4659,16 @@ class App(tk.Tk):
             data=self._vfs.read(skel_vfs)
             if not data: return (0.0, 1.0)
             tmp=os.path.join(self._tmp or ".","_submodel_"+os.path.basename(skel))
-            with open(tmp,"wb") as f: f.write(data)
+            MC.atomic_write_bytes(tmp,data)
             try: dims=MV.skd_bind_dims(MV.parse_skd(tmp))
             finally:
                 try: os.remove(tmp)
-                except OSError: pass
+                except OSError: MC.swallowed()
             longest=dims[0]; middle=dims[1] if len(dims)>1 and dims[1]>0.01 else longest
             aspect=round(longest/middle, 3) if middle>0.01 else 1.0
             return (round(longest*tscale, 3), aspect)
         except Exception:
+            MC.swallowed()
             return (0.0, 1.0)
 
     def _submodel_pose_channels(self, sub_text, pathhead):
@@ -4211,14 +4704,15 @@ class App(tk.Tk):
             data=self._vfs.read(key)
             if not data: return {}
             tmp=os.path.join(self._tmp or ".","_subanim_"+os.path.basename(ref))
-            with open(tmp,"wb") as f: f.write(data)
+            MC.atomic_write_bytes(tmp,data)
             try: skc=MV.parse_skc(tmp)
             finally:
                 try: os.remove(tmp)
-                except OSError: pass
+                except OSError: MC.swallowed()
             fr=skc.get("frames") or []
             return dict(fr[0]) if fr else {}
         except Exception:
+            MC.swallowed()
             return {}
 
     def _submodel_mesh(self, sub_text, max_aspect=3.0):
@@ -4257,11 +4751,11 @@ class App(tk.Tk):
             data=self._vfs.read(skel_vfs)
             if not data: return None
             tmp=os.path.join(self._tmp or ".","_mesh_"+os.path.basename(skel))
-            with open(tmp,"wb") as f: f.write(data)
+            MC.atomic_write_bytes(tmp,data)
             try: skd=MV.parse_skd(tmp)
             finally:
                 try: os.remove(tmp)
-                except OSError: pass
+                except OSError: MC.swallowed()
             # Pose the skeleton like the engine: the sub-tik's `idle` animation at frame 0
             # (cg_tempmodels.cpp:1337-1347).
             _ch=self._submodel_pose_channels(sub_text, pathhead)
@@ -4321,9 +4815,10 @@ class App(tk.Tk):
                                                  emitter_clean=_add)
                         if d: out["tex"]=d
             except Exception:
-                pass
+                MC.swallowed()
             return out
         except Exception:
+            MC.swallowed()
             return None
 
     def _avg_tex_color(self, texpath):
@@ -4332,7 +4827,7 @@ class App(tk.Tk):
         if not texpath or self._vfs is None: return default
         try:
             import io
-            from PIL import Image
+            Image = MC.pil_image()          # Pillow >= 10.3, pixel limit set (mohaa_common)
             data=self._vfs.read(texpath)
             if not data: return default
             with Image.open(io.BytesIO(data)) as im:
@@ -4341,6 +4836,7 @@ class App(tk.Tk):
             if not n: return default
             return [round(sum(p[k] for p in px)/n/255.0,3) for k in range(3)]
         except Exception:
+            MC.swallowed()
             return default
 
     def _resolve_emitter_sprites(self, emitters):
@@ -4475,6 +4971,7 @@ class App(tk.Tk):
                         if _mesh is not None:
                             _mesh["color"]=self._avg_tex_color(tp)
             except Exception:
+                MC.swallowed()
                 du=None
             if not du: continue
             # Original (pre-downscale) texture size, used by the viewer to size .spr sprites.
@@ -4584,6 +5081,7 @@ class App(tk.Tk):
                 q=dict(e); q["stream"]=True
                 out.append(q)
         except Exception:
+            MC.swallowed()
             return []
         return out
 
@@ -4596,16 +5094,18 @@ class App(tk.Tk):
         try:
             data=self._vfs.read(texpath)
         except Exception:
+            MC.swallowed()
             data=None
         if not data: return (0,0)
         wh=self._dims_from_header(data, texpath)
         if wh[0] and wh[1]: return wh
         try:
             import io
-            from PIL import Image
+            Image = MC.pil_image()          # Pillow >= 10.3, pixel limit set (mohaa_common)
             with Image.open(io.BytesIO(data)) as im:
                 return (int(im.size[0]), int(im.size[1]))
         except Exception:
+            MC.swallowed()
             return (0,0)
 
     @staticmethod
@@ -4639,7 +5139,7 @@ class App(tk.Tk):
                 import struct
                 w,h=struct.unpack("<HH", data[12:16]); return (w,h)
         except Exception:
-            pass
+            MC.swallowed()
         return (0,0)
 
     # ------------------------------------------------------------ run/load ---
@@ -4648,11 +5148,15 @@ class App(tk.Tk):
             filetypes=[("MOHAA model / effect","*.skd *.tik"),("MOHAA Skeleton","*.skd"),
                        ("MOHAA effect/emitter","*.tik"),("All files","*.*")])
         if p: self._path_var.set(p)
+        return p or ""
 
     def _browse_and_run(self):
-        self._browse()
-        p=self._path_var.get().strip().strip('"')
-        if p and not p.startswith("pk3://") and os.path.exists(p): self._run()
+        """Browse... (and File > Open File...): pick a file and open it at once. Only a file
+        that was picked opens (Cancel leaves the path bar's own path alone), and only a kind
+        the viewer opens (.skd / .tik here, .bsp / .map / .bak in the Map Viewer: _run says
+        so for another); Open Viewer stays for a path typed into the bar."""
+        p=self._browse()
+        if p and os.path.isfile(p): self._run()
 
     def _run(self):
         path=self._path_var.get().strip().strip('"')
@@ -4729,7 +5233,7 @@ class App(tk.Tk):
             # Always --no-open: the launcher opens the HTML itself (embedded pane or browser).
             cmd.append("--no-open")
             # Popen (not run) so Escape-to-cancel can kill the build mid-flight
-            p=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,**NOWIN)
+            p=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",errors="replace",env=MC.child_env(),**NOWIN)
             self._proc=p
             try:
                 out,err=p.communicate(timeout=180)
@@ -4747,7 +5251,7 @@ class App(tk.Tk):
                 if will_open: self._log_q.put(("openext" if ext else "openhtml",(path,subdir)))
                 self._log_q.put(("status","Done"))
             else: self._log_q.put(("err",f"Exited with code {p.returncode}"))
-        except Exception as e: self._log_q.put(("err",str(e)))
+        except Exception as e: MC.swallowed(); self._log_q.put(("err",str(e)))
         finally:
             self._log_q.put(("done",None))          # clears the building-name latch
             self._log_q.put(("batchnext",None))     # step done (no-op outside a batch)
@@ -4796,8 +5300,9 @@ class App(tk.Tk):
                     elif kind=="js": self._embed_js(msg)
                 except Exception as e:
                     # A bad handler must never kill the poll loop.
+                    MC.swallowed()
                     try: self._log_line(f"(ui error: {e})","err")
-                    except Exception: pass
+                    except Exception: MC.swallowed()
             # Fire a pk3 open queued while the index was building (see _queue_open_until_indexed)
             # once the index is ready; drop it if Escape bumped _build_gen or indexing failed (the
             # "err" handler releases _opening_view).
@@ -4811,7 +5316,57 @@ class App(tk.Tk):
         finally:
             self.after(80,self._poll_log)
 
+    # ---- start-up from the RUN file, and the files the program writes ------------------
+    # The RUN .bat starts the program without a console (mohaa_envcheck.py start) and closes
+    # once the window is open: MOHAA_READY_FILE names a file to create then. Its own text
+    # (Python, the package checks, pip) is in MOHAA_RUN_LOG; it goes at the top of the Output
+    # pane, so it is also in output_console*.log. Every file the program saves through the
+    # atomic writers is announced in the Output pane ("saved <path>"), apart from its scratch
+    # files (the temp folder, caches, logs).
+    def _startup_extras(self):
+        """Copy the RUN window's text into the Output pane, install the "saved" hook and
+        schedule the window-open signal. Never raises."""
+        try:
+            rl=os.environ.get("MOHAA_RUN_LOG","")
+            if rl and os.path.isfile(rl):
+                with open(rl,encoding="utf-8",errors="replace") as f: lines=f.read().splitlines()
+                if lines:
+                    self._log_q.put(("dim","--- the RUN window (also in %s) ---"%rl))
+                    for ln in lines:
+                        tag="err" if ln.lstrip().startswith("[ERROR]") else ("warn" if ln.lstrip().startswith("[WARN]") else "dim")
+                        self._log_q.put((tag,ln))
+                    self._log_q.put(("dim","--- end of the RUN window ---"))
+        except Exception:
+            MC.swallowed("RUN window text not shown")
+        MC.set_write_hook(self._on_file_written)
+        if os.environ.get("MOHAA_READY_FILE"):
+            self.after(300,self._signal_ready)
+
+    def _signal_ready(self):
+        """Create MOHAA_READY_FILE (once): the RUN window then closes."""
+        p=os.environ.pop("MOHAA_READY_FILE","")
+        if not p: return
+        try:
+            with open(p,"w",encoding="utf-8") as f: f.write(str(os.getpid()))
+        except OSError:
+            MC.swallowed("ready file")
+
+    def _on_file_written(self,path):
+        """The write hook: a "saved <path>" line in the Output pane, unless the file is
+        scratch (temp folder, caches, logs) or the same file was just announced."""
+        ap=os.path.normcase(os.path.abspath(path))
+        skip=[tempfile.gettempdir(),MC.logs_dir()]
+        if any(ap.startswith(os.path.normcase(os.path.abspath(d))+os.sep) for d in skip if d): return
+        parts=ap.split(os.sep)
+        if any(x in ("cache","webview2","__pycache__") or x.endswith("_cache") for x in parts[:-1]): return
+        now=time.time(); last=getattr(self,"_saved_last",None)
+        if last and last[0]==ap and now-last[1]<3: return
+        self._saved_last=(ap,now)
+        self._log_q.put(("dim","saved %s"%os.path.abspath(path)))
+
     def _log_line(self,text,tag=""):
+        """Add a line to the Output pane, output_console.log and the program's log file."""
+        LOG.log(logging.ERROR if tag=="err" else logging.INFO,"[out] %s",text)
         self._log.configure(state="normal"); self._log.insert("end",text+"\n",tag)
         self._log.see("end"); self._log.configure(state="disabled")
         # Mirror to output_console.log, prefixing the tag since the file has no colours.
@@ -4821,18 +5376,19 @@ class App(tk.Tk):
                 pre=("[%s] "%tag) if tag else ""
                 lf.write(pre+text+"\n")
             except Exception:
+                MC.swallowed()
                 self._logfile=None          # stop trying after the first failure
 
     def _log_warn(self,msg):
         """Red, non-fatal Output line. Thread-safe (goes through _log_q like every
         other worker-thread message)."""
         try: self._log_q.put(("warn",msg))
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     def _log_kind(self,kind,msg):
         """Thread-safe Output line of any _poll_log kind ("warn" red, "note" yellow, ...)."""
         try: self._log_q.put((kind,msg))
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     def _asset_miss_reason(self, ref):
         """Explain why an emitter `model` reference produced no sprite.
@@ -4874,7 +5430,7 @@ class App(tk.Tk):
         seen=[]
         for e in (ems or []):
             try: raw=(e.get("model") or "")
-            except Exception: continue
+            except Exception: MC.swallowed(); continue
             ref=raw.replace("\\","/").strip().strip('"')
             # `model ""` (fx_smokeexample) and `model none` (fx/steamworks) both draw nothing
             # in-game; report them like any other miss. An emitter with no `model` line at all is
@@ -4903,7 +5459,7 @@ class App(tk.Tk):
         muzmodel_bar shader isn't shipped in any .pk3)."""
         if not manifest or not surfs: return
         try: man=json.load(open(manifest,encoding="utf-8"))
-        except Exception: return
+        except Exception: MC.swallowed(); return
         import fnmatch
         low={k.lower() for k in man}
         miss=[s for s in surfs if s not in man and s.lower() not in low]
@@ -4943,16 +5499,17 @@ class App(tk.Tk):
         (Esc or Clear built models) so it doesn't keep showing the previous model."""
         self._last_info=None
         try: self._info_title.configure(text="No model loaded",foreground=DIM)
-        except Exception: pass
+        except Exception: MC.swallowed()
         try: self._info_stats.configure(text="")
-        except Exception: pass
+        except Exception: MC.swallowed()
         try:
             t=self._tag_text
             t.configure(state="normal"); t.delete("1.0","end"); t.configure(state="disabled")
-        except Exception: pass
+        except Exception: MC.swallowed()
         try:
             for w in self._reopen_bar.winfo_children(): w.destroy()
-        except Exception: pass
+        except Exception: MC.swallowed()
+        self._info_refit()
 
     def _update_info(self, path, stdout, html_path=None):
         stem=os.path.splitext(os.path.basename(path))[0]
@@ -4982,7 +5539,7 @@ class App(tk.Tk):
                 surf_names=[s.get("name","") for s in _data.get("surfRanges",[])]
                 if not (anim_names and anim_names[0]):
                     anim_names=[a.get("name","") for a in _data.get("anims",[])]
-        except Exception: pass
+        except Exception: MC.swallowed()
         # Cache-hit opens have no build stdout, so rebuild the "- N bones, M surfaces" line from
         # the parsed DATA.
         if not bones_n and (tags_parsed or surf_names):
@@ -5012,12 +5569,26 @@ class App(tk.Tk):
                 t.insert("end",tg.get("name","")+"\n",(dot if (origin or kind=="tag") else "tdim"))
         t.configure(state="disabled")
         if os.path.exists(html_path):
-            b=self._mkbtn(self._reopen_bar,text="\u21bb Re-open",command=lambda p=html_path:self._open_file(p),
-                          tip="Show the last-built viewer again (no rebuild)")
-            b.pack(side="left")
-            b2=self._mkbtn(self._reopen_bar,text="Browser",command=lambda p=html_path:self._open_in_browser(p),
-                           tip="Open the last-built viewer HTML in your external browser")
-            b2.pack(side="left",padx=(4,0))
+            info_button(self,"rebuild","Rebuild",self._rebuild_shown,
+                        "Build this model's viewer again from its files\n(ignores the saved HTML)").pack(side="left")
+            info_button(self,"browser","Browser",lambda p=html_path:self._open_in_browser(p),
+                        "Open the viewer page in your external browser").pack(side="left",padx=(4,0))
+            if path.lower().endswith(".tik") and os.path.isfile(path):
+                info_button(self,"file",".tik",lambda p=path:self._launch_with("text_editor","text editor","Text Editor",p),
+                            "Open the model's .tik in your Text Editor\n"+path).pack(side="left",padx=(4,0))
+        self._info_refit()
+
+    def _rebuild_shown(self):
+        """The details pane's Rebuild: build what it shows again (the last build, as Open
+        Viewer re-runs it), ignoring a saved HTML, as right-click > Rebuild does; the open
+        page is closed first so the new one really loads."""
+        lb=getattr(self,"_last_build",None)
+        if not lb:
+            self._log_line("Nothing has been built yet to rebuild.","err"); return
+        if self._viewer_open_busy(): return
+        self._run_opts={"force":True}
+        self._close_viewer()
+        self._load(*lb)
 
     # ---- embedded 3D viewer pane -----------------------------------------------
     def _ensure_webview(self):
@@ -5040,6 +5611,7 @@ class App(tk.Tk):
             self._hook_embed_drop()      # stop the pane hijacking file drops (see below)
             return True
         except Exception as e:
+            MC.swallowed()
             self._log_line(f"(embedded viewer unavailable: {e}; using browser)","dim")
             self._webview=None
             return False
@@ -5061,24 +5633,24 @@ class App(tk.Tk):
             return
         self._embed_drop_hooked=True
         try: wv.web.AllowExternalDrop=False            # 1) no navigate-on-drop
-        except Exception: pass
+        except Exception: MC.swallowed()
         try:                                           # 2) catch the drop ourselves
             from System.Windows.Forms import DataFormats,DragDropEffects
             def _enter(s,a):
                 try:
                     if a.Data.GetDataPresent(DataFormats.FileDrop): a.Effect=DragDropEffects.Copy
-                except Exception: pass
+                except Exception: MC.swallowed()
             def _drop(s,a):
                 try:
                     for p in a.Data.GetData(DataFormats.FileDrop):
                         if str(p).lower().endswith((".skd",".tik")): self._drop_paths.append(str(p))
-                except Exception: pass
+                except Exception: MC.swallowed()
             self._wv_drag_cbs=(_enter,_drop)           # pythonnet: keep delegates alive
             for c in (getattr(wv,"web",None),getattr(wv,"control",None)):
                 if c is None: continue
                 try: c.AllowDrop=True; c.DragEnter+=_enter; c.DragDrop+=_drop
-                except Exception: pass
-        except Exception: pass
+                except Exception: MC.swallowed()
+        except Exception: MC.swallowed()
         js=("(function(){if(window.__mohaaDropGuard)return;window.__mohaaDropGuard=1;"
             "function s(e){e.preventDefault();e.stopPropagation();"
             "if(e.dataTransfer)e.dataTransfer.dropEffect='none';}"
@@ -5088,13 +5660,13 @@ class App(tk.Tk):
             "try{if(window.chrome&&chrome.webview)chrome.webview.postMessage('mohaa-drop-blocked');}catch(_){}"
             "},true);})();")
         try: wv.core.AddScriptToExecuteOnDocumentCreatedAsync(js)   # 3) every future page
-        except Exception: pass
+        except Exception: MC.swallowed()
         try: wv.core.ExecuteScriptAsync(js)                         #    and the current one
-        except Exception: pass
+        except Exception: MC.swallowed()
         try:
             def _msg(s,a):
                 try: m=a.TryGetWebMessageAsString()
-                except Exception: return
+                except Exception: MC.swallowed(); return
                 try:
                     if m=="mohaa-drop-blocked":
                         self._log_q.put(("dim","(the 3D pane can't take drops here - drop onto the file tree or console instead)"))
@@ -5122,10 +5694,11 @@ class App(tk.Tk):
                         # in a plain browser never asks, so the panel stays hidden there.
                         self._send_attach_models()
                 except Exception as e:
+                    MC.swallowed()
                     self._log_q.put(("dim",f"(viewer message: {e})"))
             wv.core.WebMessageReceived+=_msg
             self._wv_msg_cb=_msg                        # keep delegate alive
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     # --- on-demand animation builds -------------------------------------------
     # A character can reach over a thousand animations through its $include chain, so the
@@ -5168,6 +5741,7 @@ class App(tk.Tk):
             self._log_q.put(("js","try{MOHAA_ATTACH_MODELS("
                                  +json.dumps(files,separators=(",",":"))+")}catch(e){}"))
         except Exception as e:
+            MC.swallowed()
             self._log_q.put(("dim",f"(attachment model list unavailable: {e})"))
 
     def _build_attach(self, vpath):
@@ -5186,6 +5760,15 @@ class App(tk.Tk):
         threading.Thread(target=self._build_attach_work,args=(vpath,key),daemon=True).start()
 
     def _build_attach_work(self, vpath, key):
+        """Worker thread: build one attachment's geometry (at<key>.js).
+
+        Attachment builds run one at a time: each keeps its parts, idle animation and scale
+        in self._attach_* and extracts into the shared _attach folder, so two overlapping
+        builds used to hand one model's settings to the other's build."""
+        with self._attach_lock:
+            self._build_attach_work_locked(vpath, key)
+
+    def _build_attach_work_locked(self, vpath, key):
         try:
             if self._vfs is None:
                 self._log_q.put(("err","Paks are still loading - try the attachment again in a moment")); return
@@ -5208,7 +5791,7 @@ class App(tk.Tk):
                     surfs=[]
                     for _sp in [skd_path]+self._attach_parts:
                         try: surfs+=[s["name"] for s in MV.parse_skd(_sp)["surfaces"]]
-                        except Exception: pass
+                        except Exception: MC.swallowed()
                     _seen=set(); surfs=[x for x in surfs if not (x in _seen or _seen.add(x))]
                     manifest=os.path.join(tdir,"_tex_"+key+".json")
                     # Resolve against the .skd's VFS path (the tik index is keyed by .skd path) and let the
@@ -5222,7 +5805,7 @@ class App(tk.Tk):
                             for v in self._attach_tikmap.values(): allpairs+=v
                             if allpairs:
                                 local_TI[tex_key]=allpairs; local_TI[tex_key.lower()]=allpairs
-                        except Exception: pass
+                        except Exception: MC.swallowed()
                     nt,ns=MTX.write_textures_manifest(self._vfs,tex_key,surfs,self._SH,local_TI,
                                                       manifest,global_surf=self._GS,
                                                       shader_props=self._PROPS,
@@ -5233,6 +5816,7 @@ class App(tk.Tk):
                                                     dict(allpairs) if self._attach_tikmap else None)
                     if nt==0: manifest=None
                 except Exception as e:
+                    MC.swallowed()
                     self._log_q.put(("dim",f"(attachment textures skipped: {e})")); manifest=None
             cmd=[self._pyexe,VIEWER,skd_path,"--attachbuild="+skd_path,
                  "--attachkey="+key,"--attachout="+self._anim_outdir,"--no-open"]
@@ -5240,7 +5824,7 @@ class App(tk.Tk):
             if getattr(self,"_attach_idle",None): cmd.append("--attachidle="+self._attach_idle)
             for _pt in getattr(self,"_attach_parts",[]): cmd.append("--attachpart="+_pt)
             cmd.append("--attachscale=%g"%(getattr(self,"_attach_ls",1.0) or 1.0))
-            p=subprocess.run(cmd,capture_output=True,text=True,timeout=180,**NOWIN)
+            p=subprocess.run(cmd,capture_output=True,text=True,encoding="utf-8",errors="replace",env=MC.child_env(),timeout=180,**NOWIN)
             for line in (p.stdout or "").splitlines():
                 if line.strip(): self._log_q.put(("stdout",line))
             jp=os.path.join(self._anim_outdir,"at"+key+".js")
@@ -5257,6 +5841,7 @@ class App(tk.Tk):
             self._log_q.put(("js",f"try{{MOHAA_ATTACH_FAIL({json.dumps(key)},"
                                   f"{json.dumps('timed out')})}}catch(e){{}}"))
         except Exception as e:
+            MC.swallowed()
             self._log_q.put(("err",f"{vpath}: {e}"))
             self._log_q.put(("js",f"try{{MOHAA_ATTACH_FAIL({json.dumps(key)},"
                                   f"{json.dumps(str(e)[:120])})}}catch(e){{}}"))
@@ -5289,17 +5874,18 @@ class App(tk.Tk):
                 parts=MV.parse_tik_skelmodels(txt)
                 base,skel=(parts[0] if parts else MV.parse_tik_setup_head(txt))
             except Exception:
+                MC.swallowed()
                 return None
             if not skel: return None
             want=_part_vfs(base,skel)
             # This .tik's own surface -> shader map for the texture pass (the global tik index is
             # keyed by .skd path, so a .tik path would never match).
             try: self._attach_tikmap=MTX.parse_tik_setup(txt)
-            except Exception: self._attach_tikmap=None
+            except Exception: MC.swallowed(); self._attach_tikmap=None
             # its setup `scale` (load_scale, $include'd files too: a player's is 0.52 from
             # models/player/base/include.txt): the game multiplies its verts by it
             try: self._attach_ls=MV.parse_tik_scale(txt)
-            except Exception: self._attach_ls=1.0
+            except Exception: MC.swallowed(); self._attach_ls=1.0
         elif low.endswith(".skd"):
             want=vpath
         if not want: return None
@@ -5307,7 +5893,7 @@ class App(tk.Tk):
         data=self._vfs.read(want)
         if data is None: return None
         target=os.path.join(tdir,os.path.basename(want))
-        with open(target,"wb") as f: f.write(data)
+        MC.atomic_write_bytes(target,data)
         # Every other skelmodel the .tik lists. A player/human model is several meshes (e.g.
         # german_officer.skd + head2.skd + hand.skd + officer_hat.skd) whose bones merge into one
         # skeleton (MV.merge_skds), as in the main build.
@@ -5318,7 +5904,7 @@ class App(tk.Tk):
             _pd=self._vfs.read(_pv)
             if not _pd: continue
             _pt=os.path.join(tdir,os.path.basename(_pv))
-            with open(_pt,"wb") as f: f.write(_pd)
+            MC.atomic_write_bytes(_pt,_pd)
             self._attach_parts.append(_pt)
         if self._attach_parts:
             self._log_q.put(("dim","- attach parts: "+", ".join(
@@ -5342,15 +5928,16 @@ class App(tk.Tk):
                     _sd=self._vfs_read_skc(_pick["s"])
                     if _sd:
                         _ip=os.path.join(tdir,os.path.basename(_pick["s"].replace("\\","/")))
-                        with open(_ip,"wb") as f: f.write(_sd)
+                        MC.atomic_write_bytes(_ip,_sd)
                         self._attach_idle=_ip
                         self._log_q.put(("dim",f"- attach pose: {_pick['n']} -> {_pick['s']}"))
             except Exception as _e:
+                MC.swallowed()
                 self._log_q.put(("dim",f"(attachment pose lookup failed: {_e})"))
             try:
                 m=re.search(r"^\s*idle\s+(\S+\.skc)", txt, re.M|re.I)
                 if m: cands.append(m.group(1).strip('"'))
-            except Exception: pass
+            except Exception: MC.swallowed()
         if self._attach_idle: return target
         cands.append(os.path.splitext(os.path.basename(want))[0]+".skc")
         d0="/".join(want.split("/")[:-1])
@@ -5361,7 +5948,7 @@ class App(tk.Tk):
                     sd=self._vfs.read(cand)
                     if sd:
                         ip=os.path.join(tdir,os.path.basename(cand))
-                        with open(ip,"wb") as f: f.write(sd)
+                        MC.atomic_write_bytes(ip,sd)
                         self._attach_idle=ip
                     break
             if self._attach_idle: break
@@ -5381,12 +5968,11 @@ class App(tk.Tk):
                 d=self._vfs.read(entry)
                 if not d: return False
                 tik=os.path.join(self._tmp,os.path.basename(entry))
-                with open(tik,"wb") as f: f.write(d)
+                MC.atomic_write_bytes(tik,d)
             raw=open(tik,"r",encoding="latin-1",errors="replace").read()   # match the VFS codec
             cat=MTX.build_anim_catalog(raw,self._vfs,entry)
             if not cat.get("anims"): return False
-            open(tik,"w",encoding="utf-8",errors="replace").write(
-                MTX.expand_tik_includes(raw,self._vfs))
+            MC.atomic_write_text(tik,MTX.expand_tik_includes(raw,self._vfs),errors="replace")
             tdir=os.path.dirname(tik)
             for (pp,ps) in (MV.parse_tik_skelmodels(raw) or []):
                 ps=(ps or "").replace("\\","/").strip().strip('"')
@@ -5396,15 +5982,16 @@ class App(tk.Tk):
                 if not pv: continue
                 dd=self._vfs.read(pv)
                 if dd:
-                    with open(os.path.join(tdir,os.path.basename(ps)),"wb") as f: f.write(dd)
+                    MC.atomic_write_bytes(os.path.join(tdir,os.path.basename(ps)),dd)
             cf=os.path.join(self._tmp,"animcat_"+re.sub(r"[^A-Za-z0-9_.-]","_",
                             os.path.basename(entry))+".json")
-            with open(cf,"w",encoding="utf-8") as f: json.dump(cat,f,separators=(",",":"))
+            MC.atomic_write_text(cf,json.dumps(cat,separators=(",",":")))
             self._animcat=cat; self._animcat_file=cf; self._animcat_for=tik
             self._log_q.put(("dim",f"animation catalogue rebuilt for {os.path.basename(entry)} "
                                   f"({len(cat['anims'])} animations)"))
             return True
         except Exception as e:
+            MC.swallowed()
             self._log_q.put(("dim",f"(animation catalogue rebuild failed: {e})")); return False
 
     def _movement_donor(self, ent, srcdir):
@@ -5440,10 +6027,11 @@ class App(tk.Tk):
             if not os.path.exists(dp):
                 d=self._vfs_read_skc(don.get("s"))
                 if not d: return None
-                with open(dp,"wb") as f: f.write(d)
+                MC.atomic_write_bytes(dp,d)
             self._log_q.put(("dim",f"  movement slot: {don.get('n')}  ({don.get('s','')})"))
             return dp
         except Exception as e:
+            MC.swallowed()
             self._log_q.put(("dim",f"  (no movement slot: {e})")); return None
 
     def _build_anim_work(self, aid, ent):
@@ -5459,7 +6047,7 @@ class App(tk.Tk):
                     self._log_q.put(("err",f"{name}: {ent.get('s','')} is not in the loaded paks"))
                     self._log_q.put(("js",f"try{{MOHAA_ANIM_FAIL({json.dumps(aid)},'.skc not found in the loaded paks')}}catch(e){{}}"))
                     return
-                with open(sp,"wb") as f: f.write(d)
+                MC.atomic_write_bytes(sp,d)
             os.makedirs(self._anim_outdir,exist_ok=True)
             # Facial sibling: e.g. scripted/smoking pairs lightup.skc with lightupMORPH.skc, listed in
             # the .tik as separate animations (smoking01 / smoking_lightup_face). Build the face entry
@@ -5473,7 +6061,7 @@ class App(tk.Tk):
                     if (_e2.get("s") or "").lower()==_sib.lower() and _e2.get("id")!=aid:
                         _d2=self._vfs_read_skc(_e2.get("s"))
                         if _d2:
-                            with open(os.path.join(src,_e2["id"]+".skc"),"wb") as f2: f2.write(_d2)
+                            MC.atomic_write_bytes(os.path.join(src,_e2["id"]+".skc"),_d2)
                             also.append(_e2["id"]); face_stem=_e2["id"]
                         break
                 if face_stem is None:
@@ -5483,7 +6071,7 @@ class App(tk.Tk):
                     _d3=self._vfs_read_skc(_sib)
                     if _d3:
                         face_stem=aid+"_face"
-                        with open(os.path.join(src,face_stem+".skc"),"wb") as f3: f3.write(_d3)
+                        MC.atomic_write_bytes(os.path.join(src,face_stem+".skc"),_d3)
             legs=self._movement_donor(ent,src)
             # One --animbuild carrying every id, comma-separated (the flag takes a list).
             cmd=[self._pyexe,VIEWER,self._animcat_for,
@@ -5492,7 +6080,7 @@ class App(tk.Tk):
                  "--animsrc="+src,"--animout="+self._anim_outdir,"--no-open"]
             if face_stem: cmd.append("--animpair="+aid+":"+face_stem)
             if legs: cmd.append("--animlegs="+legs)
-            p=subprocess.run(cmd,capture_output=True,text=True,timeout=180,**NOWIN)
+            p=subprocess.run(cmd,capture_output=True,text=True,encoding="utf-8",errors="replace",env=MC.child_env(),timeout=180,**NOWIN)
             # Relay the child's own "!" failure text to the viewer instead of a generic message
             # (e.g. "drives none of this skeleton's 72 bones" means it can never work). The
             # animation-name prefix is stripped; the viewer shows the .skc path beside it.
@@ -5529,6 +6117,7 @@ class App(tk.Tk):
             self._log_q.put(("err",f"{name}: build timed out"))
             self._log_q.put(("js",f"try{{MOHAA_ANIM_FAIL({json.dumps(aid)},'build timed out')}}catch(e){{}}"))
         except Exception as e:
+            MC.swallowed()
             self._log_q.put(("err",f"{name}: {e}"))
             self._log_q.put(("js",f"try{{MOHAA_ANIM_FAIL({json.dumps(aid)},'build error')}}catch(e){{}}"))
         finally:
@@ -5542,7 +6131,7 @@ class App(tk.Tk):
         try:
             core=getattr(wv,"core",None)
             if core is not None: core.ExecuteScriptAsync(js)
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     def _embed_merge_ui(self):
         """Hide the embedded viewer's own Theme/Shortcuts row (the launcher's buttons drive both)
@@ -5563,9 +6152,9 @@ class App(tk.Tk):
             wv=self._webview; self._webview=None
             self._embed_drop_hooked=False              # re-hook drops on a future webview
             try: wv.pack_forget()
-            except Exception: pass
+            except Exception: MC.swallowed()
             try: wv.destroy()
-            except Exception: pass
+            except Exception: MC.swallowed()
         self._embed_url=None
         # Keep _last_build so "Open Viewer" can reopen the model instantly from its cached HTML;
         # only the details panel and per-open state are cleared. (Clear built models clears
@@ -5574,25 +6163,26 @@ class App(tk.Tk):
         self._clear_info()          # details panel back to "No model loaded"
         # Reset the status bar too, which would otherwise still read "Viewing <name>".
         try: self._set_status("Ready")
-        except Exception: pass
+        except Exception: MC.swallowed()
         try:
             if not self._view_placeholder.winfo_ismapped():
                 self._view_placeholder.pack(fill="both",expand=True)
         except Exception:
+            MC.swallowed()
             try: self._view_placeholder.pack(fill="both",expand=True)
-            except Exception: pass
+            except Exception: MC.swallowed()
 
     def _toggle_embed(self):
         self._save_opts()
         if not self._embed_on.get() and self._webview is not None:
             try: self._webview.destroy()
-            except Exception: pass
+            except Exception: MC.swallowed()
             self._webview=None
             self._embed_drop_hooked=False              # re-hook drops on a future webview
             self._view_placeholder.pack(fill="both",expand=True)
         elif self._embed_on.get() and self._embed_url and self._ensure_webview():
             try: self._webview.load_url(self._embed_url)
-            except Exception: pass
+            except Exception: MC.swallowed()
 
     def _open_in_browser(self,path):
         import webbrowser, pathlib
@@ -5616,13 +6206,13 @@ class App(tk.Tk):
         w=e.widget
         try:
             if isinstance(w,str): w=self.nametowidget(w)   # bind_all can hand back a path name
-        except Exception: return
+        except Exception: MC.swallowed(); return
         try:
             if w is self._webview or str(w).startswith(str(self._webview)): return  # click landed on the pane
-        except Exception: pass
+        except Exception: MC.swallowed()
         try:
             if self.focus_displayof() is None and w.winfo_exists(): w.focus_force()
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     def _watch_camera_stop(self):
         """Stop the embedded viewer's camera when the launcher takes over. A key or mouse button
@@ -5654,7 +6244,7 @@ class App(tk.Tk):
             w=e.widget
             if isinstance(w,str): w=self.nametowidget(w)
             if w is self._webview or str(w).startswith(str(self._webview)): return
-        except Exception: pass
+        except Exception: MC.swallowed()
         self._embed_js("try{if(typeof stopCamera==='function')stopCamera();}catch(e){}")
 
     def _release_view_keys(self,_e=None):
@@ -5673,9 +6263,9 @@ class App(tk.Tk):
                 down=any(KEY_IS_DOWN(vk) for vk in CAMERA_VKS)
                 if self._camkeys_down and not down: self._release_view_keys()
                 self._camkeys_down=down
-        except Exception: pass
+        except Exception: MC.swallowed()
         try: self.after(100,self._poll_camera_keys)
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     def _open_file(self,path):
         """Show a built viewer HTML in the embedded pane when available, else in the browser.
@@ -5698,6 +6288,7 @@ class App(tk.Tk):
                 self.after(700,self._embed_merge_ui); self.after(2200,self._embed_merge_ui)
                 return
             except Exception as e:
+                MC.swallowed()
                 self._log_line(f"(embed failed: {e}; opening in browser)","dim")
         self._open_in_browser(path)
 
@@ -5709,17 +6300,17 @@ class App(tk.Tk):
         if self._webview is not None:
             wv=self._webview; self._webview=None
             try: wv.pack_forget()
-            except Exception: pass
+            except Exception: MC.swallowed()
             try: wv.web.Dispose()
-            except Exception: pass
+            except Exception: MC.swallowed()
         if getattr(self,"_restore_drop",None):
             try: self._restore_drop()
-            except Exception: pass
+            except Exception: MC.swallowed()
         if self._tmp and os.path.isdir(self._tmp): shutil.rmtree(self._tmp,ignore_errors=True)
         lf=getattr(self,"_logfile",None)
         if lf is not None:
             try: lf.close()
-            except Exception: pass
+            except Exception: MC.swallowed()
             self._logfile=None
         self.destroy()
 
@@ -5752,40 +6343,69 @@ class App(tk.Tk):
                             shell32.DragQueryFileW(wp,i,buf,need+1)
                             if buf.value.lower().endswith((".skd",".tik")): self._drop_paths.append(buf.value)
                         shell32.DragFinish(wp)
-                    except Exception: pass
+                    except Exception: MC.swallowed()
                     return 0
                 try: return CallWP(self._old_wndproc,h,msg,wp,lp)
-                except Exception: return 0
+                except Exception: MC.swallowed(); return 0
             self._wndproc_cb=WNDPROC(py_wndproc)
             old=SetWL(hwnd,GWLP_WNDPROC,self._wndproc_cb)
             if not old: self._wndproc_cb=None; self._log_line("(drag-drop unavailable; use Browse)","dim"); return
             self._old_wndproc=old; shell32.DragAcceptFiles(hwnd,True)
             def _restore(*_):
                 try: SetWL.argtypes=[HWND,ctypes.c_int,LONG_PTR]; SetWL(hwnd,GWLP_WNDPROC,self._old_wndproc)
-                except Exception: pass
+                except Exception: MC.swallowed()
             self._restore_drop=_restore
             self.bind("<Destroy>",lambda e:_restore() if e.widget is self else None)
             self._log_line("Drag-and-drop ready - drop a .skd/.tik onto this window.","dim")
         except Exception as e:
+            MC.swallowed()
             self._log_line(f"(drag-drop unavailable: {e}; use Browse)","dim")
+
+def run_gui(make_app, app_name):
+    """Run a launcher window to completion and return a process exit code.
+
+    make_app: callable returning the Tk app (App or MapApp). app_name: log file stem.
+    With the embedded pane, Tk runs on a .NET STA thread (WebView2 needs an STA COM
+    apartment; tkwebview2's documented pattern) and falls back to this thread if that
+    can't start. An exception that escapes start-up is logged with its traceback, shown
+    in a message box (pythonw has no console) and turned into exit code 1."""
+    init_runtime(app_name)
+    result={"code":0}
+    def _run():
+        """Build the window and run its event loop; record and report a failure."""
+        try:
+            make_app().mainloop()
+        except Exception as e:
+            result["code"]=1
+            LOG.critical("%s failed: %s",app_name,e,exc_info=True)
+            msg=f"{app_name} could not start:\n{type(e).__name__}: {e}\n\nDetails: {MC.logs_dir()}"
+            if sys.stderr is not None: sys.stderr.write("[FATAL] "+msg.replace("\n"," ")+"\n")
+            try:
+                r=tk.Tk(); r.withdraw(); messagebox.showerror(app_name,msg,parent=r); r.destroy()
+            except Exception:
+                MC.swallowed("no display for the error box")
+    if WEBVIEW2 is not None:
+        try:
+            from System.Threading import Thread as _NetThread, ApartmentState as _ApState, ThreadStart as _TStart
+            _t=_NetThread(_TStart(_run)); _t.ApartmentState=_ApState.STA
+        except Exception:
+            LOG.warning("no .NET STA thread; running Tk on the main thread",exc_info=True)
+            _run()
+        else:
+            _t.Start(); _t.Join()
+    else:
+        _run()
+    LOG.info("=== %s exiting (code %d) ===",app_name,result["code"])
+    logging.shutdown()
+    return result["code"]
 
 if __name__=="__main__":
     init=None
     for a in sys.argv[1:]:
         if a.lower().endswith((".skd",".tik")) and os.path.exists(a): init=a; break
-    def _run_app():
-        App(initial_file=init).mainloop()
+    _code=run_gui(lambda:App(initial_file=init),"mohaa_launcher")
     if WEBVIEW2 is not None:
-        # WebView2's WinForms control needs an STA COM apartment, so run the Tk app on a .NET
-        # STA thread (tkwebview2's documented pattern); fall back to the main thread on failure.
-        try:
-            from System.Threading import Thread as _NetThread, ApartmentState as _ApState, ThreadStart as _TStart
-            _t=_NetThread(_TStart(_run_app)); _t.ApartmentState=_ApState.STA
-            _t.Start(); _t.Join()
-        except Exception:
-            _run_app()
         # pythonnet's CLR + WebView2 crash during normal interpreter shutdown, and all cleanup
-        # already ran in _on_close, so exit immediately.
-        os._exit(0)
-    else:
-        _run_app()
+        # already ran in _on_close, so exit immediately (with the real exit code).
+        os._exit(_code)
+    sys.exit(_code)

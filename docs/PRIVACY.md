@@ -5,24 +5,27 @@ If you change one, change the other (`PRIVACY_TEXT` in `mohaa_launcher.py`).
 
 The Map Viewer shows the same notice under its own name, worded for its own files:
 `mohaa_map_viewer_config.json`, `output_console_map.log` and `mohaamap_*` temp folders,
-its decompiled `.map` files among the working files, and where the Edit parameters box
-was left among the display choices (`_PRIVACY_SWAPS` in `mohaa_map_launcher.py`, which
-must be checked whenever this text changes).
+its decompiled `.map` files among the working files, and the grid's size and colour and
+where the Edit parameters box was left among the display choices (`_PRIVACY_SWAPS` in
+`mohaa_map_launcher.py`).
+
+`python tests/check_privacy_sync.py` checks that this file, `PRIVACY_TEXT` and every
+`_PRIVACY_SWAPS` entry agree; `--write` regenerates the block below from `PRIVACY_TEXT`.
 
 ```
 PRIVACY NOTICE  --  MOHAA Model Viewer
-Last updated: 28 October 2026
+Last updated: 4 November 2026
 
 1. THE SHORT VERSION
    This program does not collect, transmit, sell, share or profile anything.
    It contains no telemetry, no analytics, no crash reporting, no advertising
    and no tracking identifiers, and it never checks for updates on its own. The
    program uses the network only when YOU open Help --> Check for updates, and
-   the Windows startup script only to install missing Python packages (see 3);
+   the startup scripts only to install missing Python packages (see 3);
    everything else happens entirely on your computer.
 
 2. WHAT IS STORED, AND WHERE
-   The program stores four things, all on your own machine, all readable and
+   The program stores six things, all on your own machine, all readable and
    deletable by you at any time:
 
      a) Settings file  --  mohaa_viewer_config.json
@@ -33,25 +36,39 @@ Last updated: 28 October 2026
         Options --> Don't save recent files is on), your chosen output folder,
         theme, window layout, view angles, and the paths of any external
         programs you configured. It contains file paths, which on most systems
-        include your user name.
+        include your user name. The previous copy is kept beside it as a .bak
+        file, and a damaged file is set aside as .corrupt-<date>. Options -->
+        Reset settings... clears it.
 
      b) Console log  --  output_console.log, in the same folder as (a).
-        A copy of the Output pane. Overwritten on each launch. It contains the
-        file paths the program touched, so it too may include your user name.
+        A copy of the Output pane, replaced on each launch (the previous
+        launch's copy is kept with ".prev" in its name). It contains the file
+        paths the program touched, so it too may include your user name.
 
-     c) Working files
+     c) Program logs  --  the "logs" folder inside the folder of (a).
+        A timestamped record of what the program did and of any errors, with
+        their technical details, one file for each part of the program. Each
+        file is capped at 2 MB, with five older copies kept. Like (b) it
+        contains file paths. Options --> Open log folder shows it.
+
+     d) Working files
         A temporary workspace under your system temp folder (mohaaview_*), and
         the generated .html viewers in your chosen output folder. Both are
         removable from File --> Clear built models / Clear %temp% files. On
         Windows, the embedded 3D pane (Microsoft Edge WebView2) also keeps its
         browser files in a "webview2" folder beside (a).
 
-     d) Display choices in the browser
+     e) Display choices in the browser
         The viewer pages remember a few display choices (theme, backdrop colour,
-        the map grid's size and colour, renderer, placement angles, game cvars) in the browser's local storage.
+        renderer, placement angles, game cvars) in the browser's local storage.
         The embedded pane runs in private mode and forgets them when the program
         closes; in your own browser they stay with that browser's data for local
         files.
+
+     f) Previous versions  --  the "previous-versions" folder beside (a).
+        When Help --> Check for updates installs a new version, the files it
+        replaces are copied here first, one numbered folder per update, with a
+        changelog.txt listing them. Delete them whenever you like.
 
    None of this is transmitted anywhere. If you want it gone, delete the folders
    above; the program will simply start fresh.
@@ -71,11 +88,12 @@ Last updated: 28 October 2026
        privacy policy, not this one. It happens only when you open that window and
        click to install; nothing is ever checked automatically.
 
-     - On Windows, the startup script (RUN -- Medal of Honor Model Viewer.bat)
-       installs any missing Python packages from pypi.org. If no suitable Python
-       is found and you agree when asked, it runs python_installer_updater.bat,
-       which downloads Python from python.org. Both sites apply their own
-       privacy policies.
+     - The startup script (RUN -- Medal of Honor Viewer.bat, or the .sh
+       file on Linux and macOS) installs any missing Python packages from
+       pypi.org into the program's own bin folder. On Windows, if no suitable
+       Python is found and you agree when asked, it runs
+       python_installer_updater.bat, which downloads Python from python.org.
+       Both sites apply their own privacy policies.
 
    The viewer itself makes no other network requests.
 

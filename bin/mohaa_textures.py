@@ -10,6 +10,17 @@
 # All lookups are case-insensitive because asset names are inconsistent
 # (skd "Ranger_pants" vs tik "ranger_pants", "HBTpants.tga" vs "hbtpants").
 
+# --- Vendored dependencies (bin/libs on Windows, bin/libs-linux on Linux, bin/libs-mac on macOS)
+import sys
+import os
+_LIBS_NAME = "libs" if sys.platform.startswith("win") else ("libs-mac" if sys.platform == "darwin" else "libs-linux")
+_libs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), _LIBS_NAME)
+if os.path.isdir(_libs_dir) and _libs_dir not in sys.path:
+    sys.path.insert(0, _libs_dir)
+_bin_dir = os.path.dirname(os.path.abspath(__file__))
+if _bin_dir not in sys.path:
+    sys.path.insert(0, _bin_dir)
+import mohaa_common as MC                       # logging, atomic writes, settings, Pillow guard
 import io, re, os, base64, hashlib, zipfile
 
 # ----------------------------------------------------------------------------- VFS
@@ -21,7 +32,10 @@ class Vfs:
         self._by_name=None              # image file name minus extension -> [paths], built on first use
         for p in pak_paths:
             try: z=zipfile.ZipFile(p)
-            except Exception: continue
+            except Exception:
+                # A pak that won't open is skipped (the rest still load), but loudly.
+                MC.get_logger("textures").warning("pak %s could not be opened; skipped",p,exc_info=True)
+                continue
             zi=len(self.zips); self.zips.append(z)
             for n in z.namelist():
                 if n.endswith("/"): continue
@@ -39,6 +53,7 @@ class Vfs:
             with self.zips[e[0]].open(e[1]) as fh:
                 data=fh.read(self.MAX_ENTRY+1)
         except Exception:
+            MC.swallowed()
             return None
         if len(data)>self.MAX_ENTRY: return None      # decompression bomb / corrupt header
         return data
@@ -47,7 +62,7 @@ class Vfs:
         """Release the pak file handles (a Vfs is rebuilt on every pak reload)."""
         for z in self.zips:
             try: z.close()
-            except Exception: pass
+            except Exception: MC.swallowed()
         self.zips=[]; self.index={}; self._by_name=None
     def find_texture(self,path):
         """Resolve a texture reference to a stored file, trying the given extension first,
@@ -87,7 +102,7 @@ class Vfs:
         e=self.index.get(self._k(path))
         if not e: return ""
         try: return os.path.basename(self.zips[e[0]].filename or "")
-        except Exception: return ""
+        except Exception: MC.swallowed(); return ""
 
 def _cache_id(s):
     """Short stable id for the animation cache (not a security hash).
@@ -163,7 +178,7 @@ def build_shader_index(vfs, editor=None):
     for k in list(vfs.names()):
         if k.endswith(".shader"):
             try: SH.update(parse_shader_file(vfs.read(k).decode("latin-1","replace"), editor))
-            except Exception: pass
+            except Exception: MC.swallowed()
     return SH
 
 # ----------------------------------------------------- shader render properties
@@ -231,12 +246,12 @@ def _parse_pulse_and_base(block):
             if wm:
                 try: wave=[wm.group(1).lower(), float(wm.group(2)), float(wm.group(3)),
                            float(wm.group(4)), float(wm.group(5))]
-                except Exception: wave=None
+                except Exception: MC.swallowed(); wave=None
             if re.match(r'(?i)alphagen\s+distfade\b', ls): fade=True
             am=re.match(r'(?i)alphagen\s+distfade\s+([-\d.]+)\s+([-\d.]+)', ls)
             if am:
                 try: dnear=float(am.group(1)); drange=float(am.group(2))
-                except Exception: pass
+                except Exception: MC.swallowed()
         if wave and additive and smap:
             pulse={"map":smap,"wave":wave,"distnear":dnear,"distrange":drange}
         elif smap and not additive:
@@ -310,7 +325,7 @@ def parse_shader_props_file(txt):
                 t=ls.split()
                 if len(t)>1:
                     try: spritescale=float(t[1]); sawsprite=True
-                    except Exception: pass
+                    except Exception: MC.swallowed()
             # `cull none|disable|twosided` or `nocull` draws both faces. The cull_* garment shaders
             # need this for thin two-sided panels, which break up if backface-culled.
             _ct=ll.split()
@@ -360,7 +375,7 @@ def parse_shader_props_file(txt):
                                    "freq":float(_fl.group(7)),
                                    "min":float(_fl.group(8)) if _fl.group(8) is not None else 0.0,
                                    "max":float(_fl.group(9)) if _fl.group(9) is not None else 1.0})
-                except Exception: pass
+                except Exception: MC.swallowed()
             if ll.startswith("alphagen"):
                 _sawrgb=True
                 # alphaGen [oneMinus][tiki]distFade [near] [range] (tr_shader.c ParseStage :1168-1194).
@@ -369,15 +384,15 @@ def parse_shader_props_file(txt):
                 if _fm:
                     _fade_inv=bool(_fm.group(1))
                     try: _fade_near=float(_fm.group(3)) if _fm.group(3) else 256.0
-                    except Exception: _fade_near=256.0
+                    except Exception: MC.swallowed(); _fade_near=256.0
                     try: _fade_range=float(_fm.group(4)) if _fm.group(4) else 256.0
-                    except Exception: _fade_range=256.0
+                    except Exception: MC.swallowed(); _fade_range=256.0
             am=re.match(r'(?i)(animmap|animmapphase)\s+(.*)', ls)
             if am:
                 toks=am.group(2).split()
                 kind=am.group(1).lower()
                 try: fps=float(toks[0]); toks=toks[1:]
-                except Exception: fps=0
+                except Exception: MC.swallowed(); fps=0
                 if kind=="animmapphase" and toks: toks=toks[1:]   # drop the phase arg
                 fr=[t.replace("\\","/") for t in toks if not (t.startswith("$") or t.startswith("*"))]
                 if fr: frames=fr
@@ -422,15 +437,15 @@ def parse_shader_props_file(txt):
                     _ms=re.match(r'(?i)tcmod\s+scale\s+([\-\d.]+)\s+([\-\d.]+)', _l)
                     if _ms and _bsc is None:
                         try: _bsc=(float(_ms.group(1)), float(_ms.group(2))); _sc_i=_li
-                        except Exception: _bsc=None
+                        except Exception: MC.swallowed(); _bsc=None
                     _msc=re.match(r'(?i)tcmod\s+scroll\s+([\-\d.]+)\s+([\-\d.]+)', _l)
                     if _msc and _bscr is None:
                         try: _bscr=(float(_msc.group(1)), float(_msc.group(2))); _scr_i=_li
-                        except Exception: _bscr=None
+                        except Exception: MC.swallowed(); _bscr=None
                     _mr=re.match(r'(?i)tcmod\s+rotate\s+([\-\d.]+)', _l)
                     if _mr and _brot is None:
                         try: _brot=float(_mr.group(1))
-                        except Exception: _brot=None
+                        except Exception: MC.swallowed(); _brot=None
                 if _bmap:
                     _bundle0={"map":_bmap,"scale":list(_bsc or (1.0,1.0))}
                     # Base-stage `tcmod rotate` (RB_CalcRotateTexCoords, tr_shade_calc.c:1599-1631).
@@ -442,7 +457,7 @@ def parse_shader_props_file(txt):
                         if _mbr:
                             try:
                                 _bundle0["brot"]=float(_mbr.group(1)); break
-                            except Exception: pass
+                            except Exception: MC.swallowed()
                     # Animated bundle tcmods are applied by the viewer at runtime. tcmods run in listed
                     # order: scroll before scale (mortar_dirthit) drifts at the scroll rate in base UV
                     # space, scroll after scale drifts at rate/scale. `prescale` records which.
@@ -464,7 +479,7 @@ def parse_shader_props_file(txt):
                     _mtr=re.match(r'(?i)tcmod\s+rotate\s+([\-\d.]+)', _l)
                     if _mtr:
                         try: _texrotate=float(_mtr.group(1))
-                        except Exception: _texrotate=None
+                        except Exception: MC.swallowed(); _texrotate=None
                 if re.match(r'(?i)clampmap\s+\S', _l): _clampbase=True
         needs_alpha=bool(_has_atest or (not _base_opaque))
         # no explicit cull keyword -> fall back to the cull_* naming convention.
@@ -504,7 +519,7 @@ def build_shader_props(vfs):
     for k in list(vfs.names()):
         if k.endswith(".shader"):
             try: P.update(parse_shader_props_file(vfs.read(k).decode("latin-1","replace")))
-            except Exception: pass
+            except Exception: MC.swallowed()
     return P
 
 # ---------------------------------------------------------------------- tik parsing
@@ -533,6 +548,7 @@ def expand_tik_includes(txt, vfs, _depth=0, _chain=None, _budget=None):
             out.append(line); continue
         try: sub=data.decode("latin-1","replace")
         except Exception:
+            MC.swallowed()
             out.append(line); continue
         _budget[0]-=len(sub)
         if _budget[0]<=0:                       # include graph too large: stop splicing
@@ -579,7 +595,7 @@ def build_tik_index(vfs):
     for k in list(vfs.names()):
         if not k.endswith(".tik"): continue
         try: mapping=parse_tik_setup(expand_tik_includes(vfs.read(k).decode("latin-1","replace"), vfs))
-        except Exception: continue
+        except Exception: MC.swallowed(); continue
         for skd,surfs in mapping.items():
             if surfs and len(surfs)>len(TI.get(skd,[])):
                 TI[skd]=surfs
@@ -588,9 +604,9 @@ def build_tik_index(vfs):
 # ------------------------------------------------------------------ texture loading
 def _have_pil():
     try:
-        import PIL  # noqa
-        return True
+        return MC.pil_status()[0]   # Pillow present AND at the security floor
     except Exception:
+        MC.swallowed()
         return False
 
 def texture_has_varied_alpha(vfs, texpath):
@@ -598,7 +614,7 @@ def texture_has_varied_alpha(vfs, texpath):
     animated nextbundle also modulates the alpha-test pattern or only the RGB grain."""
     try:
         if not _have_pil(): return False
-        from PIL import Image
+        Image = MC.pil_image()          # Pillow >= 10.3, pixel limit set (mohaa_common)
         d=vfs.read(texpath)
         if not d: return False
         im=Image.open(io.BytesIO(d)); im.load()
@@ -606,6 +622,7 @@ def texture_has_varied_alpha(vfs, texpath):
         lo,hi=im.convert("RGBA").getchannel("A").getextrema()
         return lo<250
     except Exception:
+        MC.swallowed()
         return False
 
 _GL1_LUT=None
@@ -638,7 +655,7 @@ def dataurl_gl_one_additive(durl):
     """
     if not durl or not _have_pil(): return durl
     try:
-        from PIL import Image
+        Image = MC.pil_image()          # Pillow >= 10.3, pixel limit set (mohaa_common)
         im=Image.open(io.BytesIO(base64.b64decode(durl.split(",",1)[1]))); im.load()
         im=im.convert("RGBA")
         d=bytearray(im.tobytes()); L=_gl1_lut()
@@ -654,6 +671,7 @@ def dataurl_gl_one_additive(durl):
         buf=io.BytesIO(); Image.frombytes("RGBA",im.size,bytes(d)).save(buf,"PNG")
         return "data:image/png;base64,"+base64.b64encode(buf.getvalue()).decode()
     except Exception:
+        MC.swallowed()
         return durl                                       # keep the original on any failure
 
 def texture_to_dataurl(vfs, texpath, max_dim=512, emitter_clean=False, keep_alpha=False, bundle_path=None, bundle_scale=(1.0,1.0)):
@@ -677,7 +695,7 @@ def texture_to_dataurl(vfs, texpath, max_dim=512, emitter_clean=False, keep_alph
         if ext=="png": return "data:image/png;base64,"+base64.b64encode(data).decode()
         return None
     try:
-        from PIL import Image
+        Image = MC.pil_image()          # Pillow >= 10.3, pixel limit set (mohaa_common)
         im=Image.open(io.BytesIO(data)); im.load()
         if max(im.size)>max_dim:
             r=max_dim/max(im.size)
@@ -705,7 +723,7 @@ def texture_to_dataurl(vfs, texpath, max_dim=512, emitter_clean=False, keep_alph
                         for _xx in range(0,im.size[0],_tw): _lay.paste(_tile,(_xx,_yy))
                     im=ImageChops.multiply(im.convert("RGBA" if has_alpha else "RGB"),_lay)
             except Exception:
-                pass
+                MC.swallowed()
         if emitter_clean:
             # Give emitter sprites a transparent background so they composite cleanly in any blend
             # mode. On failure, fall through to the normal encoding so the texture still loads.
@@ -733,6 +751,7 @@ def texture_to_dataurl(vfs, texpath, max_dim=512, emitter_clean=False, keep_alph
                 buf=io.BytesIO(); im.save(buf,"PNG")
                 return "data:image/png;base64,"+base64.b64encode(buf.getvalue()).decode()
             except Exception:
+                MC.swallowed()
                 pass   # fall through to the normal encoding so the texture still loads
         if has_alpha and keep_alpha:
             im=im.convert("RGBA"); buf=io.BytesIO(); im.save(buf,"PNG")
@@ -744,10 +763,11 @@ def texture_to_dataurl(vfs, texpath, max_dim=512, emitter_clean=False, keep_alph
         return "data:image/jpeg;base64,"+base64.b64encode(buf.getvalue()).decode()
     except Exception:
         # Last resort: embed browser-native bytes as-is so the texture still appears.
+        MC.swallowed()
         try:
             if ext in ("jpg","jpeg"): return "data:image/jpeg;base64,"+base64.b64encode(data).decode()
             if ext=="png": return "data:image/png;base64,"+base64.b64encode(data).decode()
-        except Exception: pass
+        except Exception: MC.swallowed()
         return None
 
 def build_global_surface_shaders(tik_index):
@@ -965,7 +985,7 @@ def write_textures_manifest(vfs, skd_relpath, surface_names, shader_index, tik_i
                 pak=vfs.pak_of(found)
                 log("note","  Found '%s' elsewhere in the loaded paks and loaded it from %s (%s%s)."
                     % (mp.replace("\\","/").rsplit("/",1)[-1], found, src, ", "+pak if pak else ""))
-    with open(out_path,"w",encoding="utf-8") as f: json.dump(man,f)
+    MC.atomic_write_text(out_path,json.dumps(man))
     return len(man), len(surface_names)
 
 # ===========================================================================
@@ -1192,6 +1212,7 @@ def _cat_include(st, token, parent, depth):
     try:
         sub = data.decode("latin-1", "replace")
     except Exception:
+        MC.swallowed()
         st["fcache"][key] = None
         return
     ci = _cat_node(st, disp)

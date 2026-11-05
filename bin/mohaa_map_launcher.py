@@ -13,6 +13,17 @@
 #  different for maps: the tree, how a file is opened and built, the map details
 #  panel, the menus' map options and where settings and pages are kept.
 # ==============================================================================
+# --- Vendored dependencies (bin/libs on Windows, bin/libs-linux on Linux, bin/libs-mac on macOS)
+import sys
+import os
+_LIBS_NAME = "libs" if sys.platform.startswith("win") else ("libs-mac" if sys.platform == "darwin" else "libs-linux")
+_libs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), _LIBS_NAME)
+if os.path.isdir(_libs_dir) and _libs_dir not in sys.path:
+    sys.path.insert(0, _libs_dir)
+_bin_dir = os.path.dirname(os.path.abspath(__file__))
+if _bin_dir not in sys.path:
+    sys.path.insert(0, _bin_dir)
+import mohaa_common as MC                       # logging, atomic writes, settings, Pillow guard
 import os, sys, re, json, shutil, subprocess, threading, tempfile, zipfile, glob
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -22,13 +33,16 @@ if HERE not in sys.path:
 import mohaa_launcher as ML                    # the shared launcher window
 from mohaa_launcher import tk, ttk, filedialog, _mi, _MSEP
 
+LOG = MC.get_logger("map_launcher")
 try:
     import mohaa_textures as MTX                # pak file system
 except Exception:
+    LOG.error("mohaa_textures could not be imported", exc_info=True)
     MTX = None
 try:
     import mohaa_bsp as MB                      # tells its own decompiled .map files apart
 except Exception:
+    LOG.error("mohaa_bsp could not be imported", exc_info=True)
     MB = None
 
 APP_NAME = "MOHAA Map Viewer"
@@ -41,7 +55,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 78
+MAP_VIEWER_REV_REQUIRED = 94
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".bak": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".lin": "bin", ".cfg": "scr"}
@@ -114,10 +128,10 @@ _PRIVACY_SWAPS = (
      "        closes; in your own browser they stay with that browser's data for local\n"
      "        files.",
      "(theme, backdrop colour,\n"
-     "        panel options, game cvars, and where the Edit parameters box was left) in\n"
-     "        the browser's local storage. The embedded pane runs in private mode and\n"
-     "        forgets them when the program closes; in your own browser they stay with\n"
-     "        that browser's data for local files."),
+     "        panel options, the grid's size and colour, game cvars, and where the Edit\n"
+     "        parameters box was left) in the browser's local storage. The embedded\n"
+     "        pane runs in private mode and forgets them when the program closes; in\n"
+     "        your own browser they stay with that browser's data for local files."),
     ("(textures are embedded as data: URIs)", "(its textures are embedded in it)"),
     ("workspace, model headers\n"
      "   are bounds-checked, and generated pages escape game-file text), but no\n"
@@ -127,7 +141,6 @@ _PRIVACY_SWAPS = (
      "   and .bsp headers are bounds-checked, and generated pages escape game-file\n"
      "   text), but no software is perfect. Please report suspected vulnerabilities\n"
      "   as described in SECURITY.md"),
-    ("RUN -- Medal of Honor Model Viewer.bat", "RUN -- Medal of Honor Map Viewer.bat"),
     ("If you open a model in", "If you open a map in"),
 )
 
@@ -149,13 +162,18 @@ class MapApp(ML.App):
 
     def __init__(self, initial_file=None):
         # Same start-up as the Model Viewer's window (mohaa_launcher.App.__init__), with
-        # this program's own title, settings file, console log and folders.
+        # this program's own title, settings file, console log and folders. NOTE: this
+        # repeats App.__init__ rather than calling it; an attribute added there must be
+        # added here too (tests/check_init_attrs.py compares the two).
+        ML.init_runtime("mohaa_map_launcher")
         tk.Tk.__init__(self)
         ML.init_fonts()
         self.title(APP_NAME)
         self.geometry("1380x820"); self.minsize(1000, 600)
+        self._config_path = MAP_CONFIG
         self._cfg = self._load_config(); self._pyexe = ML.find_python()
         self._attach_busy = set(); self._attach_parts = []
+        self._attach_lock = threading.Lock()
         self._theme = self._cfg.get("theme", "dark")
         if self._theme not in ML.THEMES: self._theme = "dark"
         ML.apply_theme(self, self._theme)
@@ -164,11 +182,8 @@ class MapApp(ML.App):
         self._log_q = queue.Queue(); self._drop_paths = []
         self._status_base = "Ready"; self._pak_suffix = ""
         self._upd_state = None; self._upd_dl_btn = None
-        self._logfile = None
-        try:
-            self._logfile = open(MAP_LOG, "w", encoding="utf-8", buffering=1)
-        except Exception:
-            self._logfile = None
+        self._logfile = ML.open_console_mirror(MAP_LOG)
+        self._startup_extras()       # the RUN window's text, "saved <file>" lines, window-open signal
         self._pk3_paths = []; self._tmp = None; self._animroot = None
         self._vfs = None; self._SH = None; self._TI = None; self._GS = None; self._PROPS = None; self._ED = None
         self._tex_ready = False; self._tex_gen = 0
@@ -223,6 +238,7 @@ class MapApp(ML.App):
         self.bind("<FocusOut>", self._popup_focus_out, add="+")
         ML._win_dark_menus(self._theme == "dark")
         self._build_menu(); self._build_ui(); self._bind_hotkeys(); self._poll_log()
+        self._show_startup_notices()
         self.after(150, self._enable_win_drop)
         self.after(250, self._apply_titlebar)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -235,20 +251,14 @@ class MapApp(ML.App):
         if initial_file: self.after(350, lambda: self._load(initial_file))
 
     # ------------------------------------------------------------- config ---
-    def _load_config(self):
-        """This program's own settings (MAP_CONFIG), or {} on first run."""
-        try:
-            with open(MAP_CONFIG, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
+    def _load_config(self, path=None):
+        """This program's own settings (MAP_CONFIG), or {} on first run (damage handled
+        as in the Model Viewer: see mohaa_launcher.App._load_config)."""
+        return ML.App._load_config(self, path or MAP_CONFIG)
 
-    def _save_config(self):
-        try:
-            with open(MAP_CONFIG, "w", encoding="utf-8") as f:
-                json.dump(self._cfg, f, indent=2)
-        except Exception:
-            pass
+    def _save_config(self, path=None):
+        """Save MAP_CONFIG atomically with a .bak (see mohaa_launcher.App._save_config)."""
+        return ML.App._save_config(self, path or MAP_CONFIG)
 
     def _save_opts(self):
         """Copy the Options menu's choices into the config and save it."""
@@ -305,7 +315,10 @@ class MapApp(ML.App):
                 _mi("Open output folder", self._open_outdir),
                 _MSEP,
                 _mi("Change Text Editor...", lambda: self._change_program("text_editor", "Text Editor")),
-                _mi("Open Text Editor folder", lambda: self._open_program_folder("text_editor", "Text Editor"))]
+                _mi("Open Text Editor folder", lambda: self._open_program_folder("text_editor", "Text Editor")),
+                _MSEP,
+                _mi("Open log folder", self._open_log_folder),
+                _mi("Reset settings...", self._reset_settings)]
 
     def _menu_items_view(self):
         return [_mi("Expand all folders", lambda: self._expand_all(True)),
@@ -356,8 +369,8 @@ class MapApp(ML.App):
                                     relief="flat", font=ML.FONT_MONO)
         self._path_entry.pack(side="left", fill="x", expand=True, padx=(10, 4), pady=2, ipady=3)
         self._tip(self._path_entry, "Selected map.\nPaste a full path here, pick from the tree,\nor drag a .bsp/.map/.bak onto this window.")
-        self._mkbtn(top, text="Browse...", command=self._browse,
-                    tip="Pick a loose .bsp, .map or .bak from disk.\n(Ctrl+Shift+O)").pack(side="left", padx=(0, 4))
+        self._mkbtn(top, text="Browse...", command=self._browse_and_run,
+                    tip="Pick a loose .bsp, .map or .bak from disk and open it.\n(Ctrl+Shift+O)").pack(side="left", padx=(0, 4))
         self._mkbtn(top, text="▶ Open Viewer", style="Accent.TButton", command=self._run,
                     tip="Build the viewer for the selected map and show it in the middle pane\n(also runs on double-click / Enter in the tree)").pack(side="left", padx=(0, 14))
         self._lines = [tk.Frame(self, bg=ML.LINE, height=1)]; self._lines[0].pack(fill="x", padx=8)
@@ -430,32 +443,18 @@ class MapApp(ML.App):
         self._tip(self._log, "Build / decompile log.\nRight-click to copy or clear.\nEscape to cancel loading / building.")
 
         # Map details: name, counts, then the entity breakdown (as MOHRadiant's Map Info).
-        info = ttk.Frame(bottomrow, style="Panel.TFrame", width=270); info.pack_propagate(False)
-        self._info_title = ttk.Label(info, text="No map loaded", style="Panel.TLabel", foreground=ML.DIM)
-        self._info_title.pack(anchor="w", padx=10, pady=(8, 2))
-        self._info_stats = ttk.Label(info, text="", style="PanelDim.TLabel", wraplength=245, justify="left")
-        self._info_stats.pack(anchor="w", padx=10, pady=(0, 4))
-        # the Re-open / Browser / .map buttons are packed at the bottom first, so the list above
-        # gives way to them in the default window size (packed after it, the list's 8 lines
-        # took the room and hid them)
-        self._reopen_bar = ttk.Frame(info, style="Panel.TFrame"); self._reopen_bar.pack(side="bottom", fill="x", padx=10, pady=(2, 8))
-        tagwrap = ttk.Frame(info, style="Panel.TFrame"); tagwrap.pack(fill="both", expand=True, padx=6, pady=(0, 4))
-        self._tag_text = tk.Text(tagwrap, bg=ML.PANEL, fg=ML.TXT, insertbackground=ML.TXT, font=ML.FONT_SMALL,
-                                 relief="flat", height=8, wrap="none", state="disabled",
-                                 highlightthickness=0, cursor="arrow")
-        _sb = ttk.Scrollbar(tagwrap, orient="vertical", command=self._tag_text.yview)
-        self._tag_text.configure(yscrollcommand=_sb.set)
-        _sb.pack(side="right", fill="y"); self._tag_text.pack(side="left", fill="both", expand=True)
+        # one scrollable column: title, stats, Rebuild / Browser / .map, then the list (a small
+        # pane scrolls as a whole, so the buttons and the scrollbar never get squeezed out)
+        info = ML.make_info_pane(self, bottomrow, "No map loaded",
+                                 "Entity breakdown of the last-built map (like MOHRadiant's Map Info).\nSelect + copy freely.\nRight-click for Copy all / Select all / Open in Text Editor.")
         self._retheme_tag_text()
-        self._tag_text.bind("<Button-3>", self._show_tag_menu)
-        self._tip(self._tag_text, "Entity breakdown of the last-built map (like MOHRadiant's Map Info).\nSelect + copy freely.\nRight-click for Copy all / Select all / Open in Text Editor.")
 
         outer.add(left, minsize=180, width=300, stretch="never")
         outer.add(rightside, minsize=340, stretch="always")
         rightside.add(upper, minsize=160, stretch="always")
-        rightside.add(bottomrow, minsize=130, height=210, stretch="never")
+        rightside.add(bottomrow, minsize=ML.BOTTOM_ROW_MIN, height=ML.BOTTOM_ROW_HEIGHT, stretch="never")
         bottomrow.add(lf, minsize=220, stretch="always")
-        bottomrow.add(info, minsize=200, width=270, stretch="never")
+        bottomrow.add(info, minsize=200, width=ML.INFO_PANE_WIDTH, stretch="never")
         self.after(160, self._restore_panes); self.after(480, self._restore_panes)
 
         stat = ttk.Frame(self, style="Panel.TFrame"); stat.pack(fill="x", side="bottom")
@@ -475,6 +474,8 @@ class MapApp(ML.App):
         """Map-details panel colours for the current theme."""
         t = self._tag_text
         t.configure(bg=ML.PANEL, fg=ML.TXT, insertbackground=ML.TXT, selectbackground=ML.SEL_BG, selectforeground=ML.TXT)
+        cv = getattr(self, "_info_canvas", None)
+        if cv is not None: cv.configure(bg=ML.PANEL)
         for tg, cl in (("thead", ML.DIM), ("tname", ML.TXT), ("tcount", ML.ACCENT), ("tdim", ML.DIM),
                        ("terr", ML.ERR_C), ("ttl", ML.ACCENT)):
             t.tag_config(tg, foreground=cl)
@@ -499,9 +500,9 @@ class MapApp(ML.App):
             self._log_line("No map details to open yet - build a map first.", "dim"); return
         try:
             base = os.path.join(self._tmp or tempfile.gettempdir(), "map_info.txt")
-            with open(base, "w", encoding="utf-8") as f:
-                f.write(txt + "\n")
+            MC.atomic_write_text(base, txt + "\n")
         except Exception as e:
+            MC.swallowed()
             self._log_line(f"Could not write the map details: {e}", "err"); return
         self._launch_with("text_editor", "text editor", "Text Editor", base)
 
@@ -528,7 +529,7 @@ class MapApp(ML.App):
         """Why folder d must not be cleared (a drive root, the home folder, or not one of
         this program's 'maps' folders), or None when it is safe."""
         try: d = os.path.abspath(d)
-        except Exception: return "unresolvable path"
+        except Exception: MC.swallowed(); return "unresolvable path"
         leaf = os.path.basename(d.rstrip(os.sep))
         if not leaf or os.path.dirname(d.rstrip(os.sep)) == d.rstrip(os.sep): return "a drive/filesystem root"
         home = os.path.abspath(os.path.expanduser("~"))
@@ -557,7 +558,7 @@ class MapApp(ML.App):
                     if self._is_built_file(fp):
                         files.append(fp)
                         try: nb += os.path.getsize(fp)
-                        except OSError: pass
+                        except OSError: MC.swallowed()
         return files, dirs, nb
 
     def _built_any(self):
@@ -589,7 +590,7 @@ class MapApp(ML.App):
         self._close_viewer()
         self._last_build = None
         try: self._path_var.set("")
-        except Exception: pass
+        except Exception: MC.swallowed()
         n = 0; failed = 0
         for root in roots:
             why = self._unsafe_to_wipe(root)
@@ -602,17 +603,18 @@ class MapApp(ML.App):
             # folders left empty (deepest first), the output folder itself included
             for dp, _dn, _fn in sorted(os.walk(root), key=lambda w: -len(w[0])):
                 try: os.rmdir(dp)
-                except OSError: pass
+                except OSError: MC.swallowed()
         if failed: self._log_line("  %d file(s) could not be deleted (open in another program?)" % failed, "err")
         self._log_line("Cleared built maps: %d file(s) deleted, %s freed." % (n, self._fmt_bytes(nb)), "ok")
 
     def _temp_dirs(self):
         """This program's workspace folders in the system temp folder."""
         try: base = tempfile.gettempdir()
-        except Exception: return []
+        except Exception: MC.swallowed(); return []
         try:
             return [d for d in sorted(glob.glob(os.path.join(glob.escape(base), TEMP_PREFIX + "*"))) if os.path.isdir(d)]
         except Exception:
+            MC.swallowed()
             return []
 
     def _own_pycache(self):
@@ -620,7 +622,7 @@ class MapApp(ML.App):
         pc = os.path.join(HERE, "__pycache__")
         if not os.path.isdir(pc): return None
         try: names = os.listdir(pc)
-        except OSError: return None
+        except OSError: MC.swallowed(); return None
         ours = ("mohaa_map_view", "mohaa_map_page", "mohaa_bsp", "mohaa_entdefs", "mohaa_map_launcher",
                 "mohaa_view", "mohaa_textures", "mohaa_launcher")
         return pc if any(any(nm.startswith(o + ".") for o in ours) for nm in names) else None
@@ -657,7 +659,7 @@ class MapApp(ML.App):
             else:
                 shutil.rmtree(live, ignore_errors=True)
                 try: self._tmp = tempfile.mkdtemp(prefix=TEMP_PREFIX)
-                except Exception: self._tmp = None
+                except Exception: MC.swallowed(); self._tmp = None
             n += 1
         pn = 0
         if pyc:
@@ -679,7 +681,7 @@ class MapApp(ML.App):
         for path in paths:
             if not os.path.exists(path): continue
             try: zipfile.ZipFile(path).close()
-            except Exception as e: self._log_line(f"Could not open {os.path.basename(path)}: {e}", "err"); continue
+            except Exception as e: MC.swallowed(); self._log_line(f"Could not open {os.path.basename(path)}: {e}", "err"); continue
             if path not in self._pk3_paths: self._pk3_paths.append(path); added += 1
         if not added and paths: return
         self._cfg["pk3s"] = self._pk3_paths if self._remember.get() else []
@@ -725,11 +727,12 @@ class MapApp(ML.App):
             self._vfs = vfs; self._SH = shaders; self._ED = ed; self._tex_ready = True
             if old is not None and hasattr(old, "close"):
                 try: old.close()
-                except Exception: pass
+                except Exception: MC.swallowed()
             nmaps = sum(1 for _k, kind in self._all_files if kind in ("bsp", "map"))
             self._log_q.put(("ok", f"Ready: {len(shaders)} shaders, {len(ed.defs)} entity classes indexed; {nmaps} map(s) in the tree."))
             self._log_q.put(("status", "Ready"))
         except Exception as e:
+            MC.swallowed()
             self._log_q.put(("err", f"Indexing failed: {e}"))
 
     def _populate_tree(self, paks):
@@ -737,7 +740,7 @@ class MapApp(ML.App):
         files = {}
         for p in paks:
             try: names = zipfile.ZipFile(p).namelist()
-            except Exception: continue
+            except Exception: MC.swallowed(); continue
             for n in names:
                 nl = n.lower()
                 if not nl.startswith("maps/") or n.endswith("/"): continue
@@ -780,7 +783,7 @@ class MapApp(ML.App):
         iid = ""
         try:
             if e.widget is self._tree: iid = self._tree.identify_row(e.y)
-        except Exception: iid = ""
+        except Exception: MC.swallowed(); iid = ""
         sel = self._tree.selection()
         if iid:
             if not (iid in sel and len(sel) > 1):
@@ -869,7 +872,7 @@ class MapApp(ML.App):
                 for p in self._pk3_paths:                       # later paks override earlier
                     if bgen != self._build_gen: return
                     try: zf = zipfile.ZipFile(p)
-                    except Exception: continue
+                    except Exception: MC.swallowed(); continue
                     for n in zf.namelist():
                         if n.lower() == entry.lower() and not n.endswith("/"):
                             target = self._extract_one(zf, n, force=True)
@@ -880,6 +883,7 @@ class MapApp(ML.App):
                 self._vpath_for[target] = entry
                 self._log_q.put(("load", (target, None, None, None, subdir)))
             except Exception as e:
+                MC.swallowed()
                 self._log_q.put(("err", f"Extract failed: {e}"))
         threading.Thread(target=work, daemon=True).start()
 
@@ -895,7 +899,7 @@ class MapApp(ML.App):
                 target = None
                 for p in self._pk3_paths:
                     try: zf = zipfile.ZipFile(p)
-                    except Exception: continue
+                    except Exception: MC.swallowed(); continue
                     for n in zf.namelist():
                         if n.lower() == entry.lower() and not n.endswith("/"):
                             target = self._extract_one(zf, n, force=True)
@@ -905,7 +909,7 @@ class MapApp(ML.App):
                 outdir = os.path.join(self._outdir, subdir) if self._outdir_on.get() else os.path.dirname(target)
                 cmd = self._builder_cmd(target, entry, outdir) + ["--decompile-only"]
                 self._log_q.put(("dim", f"Decompiling {os.path.basename(entry)} ..."))
-                env = dict(os.environ, PYTHONIOENCODING="utf-8")
+                env = MC.child_env()
                 p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                                    timeout=600, env=env, **ML.NOWIN)
                 mp = None
@@ -918,16 +922,19 @@ class MapApp(ML.App):
                 self._log_q.put(("ok", f"Decompiled to {mp}"))
                 if edit and os.path.exists(mp): self._launch_with("text_editor", "text editor", "Text Editor", mp)
             except Exception as e:
+                MC.swallowed()
                 self._log_q.put(("err", f"Decompile failed: {e}"))
         threading.Thread(target=work, daemon=True).start()
 
     def _browse(self):
-        """Browse... : pick a loose .bsp / .map / .bak (Open Viewer then builds it)."""
+        """Pick a loose .bsp / .map / .bak; returns it ("" on Cancel). Browse... opens it at
+        once (_browse_and_run)."""
         p = filedialog.askopenfilename(title="Select a MOHAA map (.bsp, .map or .bak)",
                                        filetypes=[("MOHAA map", "*.bsp *.map *.bak"), ("Compiled map", "*.bsp"),
                                                   ("Map source", "*.map"), ("MOHRadiant backup", "*.bak"),
                                                   ("All files", "*.*")])
         if p: self._path_var.set(p)
+        return p or ""
 
     def _run(self):
         """Open Viewer: build what the path bar names (a pak map or a file on disk)."""
@@ -976,8 +983,7 @@ class MapApp(ML.App):
         if self._pk3_paths and self._tmp:
             lst = os.path.join(self._tmp, "paks.txt")
             try:
-                with open(lst, "w", encoding="utf-8") as f:
-                    f.write("\n".join(self._pk3_paths) + "\n")
+                MC.atomic_write_text(lst, "\n".join(self._pk3_paths) + "\n")
                 cmd.append("--paks=" + lst)
             except OSError:
                 for p in self._pk3_paths: cmd.append("--pak=" + p)
@@ -1005,7 +1011,7 @@ class MapApp(ML.App):
             cmd.append("--no-open")
             ext = bool(opts.get("external"))
             will_open = ext or (self._auto_open.get() and not opts.get("no_open"))
-            env = dict(os.environ, PYTHONIOENCODING="utf-8")
+            env = MC.child_env()
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                  encoding="utf-8", errors="replace", bufsize=1, env=env, **ML.NOWIN)
             self._proc = p
@@ -1033,6 +1039,7 @@ class MapApp(ML.App):
             else:
                 self._log_q.put(("err", f"Exited with code {p.returncode}"))
         except Exception as e:
+            MC.swallowed()
             self._log_q.put(("err", str(e)))
         finally:
             self._log_q.put(("done", None))
@@ -1066,6 +1073,7 @@ class MapApp(ML.App):
             self._log_line(f"({os.path.basename(hp)} is from an older viewer build - rebuilding)", "dim")
             return False
         except Exception:
+            MC.swallowed()
             return False
 
     def _open_file(self, path):
@@ -1081,6 +1089,7 @@ class MapApp(ML.App):
                 self.after(700, self._embed_merge_ui); self.after(2200, self._embed_merge_ui)
                 return
             except Exception as e:
+                MC.swallowed()
                 self._log_line(f"(embed failed: {e}; opening in browser)", "dim")
         self._open_in_browser(path)
 
@@ -1089,16 +1098,17 @@ class MapApp(ML.App):
         """Empty the map-details panel."""
         self._last_info = None
         try: self._info_title.configure(text="No map loaded", foreground=ML.DIM)
-        except Exception: pass
+        except Exception: MC.swallowed()
         try: self._info_stats.configure(text="")
-        except Exception: pass
+        except Exception: MC.swallowed()
         try:
             t = self._tag_text
             t.configure(state="normal"); t.delete("1.0", "end"); t.configure(state="disabled")
-        except Exception: pass
+        except Exception: MC.swallowed()
         try:
             for w in self._reopen_bar.winfo_children(): w.destroy()
-        except Exception: pass
+        except Exception: MC.swallowed()
+        self._info_refit()
 
     @staticmethod
     def _read_page_info(html_path):
@@ -1110,11 +1120,12 @@ class MapApp(ML.App):
             m = re.search(r'<script type="application/json" id="mohaa-map-info">(.*?)</script>', head, re.S)
             return json.loads(m.group(1)) if m else {}
         except Exception:
+            MC.swallowed()
             return {}
 
     def _update_info(self, path, stdout, html_path=None):
         """Fill the map-details panel from the page's summary block: counts, the entity
-        breakdown, missing textures, and Re-open / Browser / .map buttons."""
+        breakdown, missing textures, and Rebuild / Browser / .map buttons."""
         if html_path is None: html_path = self._html_out_path(path)
         self._last_info = (path, stdout, html_path)
         info = self._read_page_info(html_path)
@@ -1153,15 +1164,16 @@ class MapApp(ML.App):
                 for m in miss: t.insert("end", "  " + m.replace("textures/", "", 1) + "\n", "tdim")
         t.configure(state="disabled")
         if os.path.exists(html_path):
-            self._mkbtn(self._reopen_bar, text="↻ Re-open", command=lambda p=html_path: self._open_file(p),
-                        tip="Show the last-built viewer again (no rebuild)").pack(side="left")
-            self._mkbtn(self._reopen_bar, text="Browser", command=lambda p=html_path: self._open_in_browser(p),
-                        tip="Open the last-built viewer page in your external browser").pack(side="left", padx=(4, 0))
+            ML.info_button(self, "rebuild", "Rebuild", self._rebuild_shown,
+                           "Build this map's viewer again from its files\n(ignores the saved HTML)").pack(side="left")
+            ML.info_button(self, "browser", "Browser", lambda p=html_path: self._open_in_browser(p),
+                           "Open the viewer page in your external browser").pack(side="left", padx=(4, 0))
             mp = info.get("mapFile")
             if not mp and path.lower().endswith(".map"): mp = path
             if mp and os.path.exists(mp):
-                self._mkbtn(self._reopen_bar, text=".map", command=lambda p=mp: self._launch_with("text_editor", "text editor", "Text Editor", p),
-                            tip="Open the map's .map source in your Text Editor\n" + mp).pack(side="left", padx=(4, 0))
+                ML.info_button(self, "file", ".map", lambda p=mp: self._launch_with("text_editor", "text editor", "Text Editor", p),
+                               "Open the map's .map source in your Text Editor\n" + mp).pack(side="left", padx=(4, 0))
+        self._info_refit()
 
     # ------------------------------------------------ embedded pane hooks ---
     def _poll_log(self):
@@ -1171,7 +1183,7 @@ class MapApp(ML.App):
         while reqs:
             fn = reqs.pop(0)
             try: fn()
-            except Exception as e: self._log_line(f"(viewer request: {e})", "err")
+            except Exception as e: MC.swallowed(); self._log_line(f"(viewer request: {e})", "err")
         super()._poll_log()
 
     # ------------------------------------------------ MODIFY: Save as .bsp / .map ---
@@ -1180,7 +1192,7 @@ class MapApp(ML.App):
         try:
             if self._webview is not None and getattr(self._webview, "core", None) is not None:
                 self._webview.core.ExecuteScriptAsync(js)
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     def _modify_source(self, req, want_bsp):
         """The bytes / text the new file starts from: the file the page was built from, else
@@ -1196,7 +1208,7 @@ class MapApp(ML.App):
                         with zipfile.ZipFile(pk) as z:
                             for n in z.namelist():
                                 if n.lower() == vp.lower(): return z.read(n), f"{os.path.basename(pk)}/{n}"
-                    except Exception: continue
+                    except Exception: MC.swallowed(); continue
             return None, None
         mp = req.get("mapFile") or (src if src.lower().endswith((".map", ".bak")) else "")
         if mp and os.path.isfile(mp):
@@ -1243,11 +1255,12 @@ class MapApp(ML.App):
             else:
                 # the page sends the whole .map when it has it (changed entities written again)
                 text = req.get("mapText") or (data.rstrip() + "\n// added in MOHAA Map Viewer's MODIFY\n" + added.strip("\n") + "\n")
-                tmp = out + ".tmp"
-                with open(tmp, "w", encoding="latin-1", errors="replace", newline="\n") as f: f.write(text)
-                os.replace(tmp, out)
+                # atomic; overwriting an earlier Save-as copy keeps that copy as .bak
+                MC.atomic_write_text(out, text, encoding="latin-1", errors="replace", newline="\n",
+                                     backup=os.path.exists(out))
                 msg = f"saved {os.path.basename(out)} with {added.count('{')} new and {len(req.get('set') or [])} changed entities"
         except Exception as e:
+            MC.swallowed()
             tell(False, f"not saved: {e}"); return
         made.add(os.path.normcase(out))
         self._cfg["modify_written"] = sorted(made)[-200:]
@@ -1299,7 +1312,19 @@ class MapApp(ML.App):
             subprocess.Popen([prog] + args(mp, line))
             self._log_line(f"opened with {os.path.basename(prog)}: {os.path.basename(mp)} at line {line}", "dim")
         except Exception:
+            MC.swallowed()
             self._launch_with("text_editor", "text editor", "Text Editor", mp)
+
+    def _open_scr(self, vpath, where):
+        """The level-script card's Open .scr / Open: the script in the Text Editor. `where`
+        is the file it was read from (a path on disk) or "<path> (<pak>)" for one read from a
+        pak, which is extracted first."""
+        vpath = (vpath or "").strip(); where = (where or "").strip()
+        if where and os.path.isfile(where):
+            self._launch_with("text_editor", "text editor", "Text Editor", where); return
+        if not vpath:
+            self._log_line("(no script to open)", "err"); return
+        self._open_entry_with(vpath.replace("\\", "/"), "text_editor", "text editor", "Text Editor")
 
     def _hook_embed_drop(self, _tries=0):
         """As the Model Viewer's (refuse file drops on the pane, catch them ourselves, and
@@ -1311,26 +1336,26 @@ class MapApp(ML.App):
             return
         self._embed_drop_hooked = True
         try: wv.web.AllowExternalDrop = False
-        except Exception: pass
+        except Exception: MC.swallowed()
         try:
             from System.Windows.Forms import DataFormats, DragDropEffects
 
             def _enter(s, a):
                 try:
                     if a.Data.GetDataPresent(DataFormats.FileDrop): a.Effect = DragDropEffects.Copy
-                except Exception: pass
+                except Exception: MC.swallowed()
 
             def _drop(s, a):
                 try:
                     for p in a.Data.GetData(DataFormats.FileDrop):
                         if str(p).lower().endswith(MAP_EXTS): self._drop_paths.append(str(p))
-                except Exception: pass
+                except Exception: MC.swallowed()
             self._wv_drag_cbs = (_enter, _drop)
             for c in (getattr(wv, "web", None), getattr(wv, "control", None)):
                 if c is None: continue
                 try: c.AllowDrop = True; c.DragEnter += _enter; c.DragDrop += _drop
-                except Exception: pass
-        except Exception: pass
+                except Exception: MC.swallowed()
+        except Exception: MC.swallowed()
         js = ("(function(){if(window.__mohaaDropGuard)return;window.__mohaaDropGuard=1;"
               "function s(e){e.preventDefault();e.stopPropagation();"
               "if(e.dataTransfer)e.dataTransfer.dropEffect='none';}"
@@ -1340,13 +1365,13 @@ class MapApp(ML.App):
               "try{if(window.chrome&&chrome.webview)chrome.webview.postMessage('mohaa-drop-blocked');}catch(_){}"
               "},true);})();")
         try: wv.core.AddScriptToExecuteOnDocumentCreatedAsync(js)
-        except Exception: pass
+        except Exception: MC.swallowed()
         try: wv.core.ExecuteScriptAsync(js)
-        except Exception: pass
+        except Exception: MC.swallowed()
         try:
             def _msg(s, a):
                 try: m = a.TryGetWebMessageAsString()
-                except Exception: return
+                except Exception: MC.swallowed(); return
                 try:
                     if m == "mohaa-drop-blocked":
                         self._log_q.put(("dim", "(the 3D pane can't take drops here - drop onto the file tree or console instead)"))
@@ -1357,12 +1382,16 @@ class MapApp(ML.App):
                         # an info card's Open: the .map at a line (and the .map the page was built from)
                         parts = (m.split("\n") + ["", ""])[1:3]
                         try: line = int(parts[0])
-                        except Exception: line = 0
+                        except Exception: MC.swallowed(); line = 0
                         self._page_requests.append(lambda l=line, f=parts[1]: self._open_map_at(l, f))
+                    elif m.startswith("mohaa-open-scr\n"):
+                        # the level-script card's Open .scr: "mohaa-open-scr\n<path in the paks>\n<where>"
+                        parts = (m.split("\n") + ["", ""])[1:3]
+                        self._page_requests.append(lambda v=parts[0], w=parts[1]: self._open_scr(v, w))
                     elif m.startswith("mohaa-modify-save\n"):
                         # MODIFY's Save as .bsp / .map: the new entities, and the map they go in
                         try: req = json.loads(m.split("\n", 1)[1])
-                        except Exception: req = None
+                        except Exception: MC.swallowed(); req = None
                         if isinstance(req, dict):
                             self._page_requests.append(lambda r=req: self._modify_save(r))
                     elif m.startswith("mohaa-log\n"):
@@ -1377,7 +1406,7 @@ class MapApp(ML.App):
                         rows = m.split("\n")[1:]
                         title = rows[0] if rows else "?"
                         try: total = int(rows[1])
-                        except Exception: total = 0
+                        except Exception: MC.swallowed(); total = 0
                         rows = [r for r in rows[2:] if r]
                         total = max(total, len(rows))
                         self._log_q.put(("warn", f"  {title}: the viewer skipped {total} unreadable block{'' if total == 1 else 's'} of the .map:"))
@@ -1386,10 +1415,11 @@ class MapApp(ML.App):
                         if total > len(rows):
                             self._log_q.put(("warn", f"    ... and {total - len(rows)} more (the red line in the viewer's panel opens the list)"))
                 except Exception as e:
+                    MC.swallowed()
                     self._log_q.put(("dim", f"(viewer message: {e})"))
             wv.core.WebMessageReceived += _msg
             self._wv_msg_cb = _msg
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     def _enable_win_drop(self):
         """Windows drag-and-drop of .bsp / .map files onto the window (same mechanism as
@@ -1423,10 +1453,10 @@ class MapApp(ML.App):
                             shell32.DragQueryFileW(wp, i, buf, need + 1)
                             if buf.value.lower().endswith(MAP_EXTS): self._drop_paths.append(buf.value)
                         shell32.DragFinish(wp)
-                    except Exception: pass
+                    except Exception: MC.swallowed()
                     return 0
                 try: return CallWP(self._old_wndproc, h, msg, wp, lp)
-                except Exception: return 0
+                except Exception: MC.swallowed(); return 0
             self._wndproc_cb = WNDPROC(py_wndproc)
             old = SetWL(hwnd, GWLP_WNDPROC, self._wndproc_cb)
             if not old: self._wndproc_cb = None; self._log_line("(drag-drop unavailable; use Browse)", "dim"); return
@@ -1434,11 +1464,12 @@ class MapApp(ML.App):
 
             def _restore(*_):
                 try: SetWL.argtypes = [HWND, ctypes.c_int, LONG_PTR]; SetWL(hwnd, GWLP_WNDPROC, self._old_wndproc)
-                except Exception: pass
+                except Exception: MC.swallowed()
             self._restore_drop = _restore
             self.bind("<Destroy>", lambda e: _restore() if e.widget is self else None)
             self._log_line("Drag-and-drop ready - drop a .bsp/.map/.bak onto this window.", "dim")
         except Exception as e:
+            MC.swallowed()
             self._log_line(f"(drag-drop unavailable: {e}; use Browse)", "dim")
 
     # ------------------------------------------------------------ dialogs ---
@@ -1457,10 +1488,11 @@ class MapApp(ML.App):
             if w0 is not None and w0.winfo_exists():
                 w0.deiconify(); w0.lift(); w0.focus_set(); return
         except Exception:
-            pass
+            MC.swallowed()
         try:
             import mohaa_map_view as MMV
         except Exception as e:
+            MC.swallowed()
             self._log_line(f"(the legend needs mohaa_map_view.py: {e})", "err"); return
         import base64
         old = ML.OLD_POPUPS
@@ -1479,8 +1511,9 @@ class MapApp(ML.App):
                     try:
                         thumbs[name] = tk.PhotoImage(master=w, data=base64.b64encode(val[1]).decode("ascii")).subsample(2, 2)
                     except Exception:
-                        pass
+                        MC.swallowed()
             except Exception:
+                MC.swallowed()
                 thumbs = {}
         w._thumbs = thumbs                     # Tk drops images nothing in Python refers to
         # text wraps at about 44 characters, narrower on a small screen so the three
@@ -1489,6 +1522,7 @@ class MapApp(ML.App):
             import tkinter.font as _tkfont
             wrap = (_tkfont.nametofont("TkDefaultFont") if old else _tkfont.Font(font=ML.FONT_SMALL)).measure("x" * 44)
         except Exception:
+            MC.swallowed()
             wrap = 320
         wrap = max(200, min(wrap, (self.winfo_screenwidth() - 160) // 3 - 60))
 
@@ -1548,6 +1582,7 @@ class MapApp(ML.App):
         try:
             lh = self.winfo_height() if self.winfo_height() > 200 else 820
         except Exception:
+            MC.swallowed()
             lh = 820
         extra = w.winfo_reqheight() - max(c[0].winfo_reqheight() for c in cols)
         cap = max(240, min(lh, self.winfo_screenheight() - 80, 640) - extra)
@@ -1567,6 +1602,7 @@ class MapApp(ML.App):
             try:
                 wdg = w.winfo_containing(e.x_root, e.y_root)
             except Exception:
+                MC.swallowed()
                 wdg = None
             while wdg is not None and not any(wdg is c[3] for c in cols):
                 wdg = getattr(wdg, "master", None)
@@ -1635,7 +1671,7 @@ class MapApp(ML.App):
             y = self.winfo_rooty() + (self.winfo_height() - w.winfo_height()) // 2
             x0, y0, _x1, _y1 = ML._virtual_screen(w)
             w.geometry(f"+{max(x0, x)}+{max(y0, y)}")
-        except Exception: pass
+        except Exception: MC.swallowed()
 
     def _show_privacy(self):
         """Help > Privacy & Legal."""
@@ -1673,51 +1709,17 @@ class MapApp(ML.App):
         if not old: self._apply_titlebar(w)
         w.grab_set(); btn.focus_set()
 
-    def _restart_program(self, staged=None):
-        """After an update: start this launcher again (not the Model Viewer's)."""
-        launcher = os.path.abspath(__file__)
-        exe = sys.executable or "pythonw"
-        try:
-            if staged:
-                pid = os.getpid()
-                lines = ["@echo off", ":wait",
-                         'tasklist /FI "PID eq %d" 2>nul | find "%d" >nul && (ping 127.0.0.1 -n 2 >nul & goto wait)' % (pid, pid)]
-                for d in staged:
-                    lines.append('move /y "%s.new" "%s" >nul' % (d, d))
-                lines.append('start "" "%s" "%s"' % (exe, launcher))
-                lines.append('del "%~f0"')
-                bat = os.path.join(tempfile.gettempdir(), "mohaa_map_update_swap.bat")
-                with open(bat, "w", encoding="utf-8") as f: f.write("\r\n".join(lines))
-                subprocess.Popen(["cmd", "/c", bat], **ML.NOWIN)
-            else:
-                subprocess.Popen([exe, launcher], **ML.NOWIN)
-        except Exception:
-            pass
-        try:
-            if getattr(self, "_tmp", None) and os.path.isdir(self._tmp):
-                shutil.rmtree(self._tmp, ignore_errors=True)
-        except Exception: pass
-        try: self.destroy()
-        except Exception: pass
-        os._exit(0)
+    def _launcher_path(self):
+        """After an update, start this launcher again (not the Model Viewer's); the restart
+        itself, staged files included, is mohaa_launcher.App._restart_program."""
+        return os.path.abspath(__file__)
 
 
 if __name__ == "__main__":
     init = None
     for a in sys.argv[1:]:
         if a.lower().endswith(MAP_EXTS) and os.path.exists(a): init = a; break
-
-    def _run_app():
-        MapApp(initial_file=init).mainloop()
+    _code = ML.run_gui(lambda: MapApp(initial_file=init), "mohaa_map_launcher")
     if ML.WEBVIEW2 is not None:
-        # WebView2 needs an STA COM apartment, so run Tk on a .NET STA thread (as the
-        # Model Viewer does); fall back to the main thread on failure.
-        try:
-            from System.Threading import Thread as _NetThread, ApartmentState as _ApState, ThreadStart as _TStart
-            _t = _NetThread(_TStart(_run_app)); _t.ApartmentState = _ApState.STA
-            _t.Start(); _t.Join()
-        except Exception:
-            _run_app()
-        os._exit(0)
-    else:
-        _run_app()
+        os._exit(_code)       # pythonnet + WebView2 crash in normal interpreter shutdown
+    sys.exit(_code)

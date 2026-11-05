@@ -51,6 +51,16 @@ venv/
 *_map_view.html
 python_installer.exe
 
+# Vendored Python packages: installed by the RUN files, one folder per OS
+bin/libs/
+bin/libs-linux/
+bin/libs-mac/
+
+# Atomic-write temp files and settings recovery copies (only left behind by a crash)
+*.tmp
+*.part
+*.corrupt-*
+
 # Editors / OS
 .vscode/
 .idea/
