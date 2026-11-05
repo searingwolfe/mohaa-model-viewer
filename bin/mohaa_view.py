@@ -2065,7 +2065,7 @@ VIEWER_KEYS={
    _kx("drag","look around",("Drag","look")),
    _kx("wheel","move forward / back",("Wheel","move")),
    _kx("W|S","move forward / back",("W","forward","move forward"),("S","back","move back")),
-   _kx("Up|Down","move forward / back",("Up","forward","move forward"),("Down","back","move back")),
+   _kx("Up|Down","move forward / back level with the ground",("Up","forward","move forward, level"),("Down","back","move back, level")),
    _kx("A|D","strafe left / right",("A","left","strafe left"),("D","right","strafe right")),
    _kx("Space|C","move up / down",("Space","up","move up"),("C","down","move down")),
    _kx("Q|E","tilt (roll) left / right",("Q","tilt L","tilt (roll) left"),("E","tilt R","tilt (roll) right")),
@@ -2497,7 +2497,7 @@ ANIM_PRELOAD_MAX=150
 # Page format revision, baked into each HTML as <!--mohaa-viewer-rev:N-->. Bump it when
 # the page gains features a cached HTML must pick up, and raise VIEWER_REV_REQUIRED in
 # mohaa_launcher.py to match so older pages are rebuilt. History: docs/CHANGELOG.md.
-VIEWER_REV=79
+VIEWER_REV=80
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!--mohaa-viewer-rev:__REV__-->
@@ -5789,7 +5789,8 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)stopCamera(
 // open, so a key let go then never reaches the page and the camera flew on. It stops as
 // the menu opens.
 window.addEventListener('contextmenu',e=>{if(!e.defaultPrevented)stopCamera();});
-// MOHRadiant-style fly camera: W/S forward-back, A/D strafe, Q/E roll (tilt),
+// MOHRadiant-style fly camera: W/S forward-back, Up/Down forward-back level with the
+// ground, A/D strafe, Q/E roll (tilt),
 // Space/C rise-lower. Runs while keys are held; renders fast (flat) during motion.
 let _wasFlying=false;
 (function flyLoop(){
@@ -5798,7 +5799,10 @@ let _wasFlying=false;
  if(view.wasd&&keysDown.size){
   if(!eye)enterFreeLook();
   const mv=rad*0.02, tn=0.03, k=s=>keysDown.has(s), b=camBasis();
-  const F=(k('w')||k('W')||k('ArrowUp'))?1:(k('s')||k('S')||k('ArrowDown'))?-1:0;
+  const F=(k('w')||k('W'))?1:(k('s')||k('S'))?-1:0;
+  // Up / Down: forward and back level with the ground (the view's forward with its height
+  // taken out, Y being up here), however the camera is pitched, as A / D strafe sideways
+  const FH=k('ArrowUp')?1:k('ArrowDown')?-1:0;
   const R=(k('d')||k('D'))?1:(k('a')||k('A'))?-1:0;
   const U=(k(' ')?1:0)-((k('c')||k('C'))?1:0);
   // Roll the strafe (right) and rise (up) axes about forward so A/D and Space/C follow the
@@ -5809,6 +5813,7 @@ let _wasFlying=false;
     return[v[0]*cr-cx*sr+fx[0]*d,v[1]*cr-cy*sr+fx[1]*d,v[2]*cr-cz*sr+fx[2]*d];};
   const rr=rollv(b.r), uu=rollv([0,1,0]);
   if(F){eye[0]+=b.f[0]*mv*F;eye[1]+=b.f[1]*mv*F;eye[2]+=b.f[2]*mv*F;}
+  if(FH){const l=Math.hypot(b.f[0],b.f[2]);if(l>1e-6){eye[0]+=b.f[0]/l*mv*FH;eye[2]+=b.f[2]/l*mv*FH;}}
   if(R){eye[0]+=rr[0]*mv*R;eye[1]+=rr[1]*mv*R;eye[2]+=rr[2]*mv*R;}
   if(U){eye[0]+=uu[0]*mv*U;eye[1]+=uu[1]*mv*U;eye[2]+=uu[2]*mv*U;}
   if(k('ArrowLeft'))yaw+=tn;

@@ -52,10 +52,10 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 53
+MAP_VIEWER_REV = 73
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
-INDEX_VERSION = 9
+INDEX_VERSION = 10
 
 # Default longest side of the textures embedded in the page. 256 keeps a large map's
 # page around 10-20 MB; the launcher can ask for 128 or 512.
@@ -852,7 +852,8 @@ MAP_VIEWER_KEYS = {
         {"title": "Camera", "rows": [
             _kx_sub("Free-look camera", "cam", "free"),
             _kx("W|S", "move forward / back", ("W", "forward", "move forward"), ("S", "back", "move back")),
-            _kx("Up|Down", "move forward / back", ("Up", "forward", "move forward"), ("Down", "back", "move back")),
+            _kx("Up|Down", "move forward / back level with the ground", ("Up", "forward", "move forward, level"),
+                ("Down", "back", "move back, level")),
             _kx("A|D", "strafe left / right", ("A", "left", "strafe left"), ("D", "right", "strafe right")),
             _kx("Space|C", "move up / down", ("Space", "up", "move up"), ("C", "down", "move down")),
             _kx("Q|E", "tilt (roll) left / right", ("Q", "tilt L", "tilt (roll) left"),
@@ -913,13 +914,20 @@ MAP_VIEWER_KEYS = {
             _kx("Shift+H", "show everything hidden", ("Shift+H", "show all")),
             _kx("Ctrl+Z", "undo the last hide or show-all (again for the one before)", ("Ctrl+Z", "undo")),
             _kx("Ctrl+F or /", "find: class, targetname, key, texture", ("Ctrl+F", "find"), ("/", "find")),
+            _kx_sub("Modify: Trim origin (the camera stays put)", "sel"),
+            _kx("W|S|A|D or arrows", "move the new entity forward / back / left / right along the map's axes "
+                "nearest the way you face, one trim step a press"),
+            _kx("Space|C", "move it up / down one trim step"),
+            _kx("Esc or T", "stop trimming (Esc in Edit parameters: done)"),
+            _kx("click", "with Make path on: the entity the selected one's target should point at "
+                "(Esc cancels)"),
             _kx_sub("Window", "win"),
             _kx("H or ?", "show / hide this window", ("H", "keys", "show / hide the keyboard shortcuts"),
                 ("Shift+/", "keys", "show / hide the keyboard shortcuts")),
             _kx("L", "the legend: what the colours, markers and editor surfaces mean", ("L", "legend")),
             _kx("T", "light / dark theme", ("T", "theme")),
             _kx("\\", "collapse / expand the control panel", ("\\", "panel")),
-            _kx("Esc", "close a card / clear the selection / close the map (one a press)", ("Esc", "back")),
+            _kx("Esc", "close a card / clear the selection (Modify's too) / close the map (one a press)", ("Esc", "back")),
         ]},
         {"title": "Show / hide and display", "rows": [
             _kx_sub("Show / hide (as in MOHRadiant)", "show"),
@@ -982,9 +990,14 @@ MAP_VIEWER_KEYS = {
                 ("=", "decals", "Decals: the map's .dcl decals on / off")),
             _kx("Y", "Weather on / off (cg_rain): the map's rain or snow, made as the game makes it; every setting "
                 "is in the game cvars (`)", ("Y", "weather", "Weather: the game's rain and snow on / off")),
-            _kx("P", "Leak trail on / off: the line the compiler wrote (the map's .lin) from the hole in the "
-                "map to the entity that reaches the void, seen through walls; on, its card shows where",
+            _kx("P", "Leak trail on / off: the line the compiler wrote (the map's .lin) from the void to "
+                "the entity it reaches, seen through walls, and where it gets in; on, its card says how to fix it",
                 ("P", "leak", "Leak: the compiler's leak trail (.lin) on / off")),
+            _kx("+", "Grid on / off: a see-through 3D grid of the grid size round Modify's moving or selected "
+                "entity (else ahead of the camera), its coordinates counted from ( 0 0 0 ); on, Modify's Add and "
+                "Move snap to its corners", ("Shift+=", "grid", "Grid: the 3D grid on / off (Add and Move snap to it)")),
+            _kx("{|}", "grid size down / up: 1, 2, 4 ... 512 units, as MOHRadiant's",
+                ("Shift+[", "grid -", "a smaller grid size"), ("Shift+]", "grid +", "a larger grid size")),
             _kx("`", "the game cvars list: r_showtris, ai_showroutes ... (type a cvar and its value, then "
                 "Enter, as in the game's console)", ("`", "cvars", "open / close the game cvars list")),
         ]},
@@ -2921,6 +2934,22 @@ class _ScrStop(Exception):
     """The walk took too many steps (a script that loops a very long way)."""
 
 
+class _ScrBreak(Exception):
+    """break: out of the loop it is in."""
+
+
+class _ScrContinue(Exception):
+    """continue: on to the loop's next turn."""
+
+
+class _ScrMaybe(Exception):
+    """A break or continue under a condition the viewer can't tell (an if read both ways):
+    the loop may end there, so it goes no further and its counter is unknown."""
+    def __init__(self, brk):
+        Exception.__init__(self)
+        self.brk = brk
+
+
 class LevelScript:
     """Reads a map's level scripts (see above). find(path) returns (text, where) for a
     script path such as "maps/m3l1b.scr", or (None, None)."""
@@ -2942,13 +2971,20 @@ class LevelScript:
         self.vars = {}            # variable name -> index in self.ents
         self.tn = {}              # targetname -> index in self.ents (the last spawned)
         self.map_tn = {}          # targetname -> map entity index
+        self.map_tn_all = {}      # targetname -> every map entity of it
         self.map_ents = ents
         for i, e in enumerate(ents):
             if i == 0:
                 continue
             t = e["kvd"].get("targetname")
+            if t:
+                self.map_tn_all.setdefault(t, []).append(i)
             if t and t not in self.map_tn:
                 self.map_tn[t] = i
+        # "$x solid" / "$x notsolid" on the map's entities before "level waittill prespawn":
+        # how they stand when the game makes the AI's paths (Level::PreSpawnSentient)
+        self.prespawned = False
+        self.presolid = {}        # map entity -> 1 solid / 0 notsolid
         self.fi = 0
         self.line = 0
         self.lines = []
@@ -2963,6 +2999,9 @@ class LevelScript:
         self.globals = set()      # the global/ scripts it runs
         self.selfref = None       # the thread's self: ("ent", i) / ("map", i), NULL or None
         self.fdata = []
+        self._brk = []            # the loops and switches the statement being run is in
+        self._lab_runs = {}       # (file, label) -> [runs, did it spawn or set anything new]
+        self._sigs = set()        # the spawns seen: (file, line, keys)
 
     # ---- tokens and structure ----------------------------------------------------------
     def _parse(self, text):
@@ -3087,7 +3126,7 @@ class LevelScript:
                 return ("if", head, body, None, ln)
             if low == "while":
                 return ("while", head, body, ln)
-            return body                        # switch: its cases, read once
+            return ("sw", body)                # switch: its cases, read once
         if low == "else":                      # an else without its if: read its body
             self._p += 1
             return self._body()
@@ -3135,14 +3174,30 @@ class LevelScript:
                 if n[3] is not None:
                     self._exec(n[3], queue)
             else:
-                # either way: both branches read, and a variable they leave different unknown
+                # either way: both branches read, and a variable they leave different unknown;
+                # a break or continue in either may happen or not (_ScrMaybe)
                 snap = self._snap()
-                self._exec(n[2], queue)
+                maybe = None
+                try:
+                    self._exec(n[2], queue)
+                except (_ScrBreak, _ScrContinue, _ScrMaybe) as e:
+                    maybe = e
                 a = self._snap()
                 self.level, self.local = dict(snap[0]), dict(snap[1])
                 if n[3] is not None:
-                    self._exec(n[3], queue)
+                    try:
+                        self._exec(n[3], queue)
+                    except (_ScrBreak, _ScrContinue, _ScrMaybe) as e:
+                        maybe = maybe or e
                 self._merge(a)
+                if maybe is not None:
+                    raise _ScrMaybe(maybe.brk if isinstance(maybe, _ScrMaybe) else isinstance(maybe, _ScrBreak))
+        elif kind == "sw":
+            self._brk.append("switch")
+            try:
+                self._exec(n[1], queue)
+            finally:
+                self._brk.pop()
         elif kind == "for":
             _k, init, cond, step, body, ln = n
             self.line = ln
@@ -3150,51 +3205,82 @@ class LevelScript:
                 self._statement(init, queue)
             var = init[0][1].lower() if init and init[0][0] == "w" else None
             turns = 0
-            while True:
-                c = self._truth(self._eval(cond)) if cond else None
-                if c is None:
-                    if turns == 0:
-                        # a loop the viewer can't count: once, its counter unknown, and
-                        # what it changes unknown after it
-                        if var:
-                            self._setvar(var, None)
-                        snap = self._snap()
+            self._brk.append("loop")
+            try:
+                while True:
+                    c = self._truth(self._eval(cond)) if cond else None
+                    if c is None:
+                        if turns == 0:
+                            # a loop the viewer can't count: once, its counter unknown, and
+                            # what it changes unknown after it
+                            if var:
+                                self._setvar(var, None)
+                            snap = self._snap()
+                            try:
+                                self._exec(body, queue)
+                            except (_ScrBreak, _ScrContinue, _ScrMaybe):
+                                pass
+                            self._merge(snap)
+                        break
+                    if not c or turns >= self.MAX_LOOP:
+                        break
+                    self.loops.append([var, self._getvar(var) if var else None])
+                    try:
                         self._exec(body, queue)
-                        self._merge(snap)
-                    break
-                if not c or turns >= self.MAX_LOOP:
-                    break
-                self.loops.append([var, self._getvar(var) if var else None])
-                try:
-                    self._exec(body, queue)
-                finally:
-                    self.loops.pop()
-                self.line = ln
-                if step:
-                    self._statement(step, queue)
-                turns += 1
+                    except _ScrBreak:
+                        break
+                    except _ScrContinue:
+                        pass
+                    except _ScrMaybe as e:
+                        if e.brk:
+                            # it may end here: no further, the counter unknown
+                            if var:
+                                self._setvar(var, None)
+                            break
+                    finally:
+                        self.loops.pop()
+                    self.line = ln
+                    if step:
+                        self._statement(step, queue)
+                    turns += 1
+            finally:
+                self._brk.pop()
         elif kind == "while":
             _k, cond, body, ln = n
             turns = 0
             # a loop that waits (respawning waves, a thread that watches something) runs
             # with the game's clock: once is all the viewer can tell
             timed = self._waits(body)
-            while turns < self.MAX_LOOP:
-                self.line = ln
-                c = self._truth(self._eval(cond))
-                if c is False:
-                    break
-                names = {s.lower() for k, s in cond if k == "w"}
-                before = [(x, self._getvar(x)) for x in sorted(names)]
-                snap = self._snap() if c is None else None
-                self._exec(body, queue)
-                if snap is not None:
-                    self._merge(snap)
-                turns += 1
-                # a loop whose condition nothing in it changes (while (1), a wait loop):
-                # once is all the viewer can tell
-                if c is None or timed or before == [(x, self._getvar(x)) for x in sorted(names)]:
-                    break
+            self._brk.append("loop")
+            try:
+                while turns < self.MAX_LOOP:
+                    self.line = ln
+                    c = self._truth(self._eval(cond))
+                    if c is False:
+                        break
+                    names = {s.lower() for k, s in cond if k == "w"}
+                    before = [(x, self._getvar(x)) for x in sorted(names)]
+                    snap = self._snap() if c is None else None
+                    stop = False
+                    try:
+                        self._exec(body, queue)
+                    except _ScrBreak:
+                        stop = True
+                    except _ScrContinue:
+                        pass
+                    except _ScrMaybe as e:
+                        stop = e.brk
+                    if snap is not None:
+                        self._merge(snap)
+                    turns += 1
+                    if stop:
+                        break
+                    # a loop whose condition nothing in it changes (while (1), a wait loop):
+                    # once is all the viewer can tell
+                    if c is None or timed or before == [(x, self._getvar(x)) for x in sorted(names)]:
+                        break
+            finally:
+                self._brk.pop()
 
     def _waits(self, n):
         """Does this node (or anything in it) wait for the game: wait, waitframe,
@@ -3211,6 +3297,8 @@ class LevelScript:
             return self._waits(n[2]) or (n[3] is not None and self._waits(n[3]))
         if k == "while":
             return self._waits(n[2])
+        if k == "sw":
+            return self._waits(n[1])
         return False
 
     def _snap(self):
@@ -3664,6 +3752,21 @@ class LevelScript:
                 return
         k0, s0 = T[0]
         l0 = s0.lower() if k0 == "w" else ""
+        if not self.prespawned and len(words) >= 3 and words[0] == "level" and words[1] == "waittill" \
+                and words[2] == "prespawn":
+            self.prespawned = True
+        if not self.prespawned and len(T) == 2 and k0 == "w" and s0.startswith("$") \
+                and T[1][0] == "w" and T[1][1].lower() in ("solid", "notsolid"):
+            for ei in self.map_tn_all.get(s0[1:], ()):
+                self.presolid[ei] = 1 if T[1][1].lower() == "solid" else 0
+        if l0 == "break" and len(T) == 1:
+            if self._brk and self._brk[-1] == "loop":
+                raise _ScrBreak()
+            return                                 # a switch's case: its cases are read once anyway
+        if l0 == "continue" and len(T) == 1:
+            if "loop" in self._brk:
+                raise _ScrContinue()
+            return
         # a thread or script run: "[<ent>] thread label [args]", "local.r = waitthread
         # file.scr::label [args]", "exec file.scr"; the entity is the thread's self
         for i, w in enumerate(words):
@@ -3784,18 +3887,44 @@ class LevelScript:
         self.vars = {k: v for k, v in self.vars.items() if not k.startswith("local.")}
         self.vars.update({k: v for k, v in vars_.items() if k.startswith("local.")})
 
+    LABEL_IDLE = 8                # runs after which a label that never spawns or sets anything is skipped
+
     def _run_label(self, fi, label, selfref, args, queue):
         lab = self.fdata[fi]["labels"].get(label)
         if lab is None or (fi, label) in self._stack or len(self._stack) > 24:
             return
+        # A thread every actor runs (its AI: path walking, sight checks, dialogue) is read
+        # again for each one; once it has been read LABEL_IDLE times without spawning or
+        # setting anything, the rest are skipped, so the steps go to the threads that place
+        # things (a waypoint spawned by a thread called hundreds of times still runs)
+        st = self._lab_runs.get((fi, label))
+        if st is None:
+            st = self._lab_runs[(fi, label)] = [0, False]
+        if st[0] >= self.LABEL_IDLE and not st[1]:
+            return
+        st[0] += 1
+        before = (len(self.ents), len(self.mods), len(self.cvars), len(self.world))
         self._ran.add((fi, label))
         self._stack.append((fi, label))
         save = self._scope(fi, selfref, lab[0], args)
+        brk, self._brk = self._brk, []
         try:
             self._run(lab[1], queue)
+        except (_ScrBreak, _ScrContinue, _ScrMaybe):
+            pass
         finally:
+            self._brk = brk
             self._unscope(save)
             self._stack.pop()
+            # new: a spawn unlike any before it (a per-actor helper spawned at the actor's
+            # unknown origin again is the same each time), or a target, cvar or $world line
+            for E in self.ents[before[0]:]:
+                sig = (E["f"], E["l"], tuple(sorted(tuple(kv) for kv in E["kv"])))
+                if sig not in self._sigs:
+                    self._sigs.add(sig)
+                    st[1] = True
+            if (len(self.mods), len(self.cvars), len(self.world)) != before[1:]:
+                st[1] = True
 
     def _call(self, target, who, T, i, queue, side=False):
         """ "thread label", "waitthread file.scr::label", "exec file.scr" with the
@@ -3838,9 +3967,13 @@ class LevelScript:
             return
         self._file_ran.add(fi)
         save = self._scope(fi, None, [], None)
+        brk, self._brk = self._brk, []
         try:
             self._run(self.fdata[fi]["top"], queue)
+        except (_ScrBreak, _ScrContinue, _ScrMaybe):
+            pass
         finally:
+            self._brk = brk
             self._unscope(save)
         key = self.files[fi][0].replace("\\", "/").lower().lstrip("/")
         for lab in self.fdata[fi]["order"]:
@@ -3903,7 +4036,8 @@ class LevelScript:
         return {"files": self.files, "base": base, "ents": placed, "un": unplaced[:500], "nun": len(unplaced),
                 "rain": self.rain, "rainv": sorted(self.rain_varies), "glob": sorted(self.globals),
                 "mods": list(last.values())[:5000], "stop": int(self.stopped),
-                "cvars": self.cvars[:2000], "world": self.world[:200], "miss": self.missing[:50]}
+                "cvars": self.cvars[:2000], "world": self.world[:200], "miss": self.missing[:50],
+                "presolid": [[k, v] for k, v in sorted(self.presolid.items())]}
 
 
 def script_payload(vfs, vpath, src, paks, ents, say=log):
@@ -4115,7 +4249,7 @@ def build(src, args):
         log("wrote %s" % map_out)
         bspinfo = {"version": bsp.version, "bounds": {str(k): [list(v[0]), list(v[1])] for k, v in stats["bounds"].items()},
                    "firstStatic": stats["first_static"], "aligned": stats["aligned"], "faces": stats["faces"],
-                   "mapFile": map_out}
+                   "mapFile": map_out, "bcont": stats["bcont"]}
         if args.get("decompile_only"):
             return {"map": map_out}
     else:
@@ -4283,6 +4417,8 @@ def build(src, args):
     world = ents[0]["kvd"] if ents else {}
     title = vpath
     header = {"v": 1, "name": stem, "path": vpath, "kind": kind, "built": time.strftime("%Y-%m-%d %H:%M"),
+              # the file the page was built from (MODIFY's Save as .bsp copies it)
+              "srcFile": os.path.abspath(src),
               "src": blobs.add(text.encode("latin-1", "replace")),
               "tex": texs.entries, "models": mb.models if mb else [], "modelOf": model_of,
               "defs": defs, "editorFlags": {str(k): v for k, v in ME.EDITOR_FLAGS.items()},

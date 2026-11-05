@@ -85,6 +85,7 @@ ascending order, so add new ones at the end of their section.
 - rev 77: a Reset button in the game cvars list's head, at its right, after the "N set" / "all at default" count: it sets every cvar that is set back to its default (`resetCvars`), so the count beside the game cvars button reads "none set" again. Greyed while none is set.
 - rev 78: every popup list closes when the window changes size (maximize, restore, a drag of its edge): the surfaces list, which was moved back beside its button, and the game cvars list, which was left where it was (far from its button once the window grew), now close like the animations and attach-to-bone lists.
 - rev 79: an attached model is sized by its own .tik's setup `scale` over the host's, as the game multiplies each entity's verts by its own load_scale. Before, it was drawn at its raw size in the host's unscaled space, so a player (`scale 0.52`, from models/player/base/include.txt) on the jeep (`scale 1.33`) was 2.6 times too big. A rifle (0.52) in a player's hand (0.52) is unchanged. The launcher reads the attached .tik's scale (`$include`s too) and passes it as `--attachscale`; the attachment's record carries it as `ls`, and its cache key changed (`attach2|`) so old attachments are rebuilt.
+- rev 80: Up / Down move the free-look camera forward and back level with the ground (the view's forward with its height taken out), where W / S follow the view. The keyboard window says so.
 
 ## Launcher cache floor (VIEWER_REV_REQUIRED)
 
@@ -116,6 +117,7 @@ VIEWER_REV_REQUIRED is raised to the live VIEWER_REV whenever cached pages or si
 - rev 77: pages built before this have no Reset button in the game cvars list.
 - rev 78: pages built before this leave the surfaces and game cvars lists open when the window changes size.
 - rev 79: pages built before this draw an attached model at its raw size, without its own or the host's .tik `scale`.
+- rev 80: pages built before this move along the view with Up / Down.
 
 ## Launcher (mohaa_launcher.py)
 
@@ -1231,3 +1233,181 @@ Changes to `python_installer_updater.bat` unless noted.
   whose own settings make no weather (no density from its script), `cg_weather` and the
   `cg_rain_*` cvars start at the "rain" preset instead of "map", so turning Weather on
   makes rain (from the sky on maps without func_rain). The cg_weather tooltip says so.
+- Map Viewer page rev 54 (`MAP_VIEWER_REV` 54, `MAP_VIEWER_REV_REQUIRED` 54): the level
+  script reader handles `break` and `continue`.
+  - **The bug:** they were read as plain statements, so every counted loop ran to its end.
+    A path walk `for (local.n = 1; local.n <= 1025; ...)` that breaks on its last node ran
+    1025 turns on each call, and a big script used up its 400,000 statements on that
+    before reaching its spawns ("stopped after 400000 statements").
+  - **How they work now:** in a `switch` a `break` ends only the case, and a `break`
+    under an undecidable `if` stops the loop with its counter unknown.
+  - **Repeated labels:** a label run 8 times without spawning anything new or setting a
+    target, cvar or `$world` line is skipped from then on (`LABEL_IDLE`): actors' AI
+    threads run for every actor.
+  - **Result:** m3l1b's remaster script now places 4228 entities in 1.6 s, up from 130
+    in 14 s when it stopped; m3l1a's goes from 240 to 253. The retail maps' placements
+    are unchanged.
+- Map Viewer page rev 55 (`MAP_VIEWER_REV` 55, `MAP_VIEWER_REV_REQUIRED` 55): an **AI
+  routes** button in Show turns `ai_showroutes` on and off, and follows the cvar when it
+  is set in the list; it is greyed on a map with no `.pth`. In Free-look, Up / Down move
+  forward and back level with the ground (yaw only), where W / S follow the view's pitch;
+  Radiant-look's arrows stay MOHRadiant's. The keyboard window says so.
+- Map Viewer page rev 56 (`MAP_VIEWER_REV` 56, `MAP_VIEWER_REV_REQUIRED` 56): a **Modify**
+  section under Find adds entities (Add, Edit parameters, Trim origin with a trim step
+  slider, To view, Fly to, Delete) and saves the map with them (Save as .bsp through the
+  launcher, Save as .map, Copy).
+  - **AI paths in the page.** OpenMoHAA's path building (`CreatePaths`, `CheckMove`,
+    `MmoveSingle`, capsule brush traces and the terrain's collision code) is ported, so a
+    new `info_pathnode`'s links show in AI routes as soon as it is placed. Worked out again
+    for whole maps, it gives 98 to 100 % of the links in eight retail `.pth` files.
+  - **No `.pth`:** a map with path nodes but no `.pth` gets its routes worked out by the
+    page, and the AI routes button is no longer greyed for it.
+  - **Build data:** the decompiler keeps each brush's own contents where they differ from
+    its first face's (`bsp.bcont`), the level script reader keeps the `solid` /
+    `notsolid` lines before `level waittill prespawn` (`scr.presolid`), and the page
+    records the file it was built from (`srcFile`).
+  - **Launcher:** a `mohaa-modify-save` message; `mohaa_bsp.write_bsp_entities` writes
+    the `.bsp` (new entity lump at the end, new
+    `map_time`, other lumps checked byte for byte, at most 4096 path nodes).
+- Map Viewer page rev 57 (`MAP_VIEWER_REV` 57, `MAP_VIEWER_REV_REQUIRED` 57): Modify's Add
+  places by a click, as the path-editor branch's Place node did: after Add, a click on the
+  map puts the entity there (a path node 16 units up), with an outline following the
+  cursor until then; Esc or Add again cancels. Edit parameters moves by its title bar
+  (its place is remembered), and its Done / Revert buttons sit at its bottom right.
+- Map Viewer page rev 58 (`MAP_VIEWER_REV` 58, `MAP_VIEWER_REV_REQUIRED` 58): Modify gets
+  **Move** (the selected new entity follows the mouse until a click puts it down; Move and
+  Trim origin grey each other out). New entities are drawn as the map's own markers of
+  the same keys (a path node the 16-unit dark green stand-in), see-through. Edit
+  parameters' Revert is replaced by Undo and Redo (from when it opened, greyed when
+  there is nothing to undo or redo; Ctrl+Z / Ctrl+Y), with Done the bottom-right button.
+- Map Viewer page rev 59 (`MAP_VIEWER_REV` 59, `MAP_VIEWER_REV_REQUIRED` 59): a new path
+  node's spawnflags outline shows while it is selected or edited (thick, as the map's
+  nodes; the selection is a yellow box round it), so it changes as "spawnflags" is typed.
+  The Modify section moved above Find, and the AI routes button to the end of the Show
+  group buttons, after Origin and Point ents.
+- Map Viewer page rev 60 (`MAP_VIEWER_REV` 60, `MAP_VIEWER_REV_REQUIRED` 60): selecting one
+  of the map's point entities gives it a Modify row (hollow square, "#N map", "#N changed"
+  once edited; new ones say "new"), so its parameters, Move and Trim origin work as for
+  new entities, Restore puts it back, and a changed path node's AI routes are worked out
+  again both ways. Save as .bsp writes the changed entities into the entity lump (found by
+  number, checked by class and old origin; `mohaa_bsp.write_bsp_entities(replace=)`),
+  Save as .map writes their blocks again. Modify's entities are drawn with the markers'
+  own shader, see-through, so the spawnflags outline is the single bold one the map's
+  nodes have.
+- Map Viewer page rev 61 (`MAP_VIEWER_REV` 61, `MAP_VIEWER_REV_REQUIRED` 61): Modify's class
+  drop-down is a searchable list, as the Model Viewer's attach-to-bone list (filter box,
+  counts in the map, arrows / Enter / Esc). Checked: changing a node's classname in Edit
+  parameters takes its AI routes away when the box closes, and back when changed back.
+- Map Viewer page rev 62 (`MAP_VIEWER_REV` 62, `MAP_VIEWER_REV_REQUIRED` 62; `INDEX_VERSION`
+  10): Simple Sky turns the sun flare off. A page opens at the player start every time (it
+  no longer goes back to where the camera was left; the launcher's privacy text says so).
+  Entities drawn only by camera-facing sprites (`static_fx_fire`) are in the pick pass, so
+  they can be hovered and clicked. Built-in definitions for `info_grenadehint`,
+  `info_splinepath`, `ai_actor` and `func_window`, the classes whose definitions are only
+  in MOHRadiant's entdefs.pk3 (colour, box and spawnflags from it).
+- Map Viewer page rev 63 (`MAP_VIEWER_REV` 63, `MAP_VIEWER_REV_REQUIRED` 63): the first
+  Lights off or Sun light, which works out every light's share of the baked light, prints a
+  line in the launcher's Output as it starts and another with the time when it is ready
+  (a `mohaa-log` message: tag and text). The map launcher's Re-open / Browser / .map
+  buttons are packed at the bottom of the details pane before its list, so they show in
+  the default window size.
+- Map Viewer page rev 64 (`MAP_VIEWER_REV` 64, `MAP_VIEWER_REV_REQUIRED` 64): Modify's rows
+  work like the Find lists: Shift+click the selected (green) name deselects it,
+  Shift+click a row's square hides / shows that entity (in red while hidden; a hidden map
+  entity's own marker stays hidden too, and its row stays in the list).
+- Map Viewer page rev 65 (`MAP_VIEWER_REV` 65, `MAP_VIEWER_REV_REQUIRED` 65): a new entity
+  selected in the 3D view deselects with Shift+click (Ctrl+click opens its card) and with
+  Esc, which clears Modify's selection before it closes the map. Ctrl+Z undoes Modify's
+  hide / show. N (More info) on a new entity opens its own card: not saved, no entity
+  number yet, its origin, box and spawnflag names, for a path node the node number the
+  saved map will give it and its links both ways, the class description, and its
+  parameters in an editable box applied as typed.
+- Map Viewer page rev 66 (`MAP_VIEWER_REV` 66, `MAP_VIEWER_REV_REQUIRED` 66): a new entity
+  of a class that faces a way (most of the map's own of that class have an angle; with
+  none in the map, player starts, actors, turrets and vehicles) is placed with an
+  `"angle"`, the camera's yaw to 45 degrees, and Modify's entities draw the same white
+  facing arrows (Arrows, 5) and target links with arrowheads (Links, 7) as the map's own,
+  both ways, in place of the thin lines before. **Make path** (after Trim origin): click
+  another entity to set the selected one's `"target"` to it; it keeps its targetname or
+  gets the next free `t<N>` (a map entity given one becomes a changed row; brush entities
+  and static props can't be). The clicked one is selected after, so Make path again goes
+  on along the path. Esc cancels.
+- Map Viewer page rev 67 (`MAP_VIEWER_REV` 67, `MAP_VIEWER_REV_REQUIRED` 67): **Grid** (+, in
+  Display under the backdrop) with a grid-size slider of MOHRadiant's sizes, 1 to 512
+  ({ and } step it), and a grid colour beside the backdrop's (Default resets both). The grid
+  is a see-through 3D lattice a grid size apart, about a dozen cells round Modify's moving
+  or selected entity (else a point ahead of the camera), fading out from there, fainter
+  still where it goes behind or into the map, lines through multiples of 64 (or of 8 grid
+  sizes) and through ( 0 0 0 ) brighter, with its coordinates written along the three lines
+  through its centre. While it is on, Add and Move snap to its nearest corner (moved up a
+  grid size rather than leave the box in the floor). Its on / off, size and colour are
+  remembered.
+- Map Viewer page rev 68 (`MAP_VIEWER_REV` 68, `MAP_VIEWER_REV_REQUIRED` 68): the leak trail
+  says where the void gets in. The brushes that seal a map for the compiler (the world's
+  structural, solid, not see-through brushes; not detail, patches, terrain, clips or
+  water) are tested along the trail from its start with rays 26 ways: the last place the
+  void is still in a straight line, before the trail is shut in, is where it gets in, and
+  from there toward the void the place the way out passes closest to those brushes is
+  the gap. It is marked with a light blue circle ("leak: gets in here, fix this", with
+  the gap's width when small) and the card is in sections: Found (start, gets in,
+  reaches), Where it gets in (the gap's width along each axis and between which
+  coordinates, which way the void is, the brushes either side with Select them, how far
+  along the trail the void stays in sight, anything the game collides with there that
+  doesn't seal), Recommended fix (a hairline crack: snap to the grid or overlap; a small
+  gap; a missing wall, floor or sky; caulk behind terrain and patches; the entity itself
+  out in the void: move it in), Reading the trail (why it zigzags: the compiler's BSP
+  cells; the entity at the end is only the first the void reaches) and the points. A
+  click on a trail point or circle in the view opens the card at that point (the entity's
+  selects it too), and the stats under the map's name have a "leak trail: the map isn't
+  sealed" line that opens it. BSunrise3-3: a 0.39-unit crack along x between two caulk
+  floor slabs (x 318 and 318.39), open to the void below.
+- Map Viewer page rev 69 (`MAP_VIEWER_REV` 69, `MAP_VIEWER_REV_REQUIRED` 69): the leak gap,
+  checked on eight custom maps that leak. From where the trail gets in, looking toward the
+  void: the first thing in the way that the game collides with but the compiler doesn't
+  take as a seal (terrain, a patch, a detail, clip or see-through brush, a brush entity)
+  is where the void comes through, named on the card with Select it, and the fix is caulk
+  under or behind it; else the opening is the last place along that way still between
+  sealing brushes (within 1024 units across), its gap measured at its narrowest within 64
+  units of it, and gaps under 1024 units are listed. A crack under 2 units or with sides
+  at fractions of a unit is called a hairline crack off the grid. A `.bsp` with vis data
+  didn't leak when compiled: its card says the `.lin` is left over from an earlier
+  compile. The sealing brushes were checked on sealed maps (obj_team2, mohdm7, m1l1,
+  m3l1a, m5l1a, m6l3e, Tirtagen-Kechtat: no player start or path node of 1,270 sees the
+  void). BSunrise3-3a: a 1.33-unit crack (x 3444 to 3445.33) open below;
+  NormandyBridge_V1 and abydos: in under terrain with no caulk beneath; pleviathan: an
+  8-unit slit (z 192 to 200) at the map's -x edge; SiDvFinal: an 8-unit gap along x (1680
+  to 1688) open below; V2revamped: an opening toward +y; Tirtagen-Kechtat (both of its
+  paks): a `.lin` left over beside a `.bsp` with vis.
+- Map Viewer page rev 70 (`MAP_VIEWER_REV` 70, `MAP_VIEWER_REV_REQUIRED` 70): the game's
+  limits. The stats' "real" tooltip gives the entity limit on its own paragraph:
+  maxentities 1024, the world and "none" keep two, the client slots come first (1 in
+  single player, sv_maxclients in multiplayer), past that `Level::AllocEdict: no free
+  edicts`; with this map's count (its real entities and the real ones its level script
+  spawns) of 1021 with one player (and of 990 with 32 for a dm/obj map). The "simple"
+  tooltip gives MAX_PATHNODES (4096, `navigate.h`; "Exceeded MAX_PATHNODES!") with the
+  map's path node count; the other simple entities have no fixed limit. Modify counts its
+  new entities and changed classes in: Add and placing a new one are refused past 1021
+  real entities or 4096 path nodes, with a warning near them, and its status line gives
+  both counts, yellow when close, red when past (a classname changed in Edit parameters
+  can get there).
+- Map Viewer page rev 71 (`MAP_VIEWER_REV` 71, `MAP_VIEWER_REV_REQUIRED` 71): Modify's path
+  problems, as the game meets them (`paIssues`). For its new and changed path nodes: 48
+  paths to check (`NUM_PATHSPERNODE`; "^~^~^ 48 paths per node at (...) exceeded", linked
+  no further, and g_nodecheck 1 stops the level), a full 256-unit cell (`PATHMAP_NODES`
+  128; "^~^~^ PathSearch::AddToGrid: Node overflow at ( x, y )"), no path at all (nothing
+  it can walk to within 384 units, or only drops past ai_fallheight), and nodes cut off
+  from the map's others (an AI sent across gets "^~^~^ Path not found", g_patherror 1 by
+  default); also the map's own nodes the new ones crowd past 48. Each shows as an orange
+  tag over the node in the view, a line on its card and in the launcher's Output, a
+  flash when it first appears, and a count in Modify's status (yellow, the lines in its
+  tooltip). They follow ai_fallheight as it is changed, as the game's routes do.
+- Map Viewer page rev 72 (`MAP_VIEWER_REV` 72, `MAP_VIEWER_REV_REQUIRED` 72): Selection's
+  **Eye view** (after Same kind), for an entity with angles, a target to look at, or a
+  player start: the camera flies to where it sees from and looks the way its angles say
+  (pitch, yaw and roll), else at its target, else (a player start) yaw 0. Player starts:
+  82 units above the start (DEFAULT_VIEWHEIGHT, `bg_public.h`). Path nodes, waypoints,
+  vehicle points and actors: dropped to the floor (as droptofloor) and 82 above it.
+  Spline paths, cameras and everything else: exactly at the origin.
+- Map Viewer page rev 73 (`MAP_VIEWER_REV` 73, `MAP_VIEWER_REV_REQUIRED` 73): no more mention of
+  the separate `.bsp` entity script, whose work `mohaa_bsp.write_bsp_entities` does: Save as
+  .bsp outside the launcher says to open the map there.

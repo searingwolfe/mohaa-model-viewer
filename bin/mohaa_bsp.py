@@ -1003,7 +1003,7 @@ def decompile(bsp, tex_size=None, static_classname=None, log=None):
              "bounds": {}, "first_static": len(ents),
              # for the viewer's in-game lighting: which brush face / patch / terrain block
              # each draw surface and terrain patch was written as
-             "owners": {}, "patch_owner": {}, "terrain_owner": [],
+             "owners": {}, "patch_owner": {}, "terrain_owner": [], "bcont": {},
              # brush model number -> (entity number, origin its surfaces are stored around)
              "models": {}}
     for ei, mis in by_ent.items():
@@ -1039,6 +1039,9 @@ def decompile(bsp, tex_size=None, static_classname=None, log=None):
                 written = []
                 lines = _brush_lines(bsp, b, origin, pidx, tsize, stats, written)
                 if lines:
+                    bc, fc = stats.pop("_bcont", (0, 0))
+                    if bc != fc:
+                        stats["bcont"].setdefault(str(ei), []).append([bn, bc])
                     for fr in written:
                         for si in fr[5]:
                             stats["owners"].setdefault(si, (ei, bn, fr[4]))
@@ -1180,6 +1183,8 @@ def _brush_lines(bsp, b, origin, pidx, tsize, stats, written=None):
         cont = rec["contents"]
         if detail:
             cont |= CONTENTS_DETAIL
+        if nfaces == 0:
+            first_cont = cont
         line = "( %s ) ( %s ) ( %s ) %s %s %s %s %s %s %d %d 0" % (
             " ".join(_fmt(c) for c in p0), " ".join(_fmt(c) for c in p1), " ".join(_fmt(c) for c in p2),
             sname, _fmt(shift[0]), _fmt(shift[1]), _fmt(rot), _fmt(scale[0]), _fmt(scale[1]),
@@ -1192,6 +1197,12 @@ def _brush_lines(bsp, b, origin, pidx, tsize, stats, written=None):
         nfaces += 1
     if nfaces < 4:
         return None
+    # the brush's own contents (its shader's, which the collision code uses), kept where
+    # they differ from its first face's: the page's AI path tracing needs them
+    bcont = bsp.shaders[bshader]["contents"] if 0 <= bshader < len(bsp.shaders) else 0
+    if detail:
+        bcont |= CONTENTS_DETAIL
+    stats["_bcont"] = (bcont, first_cont)
     stats["brushes"] += 1
     stats["faces"] += nfaces
     lines.append("}")
@@ -1800,6 +1811,175 @@ def read_path_file(data):
     except (struct.error, IndexError) as e:
         raise ValueError("damaged path file (%s)" % e)
     return {"version": arc_version, "info": info, "maptime": maptime, "failed": failed, "nodes": nodes}
+
+
+# ------------------------------------------------------------------------------
+#  Writing a .bsp with more entities (the Map Viewer's MODIFY, Save as .bsp)
+# ------------------------------------------------------------------------------
+# Every lump but the entities is copied byte for byte; the new
+# entity lump goes at the end of the file and the header points at it. Worldspawn gets a new
+# "map_time": the game keys its cached .pth on that string (CM_MapTime), so with it changed
+# the game rebuilds the AI's paths for the new nodes instead of loading the old .pth (stock
+# MOHAA overruns its node table when the .bsp has more nodes than the cached file).
+MAX_PATHNODES = 4096          # PathSearch::pathnodes[]
+
+
+def _bsp_header(data):
+    if len(data) < 12 + 8 * (HEADER_LUMPS + 1) or data[:4] not in (b"2015", b"EALA"):
+        raise BspError("not a MOHAA .bsp")
+    version = struct.unpack_from("<i", data, 4)[0]
+    if not (17 <= version <= 21):
+        raise BspError("unsupported .bsp version %d" % version)
+    n = HEADER_LUMPS + (1 if version <= 18 else 0)
+    lumps = [struct.unpack_from("<ii", data, 12 + 8 * i) for i in range(n)]
+    for i, (ofs, ln) in enumerate(lumps):
+        if ofs < 0 or ln < 0 or ofs + ln > len(data):
+            raise BspError("lump %d is out of the file (a damaged .bsp)" % i)
+    # versions 17-18 have an extra fog lump after the brushes, so their entities are one on
+    return version, lumps, LUMP_ENTITIES + (1 if version <= 18 else 0)
+
+
+def bsp_entity_text(data):
+    """The entity lump of a .bsp's bytes, as text."""
+    _v, lumps, le = _bsp_header(data)
+    ofs, ln = lumps[le]
+    return data[ofs:ofs + ln].split(b"\0", 1)[0].decode("latin-1")
+
+
+def bump_map_time(text, stamp=None):
+    """The entity text with worldspawn's "map_time" set to now (added if it has none)."""
+    import time
+    stamp = stamp or time.strftime("%a %b %d %H:%M:%S %Y")
+    end = text.find("}")
+    if end < 0:
+        raise BspError("no worldspawn in the entity lump")
+    head, tail = text[:end], text[end:]
+    pat = re.compile(r'"map_time"(\s+)"[^"]*"')
+    if pat.search(head):
+        head = pat.sub(lambda m: '"map_time"%s"%s"' % (m.group(1), stamp), head, count=1)
+    else:
+        brace = head.find("{")
+        head = head[:brace + 1] + '\n"map_time" "%s"' % stamp + head[brace + 1:]
+    return head + tail, stamp
+
+
+def _ent_origin(e):
+    for k, v in e:
+        if k.lower() in ("origin", "$origin"):
+            try:
+                p = [float(x) for x in v.split()]
+                return p if len(p) == 3 else None
+            except ValueError:
+                return None
+    return None
+
+
+def _ent_class(e):
+    return next((v for k, v in e if k.lower() == "classname"), "").lower()
+
+
+def _find_entity(ents, s):
+    """The entity a change from the page means: its entity number when that one still has
+    the same class and origin, else the only entity that has them."""
+    cls = str(s.get("cls") or "").lower()
+    org = s.get("origin")
+
+    def same(e):
+        if _ent_class(e) != cls:
+            return False
+        if org is None:
+            return True
+        o = _ent_origin(e)
+        return o is not None and all(abs(a - float(b)) < 0.05 for a, b in zip(o, org))
+    i = s.get("ei")
+    if isinstance(i, int) and 0 < i < len(ents) and same(ents[i]):
+        return i
+    hits = [j for j, e in enumerate(ents) if j and same(e)]
+    if len(hits) == 1:
+        return hits[0]
+    raise BspError("entity %s (%s at %s) %s in the .bsp" % (i, cls, org, "isn't" if not hits else "matches %d entities" % len(hits)))
+
+
+def _clean(s):
+    s = str(s)
+    if any(c in s for c in '"\n\r\0{}'):
+        raise BspError("a key or value holds a character the entity lump can't: %r" % s[:60])
+    return s
+
+
+def write_bsp_entities(data, added, out_path, src_path=None, replace=None):
+    """Write data (a .bsp's bytes) to out_path with the entities in added (entity-lump
+    text) after its own, the map's entities in replace ([{ei, cls, origin, kv}]) given their
+    new keys, and a new map_time. Checked afterwards: every other lump byte for byte the
+    same, the entities read back. Returns (old map_time, new map_time, nodes before, nodes
+    after, entities)."""
+    if src_path and os.path.normcase(os.path.abspath(src_path)) == os.path.normcase(os.path.abspath(out_path)):
+        raise BspError("that is the .bsp the map was opened from: pick another name")
+    version, lumps, le = _bsp_header(data)
+    text = bsp_entity_text(data)
+    old = parse_entity_string(text)
+    new = parse_entity_string(added)
+    if not new and not replace:
+        raise BspError("no entities to add or change")
+    for e in new:
+        if not any(k.lower() == "classname" and v for k, v in e):
+            raise BspError("an added entity has no classname")
+    if not old or not any(k.lower() == "classname" and v.lower() == "worldspawn" for k, v in old[0]):
+        raise BspError("the .bsp's first entity isn't the worldspawn")
+    count = lambda ents: sum(1 for e in ents if any(k.lower() == "classname" and v.lower() == "info_pathnode" for k, v in e))
+    before, after = count(old), count(old) + count(new)
+    if after > MAX_PATHNODES:
+        raise BspError("%d path nodes (%d + %d): the game holds %d at most" % (after, before, after - before, MAX_PATHNODES))
+    old_time = next((v for k, v in old[0] if k.lower() == "map_time"), None)
+    if replace:
+        # changed entities: the whole lump is written again from its entities
+        ents = [list(e) for e in old]
+        for s in replace:
+            i = _find_entity(ents, s)
+            kv = [(_clean(k), _clean(v)) for k, v in (s.get("kv") or ())]
+            if not any(k.lower() == "classname" and v for k, v in kv):
+                raise BspError("a changed entity has no classname")
+            ents[i] = kv
+        after = count(ents) + count(new)
+        if after > MAX_PATHNODES:
+            raise BspError("%d path nodes: the game holds %d at most" % (after, MAX_PATHNODES))
+        text = "".join("{\n" + "".join('"%s" "%s"\n' % kv for kv in e) + "}\n" for e in ents)
+        if new:
+            text += added.strip("\n") + "\n"
+        text, stamp = bump_map_time(text)
+    else:
+        if not text.endswith("\n"):
+            text += "\n"
+        text, stamp = bump_map_time(text + added.strip("\n") + "\n")
+    if "\0" in text:
+        raise BspError("the entity text holds a NUL byte")
+    payload = text.encode("latin-1", "replace") + b"\0"
+    out = bytearray(data)
+    while len(out) % 4:
+        out.append(0)
+    new_ofs = len(out)
+    out += payload
+    while len(out) % 4:
+        out.append(0)
+    struct.pack_into("<ii", out, 12 + le * 8, new_ofs, len(payload))
+    tmp = out_path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(out)
+    os.replace(tmp, out_path)
+    # check what was written
+    with open(out_path, "rb") as f:
+        d2 = f.read()
+    _v2, l2, _le = _bsp_header(d2)
+    for i in range(len(lumps)):
+        if i == le:
+            continue
+        a, b = lumps[i], l2[i]
+        if a != b or data[a[0]:a[0] + a[1]] != d2[b[0]:b[0] + b[1]]:
+            raise BspError("checking the new file: lump %d differs" % i)
+    back = parse_entity_string(bsp_entity_text(d2))
+    if len(back) != len(old) + len(new):
+        raise BspError("checking the new file: its entities didn't read back")
+    return old_time, stamp, before, after, len(back)
 
 
 def load(path):

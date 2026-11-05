@@ -5,8 +5,8 @@ If you change one, change the other (`PRIVACY_TEXT` in `mohaa_launcher.py`).
 
 The Map Viewer shows the same notice under its own name, worded for its own files:
 `mohaa_map_viewer_config.json`, `output_console_map.log` and `mohaamap_*` temp folders,
-its decompiled `.map` files among the working files, and where you left the camera on
-each map among the display choices (`_PRIVACY_SWAPS` in `mohaa_map_launcher.py`, which
+its decompiled `.map` files among the working files, and where the Edit parameters box
+was left among the display choices (`_PRIVACY_SWAPS` in `mohaa_map_launcher.py`, which
 must be checked whenever this text changes).
 
 ```
@@ -48,7 +48,7 @@ Last updated: 28 October 2026
 
      d) Display choices in the browser
         The viewer pages remember a few display choices (theme, backdrop colour,
-        renderer, placement angles, game cvars) in the browser's local storage.
+        the map grid's size and colour, renderer, placement angles, game cvars) in the browser's local storage.
         The embedded pane runs in private mode and forgets them when the program
         closes; in your own browser they stay with that browser's data for local
         files.

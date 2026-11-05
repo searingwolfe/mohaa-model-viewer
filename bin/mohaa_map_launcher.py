@@ -41,7 +41,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 53
+MAP_VIEWER_REV_REQUIRED = 73
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".bak": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".lin": "bin", ".cfg": "scr"}
@@ -114,7 +114,7 @@ _PRIVACY_SWAPS = (
      "        closes; in your own browser they stay with that browser's data for local\n"
      "        files.",
      "(theme, backdrop colour,\n"
-     "        panel options, game cvars, and where you left the camera on each map) in\n"
+     "        panel options, game cvars, and where the Edit parameters box was left) in\n"
      "        the browser's local storage. The embedded pane runs in private mode and\n"
      "        forgets them when the program closes; in your own browser they stay with\n"
      "        that browser's data for local files."),
@@ -435,6 +435,10 @@ class MapApp(ML.App):
         self._info_title.pack(anchor="w", padx=10, pady=(8, 2))
         self._info_stats = ttk.Label(info, text="", style="PanelDim.TLabel", wraplength=245, justify="left")
         self._info_stats.pack(anchor="w", padx=10, pady=(0, 4))
+        # the Re-open / Browser / .map buttons are packed at the bottom first, so the list above
+        # gives way to them in the default window size (packed after it, the list's 8 lines
+        # took the room and hid them)
+        self._reopen_bar = ttk.Frame(info, style="Panel.TFrame"); self._reopen_bar.pack(side="bottom", fill="x", padx=10, pady=(2, 8))
         tagwrap = ttk.Frame(info, style="Panel.TFrame"); tagwrap.pack(fill="both", expand=True, padx=6, pady=(0, 4))
         self._tag_text = tk.Text(tagwrap, bg=ML.PANEL, fg=ML.TXT, insertbackground=ML.TXT, font=ML.FONT_SMALL,
                                  relief="flat", height=8, wrap="none", state="disabled",
@@ -445,7 +449,6 @@ class MapApp(ML.App):
         self._retheme_tag_text()
         self._tag_text.bind("<Button-3>", self._show_tag_menu)
         self._tip(self._tag_text, "Entity breakdown of the last-built map (like MOHRadiant's Map Info).\nSelect + copy freely.\nRight-click for Copy all / Select all / Open in Text Editor.")
-        self._reopen_bar = ttk.Frame(info, style="Panel.TFrame"); self._reopen_bar.pack(fill="x", padx=10, pady=(2, 8))
 
         outer.add(left, minsize=180, width=300, stretch="never")
         outer.add(rightside, minsize=340, stretch="always")
@@ -1171,6 +1174,92 @@ class MapApp(ML.App):
             except Exception as e: self._log_line(f"(viewer request: {e})", "err")
         super()._poll_log()
 
+    # ------------------------------------------------ MODIFY: Save as .bsp / .map ---
+    def _page_js(self, js):
+        """Run a line of script in the viewer's page (on the Tk thread)."""
+        try:
+            if self._webview is not None and getattr(self._webview, "core", None) is not None:
+                self._webview.core.ExecuteScriptAsync(js)
+        except Exception: pass
+
+    def _modify_source(self, req, want_bsp):
+        """The bytes / text the new file starts from: the file the page was built from, else
+        the map's entry in the loaded paks."""
+        src = req.get("src") or ""
+        if want_bsp:
+            if src.lower().endswith(".bsp") and os.path.isfile(src):
+                with open(src, "rb") as f: return f.read(), src
+            vp = (req.get("vpath") or "").replace("\\", "/").lstrip("/")
+            if vp.lower().endswith(".bsp"):
+                for pk in reversed(self._pk3_paths):
+                    try:
+                        with zipfile.ZipFile(pk) as z:
+                            for n in z.namelist():
+                                if n.lower() == vp.lower(): return z.read(n), f"{os.path.basename(pk)}/{n}"
+                    except Exception: continue
+            return None, None
+        mp = req.get("mapFile") or (src if src.lower().endswith((".map", ".bak")) else "")
+        if mp and os.path.isfile(mp):
+            with open(mp, "r", encoding="latin-1", errors="replace") as f: return f.read(), mp
+        return None, None
+
+    def _modify_save(self, req):
+        """The page's Save as .bsp / .map: ask where, never over the map it came from (nor
+        over a file this didn't write), and write the copy with the new entities."""
+        kind = "bsp" if req.get("kind") == "bsp" else "map"
+        added = req.get("ents") or ""
+        name = os.path.splitext(os.path.basename(req.get("vpath") or req.get("src") or "map"))[0] or "map"
+
+        def tell(ok, msg):
+            self._log_line(("  " if ok else "! ") + msg, "ok" if ok else "err")
+            self._page_js("try{modSaved(%s,%s)}catch(e){}" % ("true" if ok else "false", json.dumps(msg)))
+        if kind == "bsp" and not req.get("isBsp"):
+            tell(False, "Save as .bsp needs a map opened from its .bsp (this one is a .map: save as .map and compile it)"); return
+        data, where = self._modify_source(req, kind == "bsp")
+        if data is None:
+            tell(False, "the map's " + (".bsp" if kind == "bsp" else ".map") + " wasn't found to copy from (rebuild the map and try again)"); return
+        src = req.get("src") or ""
+        loose = os.path.isfile(src) and not (self._tmp and os.path.abspath(src).startswith(os.path.abspath(self._tmp)))
+        init_dir = self._cfg.get("modify_dir") or (os.path.dirname(src) if loose else os.path.expanduser("~"))
+        out = filedialog.asksaveasfilename(
+            title="Save the map with the new entities as" + (" a .bsp" if kind == "bsp" else " a .map"),
+            initialdir=init_dir if os.path.isdir(init_dir) else None, initialfile=name + "_mod." + kind,
+            defaultextension="." + kind, filetypes=[("MOHAA " + ("compiled map" if kind == "bsp" else "map source"), "*." + kind)])
+        if not out: return
+        out = os.path.abspath(out)
+        made = set(self._cfg.get("modify_written") or [])
+        same = lambda a, b: bool(a) and os.path.normcase(os.path.abspath(a)) == os.path.normcase(out)
+        if same(src, out) or same(req.get("mapFile"), out) or same(where, out):
+            tell(False, "not saved: that is the map it was opened from - pick another name"); return
+        if os.path.exists(out) and os.path.normcase(out) not in made:
+            tell(False, "not saved: " + os.path.basename(out) + " is already there and wasn't written by Save as - pick a new name"); return
+        try:
+            if kind == "bsp":
+                import mohaa_bsp as MB
+                sets = req.get("set") or []
+                old, new, n0, n1, ne = MB.write_bsp_entities(data, added, out, src if loose else None, replace=sets)
+                msg = (f"saved {os.path.basename(out)}: {ne} entities ({len(sets)} changed), info_pathnode {n0} -> {n1}; "
+                       f"map_time {old!r} -> {new!r}, so the game rebuilds the AI paths")
+            else:
+                # the page sends the whole .map when it has it (changed entities written again)
+                text = req.get("mapText") or (data.rstrip() + "\n// added in MOHAA Map Viewer's MODIFY\n" + added.strip("\n") + "\n")
+                tmp = out + ".tmp"
+                with open(tmp, "w", encoding="latin-1", errors="replace", newline="\n") as f: f.write(text)
+                os.replace(tmp, out)
+                msg = f"saved {os.path.basename(out)} with {added.count('{')} new and {len(req.get('set') or [])} changed entities"
+        except Exception as e:
+            tell(False, f"not saved: {e}"); return
+        made.add(os.path.normcase(out))
+        self._cfg["modify_written"] = sorted(made)[-200:]
+        self._cfg["modify_dir"] = os.path.dirname(out)
+        self._save_config()
+        tell(True, msg)
+        if kind == "bsp":
+            stem = os.path.splitext(os.path.basename(out))[0]
+            if stem.lower() != name.lower():
+                self._log_line(f"  (a new name is a new map: the game runs maps/{stem}.scr with it, not maps/{name}.scr - "
+                               f"copy or rename the script, or keep the name {name}.bsp in another folder)", "dim")
+
     # Text editors that open a file at a line, and how: {program name: args(file, line)}.
     _EDITOR_LINE = {
         "notepad++": lambda f, n: ["-n%d" % n, f],
@@ -1270,6 +1359,17 @@ class MapApp(ML.App):
                         try: line = int(parts[0])
                         except Exception: line = 0
                         self._page_requests.append(lambda l=line, f=parts[1]: self._open_map_at(l, f))
+                    elif m.startswith("mohaa-modify-save\n"):
+                        # MODIFY's Save as .bsp / .map: the new entities, and the map they go in
+                        try: req = json.loads(m.split("\n", 1)[1])
+                        except Exception: req = None
+                        if isinstance(req, dict):
+                            self._page_requests.append(lambda r=req: self._modify_save(r))
+                    elif m.startswith("mohaa-log\n"):
+                        # a line from the page for the Output pane: "mohaa-log\n<tag>\n<text>"
+                        parts = (m.split("\n", 2) + ["", ""])[1:3]
+                        tag = parts[0] if parts[0] in ("dim", "ok", "warn", "err") else "dim"
+                        self._log_q.put((tag, "  " + parts[1][:400]))
                     elif m.startswith("mohaa-map-errors\n"):
                         # blocks of the .map the page's reader skipped: title, count, then
                         # one line each (entity, primitive, line in the .map, why); in red

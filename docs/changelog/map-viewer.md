@@ -325,7 +325,13 @@ run at once.
   Ctrl+Alt+click do (Same path shows when the selected entity has a path: its target leads
   somewhere or something targets it). **Same targetname** (`$`, Shift+4) selects every
   entity with the selected one's targetname, the group a script reaches as `$name`; it
-  shows when another entity shares the name. **Open door** (`O`) shows when a door is
+  shows when another entity shares the name. **Eye view** (after Same kind) shows for an
+  entity with angles, a target to look at, or a player start: the camera flies to where it
+  sees from, facing its angles (pitch, yaw, roll), else its target, else yaw 0. Player
+  starts put the eye 82 units above the start (DEFAULT_VIEWHEIGHT); path nodes,
+  waypoints, vehicle points and actors drop to the floor first (droptofloor, as the game
+  stands them there) and put it 82 above that; spline paths, cameras and everything else
+  see from their exact origin, as the game's cameras do. **Open door** (`O`) shows when a door is
   selected (Doors, below).
 - **Entity boxes** (the `setsize` on the info card): for a `.bsp`, the brush model's
   exact bounds around its origin; for a `.map`, the bounds of the entity's brushes around
@@ -480,7 +486,8 @@ run at once.
     shut, except a `func_door`, `func_rotatingdoor` or `script_door` with spawnflags 1
     (START_OPEN) that leads its group, whose portal is open (flooded as
     `CM_FloodAreaConnections` does); Open door opens and shuts them (Doors, above).
-  - `ai_showroutes 1` (with `ai_showroutes_distance` and `ai_fallheight`; the viewer starts
+  - `ai_showroutes 1` (also the **AI routes** button in Show, greyed on a map with no
+    path nodes; with `ai_showroutes_distance` and `ai_fallheight`; the viewer starts
     the distance at 8200, where the game's default is 1000, since it draws that many
     without slowing down) draws the connections in the map's `.pth` as
     `DrawAllConnections` (`navigate.cpp`) draws them:
@@ -490,6 +497,8 @@ run at once.
     it, typed (the game's own files) or untyped (OpenMoHAA's); node i is the map's i-th
     `info_pathnode`, and a count mismatch is flagged. A path node's info card lists its
     connections.
+    A map with path nodes but no `.pth` gets its paths worked out by the page the first
+    time they are drawn, as the game does when it loads it (Modify, below).
   - `r_lockpvs 1` keeps the leafs marked from where the camera was (`R_MarkLeaves` stops);
     `r_novis 1` keeps every leaf. The server's marks (what it sends) and the renderer's
     are kept apart, so with the lock the entities still follow the camera.
@@ -584,7 +593,8 @@ while lights are turned off (Lights off, below).
     the sun, the sky and `ambientlight` gave stays.
   - Probes are the props' vertices, the vertex-lit polygons' vertices and one per
     grid-lit model at its origin, relit the same way (`FS_LTPREL`).
-  - The first time, every light's share is worked out once, with a progress line; after
+  - The first time, every light's share is worked out once, with a progress line (and in
+    the launcher a line in Output as it starts and one with the time when ready); after
     that a light turned off or on is one light's work, added or taken out (`ltApply`).
   - All of it runs on the graphics card in float textures (`EXT_color_buffer_float`), a
     few steps per frame. Each batch starts only when the card has finished the last (a
@@ -639,19 +649,60 @@ while lights are turned off (Lights off, below).
   origin of the entity it reached. So the first point is at the opening the void comes
   in through, and the last one is the entity.
   - Drawn on the 2D overlay, so it shows through walls: a red line with a dark edge,
-    yellow dots at its points, a red ring at the hole ("leak: the hole is here") and a
-    yellow one at the entity (its class and number).
-  - Turning it on opens its card: the file, the point count and length, what a leak
-    means and how to fix it (patches, terrain and detail brushes never seal a map), the
-    hole and the entity (a link that selects it) with Go and Copy, and every point (up
-    to 200 listed; Copy all has them all). Go flies to a point looking along the trail
-    from the next point's side, so the camera isn't put inside a wall.
+    yellow dots at its points, a red ring at its start ("leak: starts in the void"), a
+    yellow one at the entity ("leak: reaches <class> (entity N)") and a light blue one
+    where the void gets in ("leak: gets in here, fix this", with the gap's width when it
+    is under 64 units). A click on a point or a ring opens the card at that point (on the
+    entity's it selects the entity too); the stats under the map's name have a "leak
+    trail: the map isn't sealed" line that opens it as well.
+  - **Where it gets in** (`leakFix`): the first point is only just outside the map, so
+    the gap is found from the brushes. The ones that seal a map for the compiler are the
+    world's (and func_group's) structural brushes that are solid and not see-through
+    (`surfaceparm trans` / CONTENTS_TRANSLUCENT): detail brushes, patches, terrain,
+    clips, water don't. Along the trail from its start, every 32 units, rays go 26 ways
+    (`leakRay`, against those brushes only); the last sample from which one of them
+    leaves the map's box is where the trail gets in. From there, along that way out, the
+    gap is the place it passes closest to those brushes (the free width across it, the
+    two other axes). When the void is in sight from most ways (18 of 26) at the entity
+    itself, the entity is out in the void.
+  - From there toward the void: if the game collides with something first that the
+    compiler doesn't take as a seal (terrain, a patch, a detail / clip / see-through
+    brush, a brush entity: `leakWhatAt`), the void comes in through that, and the card
+    names it with Select it and says to put caulk under or behind it. Else the opening is
+    the last place along that way still between sealing brushes (across one of the two
+    other axes, within 1024 units): past it is the void. The gap is measured at its
+    narrowest within 64 units of there; under 2 units, or with sides at fractions of a
+    unit, it is a hairline crack off the grid.
+  - A `.bsp` with vis data didn't leak when it was compiled, so its `.lin` is left over
+    from an earlier one (found in another pak, or shipped by mistake): the card says so.
+  - Checked: on sealed maps no player start or path node sees the void through the
+    sealing brushes (1,270 in obj_team2, mohdm7, m1l1, m3l1a, m5l1a, m6l3e and
+    Tirtagen-Kechtat). Leaking: BSunrise3-3 (0.39-unit crack), BSunrise3-3a (1.33-unit
+    crack), pleviathan (8-unit slit at its -x edge), SiDvFinal (8-unit gap), V2revamped
+    (an opening toward +y), NormandyBridge_V1 and abydos (under terrain with no caulk).
+  - The card, in sections: **Found** (what a leak is and does; where the trail starts,
+    gets in and ends, each with Go and Copy), **Where it gets in** (the gap's width along
+    each axis it is shut on and between which coordinates, which way the void is, the
+    brushes either side with Select them, how far along the trail the void stays in
+    sight, and anything the game collides with there that the compiler doesn't take as a
+    seal), **Recommended fix** (under 1 unit: a hairline crack, brushes off the grid,
+    snap them, Ctrl+G in MOHRadiant, or overlap them; under 16: stretch one to meet the
+    other; else a missing wall, floor or sky to close with a structural brush; caulk
+    behind terrain and patches; the entity out in the void: move it in), **Reading the
+    trail** (q3map's BSP cells: the trail is the fewest cells from outside, through the
+    middle of each opening between two, hence its straight runs on the 1024-unit lines
+    and its turns; the entity at its end is only the first, by number, the void reaches)
+    and every point (up to 200 listed; Copy all has them all; the start, the gap and the
+    entity named). Go flies to a point looking along the trail from the next point's
+    side, so the camera isn't put inside a wall.
   - Beside a `.map`, a `.lin` older than the `.map` is flagged: the map was saved after
     the compile that leaked, so the hole may be sealed already. (Beside a `.bsp` the
     dates say nothing: a leaking compile writes the `.bsp` after the `.lin`.)
   - A leaking `.bsp` has no vis data, which the card notes when it applies.
   - Greyed out when there is no `.lin`. NormandyBridge_V1: 3 points, from below the
-    terrain up to a `light`.
+    terrain up to a `light`. BSunrise3-3: 32 points, in through a 0.39-unit crack along x
+    between two caulk floor slabs (one ends at x 318, the next starts at 318.39), open to
+    the void below, then 2,272 units along it before the trail turns in.
 - `.min` (the loading bar's resource list, written by `UI_EndLoad`) and `.vis` aren't
   used.
 
@@ -778,8 +829,21 @@ game, and the page adds what it spawns.
   - Lines read inside a loop note the counters in the card (`// local.q = 1703`).
   - A `while` with a `wait`, `waitframe` or `waittill` in it (respawn waves, watcher
     threads) runs once: it goes by the game's clock.
+  - `break` and `continue` end the loop they are in, or go on to its next turn. Inside a
+    `switch` a `break` only ends the case. Under an `if` the viewer can't decide, a
+    `break` may or may not happen, so the loop goes no further and its counter is unknown
+    afterwards. Before rev 54 these were read as plain statements, so a path walk such as
+    `for (local.n = 1; local.n <= 1025; local.n++) { ... if (local.tent == NULL) { break } }`
+    ran all 1025 turns every time.
+  - A label run again and again (every actor's AI threads: path walks, sight checks,
+    dialogue) is skipped once it has run 8 times without spawning anything new, or setting
+    a target, cvar or `$world` line (`LABEL_IDLE`). A label that keeps spawning new things
+    (a waypoint thread called hundreds of times) keeps running.
   - At most 400,000 statements are run in all, and one line spawns at most 1024
     entities; the build log says so if a script hits the first.
+  - The m3l1b remaster script (1.36 MB) used to stop at the limit after 14 s with 130
+    entities placed. It now finishes in 1.6 s with 4228 placed (3740 of them
+    info_waypoints). The retail maps place the same as before.
 - **Threads.** Each file is split at its labels (`bipod local.exists local.origin
   local.angles:`). A label run by name (`thread x`, `waitthread x`, `exec file.scr::x`,
   with or without an entity in front: `$mg42 thread bipod 1`, `local.gun thread bipod`)
@@ -824,10 +888,154 @@ game, and the page adds what it spawns.
   `script_origin` placed from another one, an actor and a spawn inside a `for` loop
   (listed as not placed).
 
+## Modify
+
+The **Modify** section, above Find, adds entities to the map and saves a copy of it. Its
+main use is adding AI path nodes and seeing the AI's routes change as they are placed.
+
+- **Adding.** Pick a class from the class list (`info_pathnode` first, then every point
+  class the entity definitions know and every class in the map, each with how many the
+  map has; it opens beside its button with a search box, as the Model Viewer's attach-to-
+  bone list: every typed word must appear, the arrows move, Enter or a click takes one) and press Add, then click anywhere on the
+  map: the entity goes where the click meets it (a path node 16 units over the spot, as
+  the game drops it to the floor from 36 units up; anything else with its box's bottom
+  on it). While placing, a white outline follows the cursor; Esc or Add again cancels.
+  **Move** makes the selected new entity follow the mouse again until a click puts it
+  down (Esc or Move again cancels); Move and Trim origin each grey the other out while on.
+  New entities look like the map's own markers of the same keys (a path node:
+  MOHRadiant's 16-unit dark green stand-in, inside out with a targetname, its
+  spawnflags outline, drawn by the markers' own shader, which follows "spawnflags" as it
+  is typed; a selected one gets a yellow box round it), but see-through until the saved `.bsp` is opened, and fainter
+  while edited, moved or trimmed; with an angle, a white line along their yaw. They stay out of the map's own lists and cvars
+  (entity numbers, Find), and a click in the 3D view on one, nearer than the map under
+  the cursor, selects it in Modify's list. As in the Find lists, Shift+click the selected
+  (green) name deselects it and Shift+click a row's square hides / shows it (its name in
+  red while hidden; hidden is only how it is drawn, its AI routes stay). Ctrl+Z undoes a hide or
+  show. In the 3D view Shift+click on the selected new entity deselects it, as Esc does
+  (before it closes the map), and Ctrl+click opens its card. N (More info) on a new entity
+  opens a card of its own: not saved (no entity number until the saved map loads), its
+  origin, box and spawnflag names, for a path node the number the saved map gives it
+  (after the map's nodes) and its links both ways, its class's description, and its
+  parameters in a box that applies what is typed (its routes follow). To view moves it to where the middle of the
+  view meets the map; Fly to, Delete.
+- **The map's own entities.** Selecting one of the map's point entities (a path node, a
+  player start, a script origin...; not brush entities, static props or what the level
+  script spawns) gives it a row too, with a hollow square and its entity number ("#251
+  map"); new ones have a filled square and "new". Edit parameters, Move, Trim origin and
+  To view work on it the same way. Once its keys differ from the map's the row says
+  "changed" (and stays when something else is selected), the map's own marker is hidden
+  and it is drawn see-through where it now is; Restore puts back the map's keys. A
+  changed `info_pathnode` (node k of the `.pth`, the map's k-th) has its links worked out
+  again, both ways, as a new node's are, and the `.pth`'s links to and from it are left
+  out; a node whose classname is changed away from `info_pathnode` loses its links (and
+  gets them again if changed back), once Edit parameters is closed.
+- **Edit parameters** (or double-click its row) opens a box, which moves by its title bar
+  and stays where it was left, with the entity as
+  the `.bsp`'s entity lump holds it, `"key" "value"` lines in `{ }`. What is typed applies
+  a moment later when it reads (an error says why it doesn't): origin, angles, spawnflags,
+  setsize, a model the page has (its size), classname. Undo and Redo step
+  through the changes made since the box opened (Ctrl+Z, Ctrl+Y; greyed when there is
+  none), each pause in typing one step; Done (Esc), at the bottom right, keeps it. Light isn't worked out for new entities.
+- **Trim origin** stops the camera (keys, drag and wheel); W A S D or the arrows move the
+  entity along the map axis nearest the way the camera faces, Space / C up and down, one
+  **trim step** (1 to 50 units) a press. Arrows round it show the ways, white, red while
+  it moves that way. Esc or T stops.
+- **Limits.** The game stops a map past 1024 entity slots (maxentities; the world and
+  "none" keep two and the client slots come first: 1 in single player, sv_maxclients in
+  multiplayer; "Level::AllocEdict: no free edicts") or 4096 path nodes (MAX_PATHNODES,
+  "Exceeded MAX_PATHNODES!"). Modify counts real entities (the map's, the real ones its
+  level script spawns, and its own new ones and changed classes; `modLimits`) and path
+  nodes: Add and placing are refused past 1021 real entities (one player) or 4096 path
+  nodes, a flash warns within 64 (96 in multiplayer) or 200 of them, and the status line
+  gives both counts, yellow near and red past. The stats' real and simple tooltips say
+  the same with the map's own counts. Other simple entities have no fixed limit.
+- **Path problems** (`paIssues`), for Modify's new and changed path nodes, as the game
+  meets them when it builds and walks the paths: 48 paths to check (NUM_PATHSPERNODE:
+  "^~^~^ 48 paths per node at (...) exceeded", the node linked no further, and
+  g_nodecheck 1 stops the level with "Node check failed"), a full 256-unit cell
+  (PATHMAP_NODES 128: "^~^~^ PathSearch::AddToGrid: Node overflow at ( x, y )", the node
+  left out of it), no path (nothing within 384 units it can walk to, or only drops deeper
+  than ai_fallheight, 96: ai_showroutes's red X) and nodes cut off from the map's others
+  (an AI sent across gets "^~^~^ Path not found", which g_patherror 1, the default,
+  prints). The map's own nodes the new ones push past 48 are named too. Each is an
+  orange tag over the node in the view, a line on its card (with the rules: 384 units,
+  48 a node, 128 a cell, drops past ai_fallheight not taken and shallower ones one way),
+  a line in the launcher's Output, a flash when it first appears, and a count in the
+  status line (yellow; its tooltip lists them). Changing ai_fallheight works them out
+  again, as the game's drawn routes and its path search follow it.
+- **Make path** sets the selected entity's `"target"`: a note in green says to click the
+  entity it should point at (a new one or one of the map's). That one keeps its
+  targetname, or gets the next free `t<N>` (as MOHRadiant names them; one of the map's
+  given one this way becomes a changed row, which a brush entity or static prop can't).
+  The link is drawn as the map's are (Links, 7), with its arrowhead, and the clicked
+  entity is selected after, so Make path again goes on along the path: `info_waypoint`,
+  `info_splinepath`, `script_origin` chains. Esc or Make path again cancels.
+- **Facing.** A new entity of a class that faces a way (most of the map's own of that
+  class carry an angle; with none in the map, player starts, actors, turrets, vehicles)
+  is placed with an `"angle"`: the camera's yaw to the nearest 45 degrees. Its facing
+  arrow is drawn as the map's (Arrows, 5).
+- **Grid** (+; Display, under the backdrop): a slider of MOHRadiant's grid sizes (1, 2, 4
+  ... 512; { and } step it) and a colour beside the backdrop's (cyan by default; Default
+  resets both). On, a see-through 3D lattice of that size is drawn round Modify's moving or
+  selected entity, else a point ahead of the camera: 6 to 12 cells each way (fewer for the
+  big sizes), fading with the distance from its centre and fainter again where it is
+  behind or inside the map. Lines on multiples of 64 (or 8 grid sizes) are brighter, those
+  through ( 0 0 0 ) brightest; the centre's coordinates and every few lines' x / y / z
+  are written beside them. Add and Move snap the origin to the nearest corner, a grid size
+  higher when the nearest would put the entity's box into the floor. Trim origin keeps its
+  own trim step. On / off, size and colour are remembered (`mohaaMapViewerGrid`).
+- **AI routes.** A new `info_pathnode` joins the paths whenever it isn't being edited or
+  trimmed. Its links are worked out as `PathSearch::CreatePaths` makes them
+  (`navigate.cpp`): dropped to the floor (`droptofloor`, a 31 x 31 box 36 up and 2048
+  down); a node at the same spot as an earlier one is a duplicate and gets DONT_LINK (a
+  blue circle); otherwise it is filed in the four 256-unit cells round it and linked
+  with every node of the 3 x 3 cells about each end (at most 48 links a node, 128 nodes a
+  cell) that is less than 384 units away across the ground and that `CheckMove` reaches:
+  a 31 x 31 x 94 box walking at 150 units a second in 0.1 s steps (at most 200) through
+  the AI's movement code (`MmoveSingle`, `g_mmove.cpp`: sliding along walls, stepping up
+  18 units, falling at gravity 800), stopped by a wall it can't pass, a fall over 1024
+  units, or arriving more than 94 units above or below the other node. The fall on the
+  way is the link's fall height (`ai_fallheight` hides it). The map's own links come from
+  its `.pth`, and each new node gets its links to its neighbours and theirs to it, the new
+  nodes numbered after the map's, as they will be in game.
+  - **Collision**, as the game's traces: brushes whose own contents (from the `.bsp`'s
+    brush, `D.bsp.bcont` where it differs from the first face's) are in `MASK_PATHSOLID`
+    (solid, monsterclip, fence, not playerclip); movement traces see the box as a
+    capsule on brushes (`CM_TraceThroughBrush` with `sphere.use`) and as a sphere on the
+    terrain (`CM_TraceCylinderThroughTerrainCollide`), `droptofloor` sees the terrain by
+    the box's four bottom corners (`CM_TracePointThroughTerrainCollide`); the terrain's
+    collision squares are built as `CM_GenerateTerrainCollide` builds them. Patches are
+    facets seen from the front. Brush entities count except doors (`CreatePaths` unlinks
+    them), triggers, `func_rain` and `func_ladder`, exploder chunks and smashed pieces
+    (`global/exploder.scr` makes them notsolid as the level loads), script objects made
+    only of `common/trigger`, and the map's entities the level script makes `notsolid`
+    before `level waittill prespawn` (`$x solid` / `notsolid` lines, read by the level
+    script reader).
+  - **Checked against the game's own `.pth` files**, every node pair worked out again:
+    m3l1a 850 of 850 links, m2l2b 889 of 893 (1 extra), m6l3e 760 of 768, m5l1a 3085
+    of 3114 (16 extra), m6l2a 7532 of 7544 (48 extra), m5l2a 11668 of 11836, m1l1 6396
+    of 6517, m3l2 23759 of 24053 (14 extra); fall heights agree on 94 % (m5l2a) to 99 % of the links found.
+    The whole map takes 0.3 to 11 s in the page; a new node, a few dozen pairs.
+- **Saving** writes the changed map entities too. Save as .bsp asks the launcher where to write a copy of the `.bsp` (never
+  over the file the map came from, nor over a file Save as didn't write): every lump but
+  the entities is copied byte for byte, the entity lump with the new entities after the
+  map's goes at the end of the file (with changed entities, the whole lump written again
+  from its entities: each one found by its entity number, checked by its class and old
+  origin, else the only entity with them), and worldspawn gets a new `"map_time"`, so the game
+  rebuilds the `.pth` instead of loading the old one (`PathSearch::ArchiveLoadNodes`
+  compares it). The new file is read back and checked; more than 4096 path nodes is
+  refused. A map from a pak is copied out of the pak. A new file name is a new map: the
+  game runs `maps/<newname>.scr` with it, so the map's script needs copying or renaming
+  (the launcher's Output says so). Save as .map writes the `.map` with the new entities
+  added. Copy puts the new entities on the clipboard as entity-lump text. Outside the launcher, Save as .map downloads the file and
+  Save as .bsp isn't available.
+
 ## Cameras
 
-- **Free-look** is the Model Viewer's: drag to look, WASD / arrows, Space / C, Q / E
-  tilt (Q the head to the left shoulder, E to the right, as in the Model Viewer). With
+- **Free-look** is the Model Viewer's: drag to look, WASD, Space / C, Q / E tilt, Left /
+  Right turn, and Up / Down forward and back level with the ground (the way the camera
+  faces with its pitch taken out, so looking down doesn't dive), where W / S follow the
+  view. Q / E (Q the head to the left shoulder, E to the right, as in the Model Viewer). With
   the camera tilted, looking and turning follow the tilted screen, as in the Model
   Viewer: a mouse movement (or arrow key) is rotated by the roll before it becomes yaw
   and pitch (`lookBy`), so dragging down still looks toward the bottom of the screen.
@@ -861,7 +1069,7 @@ game, and the page adds what it spawns.
   right axis up for a positive roll, `AngleVectors` down), so both swap its sign
   (`camAngles`, `turnTo`). The camera line at the bottom of the view shows `roll` after
   pitch only while the camera is tilted.
-- `V` switches cameras, `R` returns to the player start, `B` toggles Full Brightness,
+- A page always opens at the player start. `V` switches cameras, `R` returns to the player start, `B` toggles Full Brightness,
   `K` Simple Sky, `M` Simple models, `J` Sun flare, `0` Lights off, `-` Sun light, `=`
   Decals, `Y` Weather, `P` Leak trail, `Ctrl+E` Script ents, `L`
   opens the legend, `` ` `` the game cvars list and `T` switches the theme. The FOV
@@ -936,5 +1144,11 @@ game, and the page adds what it spawns.
   `com_maxfps` (at most a fifth of a second of client frames at once), and from the
   camera's place rather than the player's feet (1.11 took the player's origin; across, it
   is the same). Script-spawned `func_rain`s have no brush to give them a box.
+- Modify: a changed map entity drawn with a model shows as a box while changed. New
+  entities are boxes (a model isn't drawn), get no light, and don't take
+  part in what the page simulates (doors, exploders, cvars that list entities). Only
+  point entities can be added. The routes on the `.pth`'s own nodes are the file's;
+  only links to and from new nodes are worked out, so a new node that fills a cell or a
+  node's 48 links isn't followed by the game's re-ordering of the rest.
 - **Planned:** following more of what a level script does as it runs. More of the game's
   debugging cvars, once checked in game.

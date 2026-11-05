@@ -156,6 +156,16 @@ _POINT_NO_BOX = ("script_model", "misc_model", "script_model_realdamage")
 # worldspawn, vis_leafgroup and info_pathnode are described here directly. Definitions
 # found in the loaded paks (.tik headers, code/*.cpp in entdefs.pk3) take priority.
 BUILTIN = {
+ # Classes with no /*QUAKED*/ header in OpenMoHAA's code: colour, box and spawnflag names as
+ # MOHRadiant's entdefs.pk3 defines them (code/*.cpp), with notes from what the game does.
+ 'ai_actor': ((0.5, 1, 1), ((-16, -16, 0), (16, 16, 92)), (),
+  'An AI actor (Actor, actor.cpp). Its model key names the character .tik; keys such as\n"type_idle", "type_attack", "patrolpath", "health" and "accuracy" set how it behaves.'),
+ 'func_window': ((0, 0.25, 0.5), None, ('WINDOW_BROKEN_BLOCK', ),
+  'Brush model window that breaks when shot (WindowObject, windows.cpp).\n"health" how much it takes to break (default 250)\n"debristype" the debris it leaves\nWINDOW_BROKEN_BLOCK: its broken model still blocks players and the AI (else only shots).'),
+ 'info_grenadehint': ((0.5, 0.5, 0.5), ((-8, -8, -8), (8, 8, 8)), (),
+  'A hint for the AI (GrenadeHint, grenadehint.cpp): a point it may throw a grenade through\nto reach an enemy out of sight.'),
+ 'info_splinepath': ((0.2, 0.5, 1), ((-16, -16, -16), (16, 16, 16)), (),
+  'A node of a spline path for cameras and flying things (SplinePath, bspline.cpp): its\n"target" is the next node; "loop" names the node a looping path goes back to.'),
  'detail': ((0.5, 0, 1), None, (),
   'Used to fake detail brushes, convenient for grouping'),
  'func_barrel': ((0, 0.25, 0.5), None, ('INDESTRUCTABLE', ),

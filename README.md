@@ -261,7 +261,8 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
 * **Decals** (`=`): the map's permanent `.dcl` decals (signs, cracks, numbers), lit as
   the game draws them.
 * **Leak trail** (`P`): when a map leaks, the compiler's `.lin` trail is drawn through
-  walls from the hole to the entity the void reaches, and its card takes you to both.
+  walls from the void to the entity it reaches; the place it gets in is worked out and
+  marked (the gap's size and the brushes either side), and its card says how to fix it.
 * **Level script entities** (Show → Script ents, `Ctrl+E`): what the map's `.scr` (and
   the map scripts it runs) spawns: waypoints and their `target` paths (set in loops
   too), script models and origins, actors, placed where its lines say, with the threads it
@@ -272,8 +273,20 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
 * **Run exploder** sets off an exploder's `#set` as `global/exploder.scr` does: the
   building goes and its chunks fly toward their targets, land and sink away. **Reset
   exploder** puts it back.
+* **Modify** (above Find): add entities, most of all AI path nodes: Add, then click on the
+  map where it goes. A new node is drawn
+  see-through until saved, its parameters edit as entity-lump text (applied as you type),
+  **Move** picks it up again with the mouse, **Trim origin** nudges it with W A S D / the arrows by a trim step of 1 to 50 units
+  while the camera stays put, and **AI routes** show its links as soon as it is placed,
+  worked out the way the game builds its `.pth`. **Save as .bsp** writes a copy of the
+  map with the new entities and a new `map_time`, so the game rebuilds its paths; it
+  never writes over the original. **Save as .map** and **Copy** are there too. Selecting one of the map's own point entities (a broken
+  path node, say) lists it in Modify too, to edit, move or trim it the same way. **Make path**
+  sets the selected entity's `target` by clicking the next one (waypoints, spline paths,
+  script origins), drawn as a target link. **Grid** (+) draws a see-through 3D grid of MOHRadiant's sizes (1 to 512)
+  that Add and Move snap to.
 * **Game cvars** (`` ` ``): the game's debugging cvars, working in the page:
-  `r_showtris`, `r_farplane`, `ai_showroutes` (from the map's `.pth`), `sv_showentnums`,
+  `r_showtris`, `r_farplane`, `ai_showroutes` (from the map's `.pth`, or worked out when it has none), `sv_showentnums`,
   `sv_showbboxes`, `g_entinfo`, `r_lightmap` and more; Reset at the top of the list sets them all back.
 * **MOHRadiant-style filters** (`Alt+1` … `Alt+0`, `Ctrl+D / H / M / R / T / P / K`) for
   caulk, clips, triggers, hints, AI nodes, lights, details, terrain, sky and more, with
