@@ -1575,6 +1575,13 @@ Changes to `python_installer_updater.bat` unless noted.
 - Map Viewer page rev 89 (`MAP_VIEWER_REV` 89, `MAP_VIEWER_REV_REQUIRED` 89): Show's **All**
   (`Ctrl+A`) sits on the line of AI routes, at the end of the Show buttons and in their
   style, instead of on a row of its own.
+- The two launchers are renamed **`MOH Model-Map Viewer (Windows x86-x64).bat`** and
+  **`MOH Model-Map Viewer (Linux - Mac OS).sh`** (they were `RUN -- Medal of Honor Viewer`
+  `.bat` / `.sh` for a while, as the entry below says); the README, the privacy notice,
+  `docs/requirements.txt`, the installer's messages and the docs name them so, and the
+  updater retires the earlier pair too (`UPDATE_RETIRED`). Added `.gitattributes`: the
+  `.bat` files are stored byte for byte (CRLF) and the `.sh` files with LF, whatever Git's
+  line-ending setting on the machine, so a download from GitHub runs as written.
 - One launcher per system for both programs: **`RUN -- Medal of Honor Viewer.bat`**
   (Windows) and **`RUN -- Medal of Honor Viewer.sh`** (Linux and macOS) replace the four
   `RUN -- Medal of Honor Model/Map Viewer .bat/.sh`. They open with a short title and a

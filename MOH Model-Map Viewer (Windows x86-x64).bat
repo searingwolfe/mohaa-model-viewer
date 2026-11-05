@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================================
-REM  RUN -- Medal of Honor Viewer.bat
+REM  MOH Model-Map Viewer (Windows x86-x64).bat
 REM  Starts the MOHAA Map Viewer or Model Viewer, picked from a menu: 1 / 2, or
 REM  Up / Down and Enter (1, the Map Viewer, is selected at first); Q or Esc quits.
 REM  Drop a .bsp / .map / .bak file onto this to open it in the Map Viewer, or a

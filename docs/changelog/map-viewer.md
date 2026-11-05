@@ -15,7 +15,7 @@ run at once.
 
 | Path | Role |
 |---|---|
-| `RUN -- Medal of Honor Viewer.bat` (`.sh`) | The entry point both programs share: press 1 (or Enter) in its menu for the Map Viewer. Same checks as for the Model Viewer (Python 3.8+ with tkinter, Pillow, the embedded-pane packages, WebView2) and the same installer, plus the map viewer's own scripts. A `.bsp` / `.map` / `.bak` dropped on it skips the menu and opens directly. |
+| `MOH Model-Map Viewer (Windows x86-x64).bat` (`.sh`) | The entry point both programs share: press 1 (or Enter) in its menu for the Map Viewer. Same checks as for the Model Viewer (Python 3.8+ with tkinter, Pillow, the embedded-pane packages, WebView2) and the same installer, plus the map viewer's own scripts. A `.bsp` / `.map` / `.bak` dropped on it skips the menu and opens directly. |
 | `bin/mohaa_map_launcher.py` | The launcher. `MapApp` subclasses `mohaa_launcher.App` and changes only what differs for maps: the `maps/` tree, opening and building, the map details panel (one scrolling column, shared with the Model Viewer as `make_info_pane`, with Rebuild / Browser / .map buttons: `info_button`), the map options in the menus, the privacy notice's wording (`_PRIVACY_SWAPS`), and its config / log / output names. What both programs share (the updater, the WebView2 folder, `PRIVACY_TEXT`, `VERSION`) stays in `mohaa_launcher.py`. |
 | `bin/mohaa_map_view.py` | Map builder. Decompiles a `.bsp`, scans the `.map`, resolves textures through the shaders, builds the placed models, collects the entity definitions and writes `<stem>_bsp_view.html` / `<stem>_map_view.html` (`<stem>_bak_view.html` for a `.bak`). |
 | `bin/mohaa_map_page.py` | The viewer page template (`HTML_TEMPLATE`): HTML, CSS and the WebGL2 viewer. |

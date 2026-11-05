@@ -49,7 +49,7 @@ program keeps working when other software updates Python's packages.
 * Click the green `<> Code` button and choose `Download ZIP`. <br>
 Extract the `mohaa-model-viewer-main` folder anywhere on your PC.
 
-* Start either program with **`RUN -- Medal of Honor Viewer.bat`**. A menu asks which one:
+* Start either program with **`MOH Model-Map Viewer (Windows x86-x64).bat`**. A menu asks which one:
   press **1** for the **Map Viewer** (`.bsp` / `.map` / `.bak`) or **2** for the **Model
   Viewer** (`.skd` / `.tik`), or move with Up / Down and press Enter (the Map Viewer is
   selected at first); Q or Esc quits. Drag a file onto the `.bat` to skip the menu and
@@ -104,15 +104,15 @@ sudo pacman -S tk                         # Arch
 brew install python-tk                    # macOS (or use the python.org installer, which bundles Tk)
 ```
 
-Then start either program with **`RUN -- Medal of Honor Viewer.sh`**, from a terminal
+Then start either program with **`MOH Model-Map Viewer (Linux - Mac OS).sh`**, from a terminal
 (Konsole, GNOME Terminal, macOS Terminal ...) or a Linux file manager (it opens a terminal
 for itself if it has none). The same menu asks which one: **1** Map Viewer, **2** Model
 Viewer, or Up / Down and Enter. Give it a file to skip the menu:
 
 ```sh
-./"RUN -- Medal of Honor Viewer.sh"                     # the menu
-./"RUN -- Medal of Honor Viewer.sh" maps/obj_team2.bsp  # straight into the Map Viewer
-./"RUN -- Medal of Honor Viewer.sh" models/dog.tik      # straight into the Model Viewer
+./"MOH Model-Map Viewer (Linux - Mac OS).sh"                     # the menu
+./"MOH Model-Map Viewer (Linux - Mac OS).sh" maps/obj_team2.bsp  # straight into the Map Viewer
+./"MOH Model-Map Viewer (Linux - Mac OS).sh" models/dog.tik      # straight into the Model Viewer
 ```
 
 Like the `.bat`, it finds Python 3.8+ with tkinter and installs Pillow into
@@ -120,7 +120,7 @@ Like the `.bat`, it finds Python 3.8+ with tkinter and installs Pillow into
 works on distributions that refuse system-wide `pip` installs (Ubuntu and Kubuntu 23.04
 and newer), and it avoids Ubuntu 24.04's packaged Pillow 10.2, which is below the 10.3
 security floor. If the `.sh` file won't start, make it executable:
-`chmod +x "RUN -- Medal of Honor Viewer.sh"`. On macOS, Finder opens a double-clicked
+`chmod +x "MOH Model-Map Viewer (Linux - Mac OS).sh"`. On macOS, Finder opens a double-clicked
 `.sh` in a text editor, so start it from Terminal.
 
 The embedded 3D pane is Windows-only. Everywhere else, pages open in your default
@@ -141,7 +141,7 @@ A browser-based 3D asset viewer aiming at exact in-game visual parity across eve
 type the engine ships: skeletal models, animations, vehicles, weapons, projectiles,
 static props, and the particle emitters and FX effects that existing tools do not handle.
 
-Start it with **`RUN -- Medal of Honor Viewer.bat`** and press **2** (or drag a `.skd` /
+Start it with **`MOH Model-Map Viewer (Windows x86-x64).bat`** and press **2** (or drag a `.skd` /
 `.tik` onto it), load your `.pk3` archives, browse the model tree, and open any `.skd` or `.tik`
 in a self-contained HTML viewer with animation playback, tag display, texture resolution
 through the shader chain, and live particle effects.
@@ -236,7 +236,7 @@ opened in a plain browser shows everything already built into it.
 A `.map` source opens directly. It's a modern, view-only stand-in for MOHRadiant: nothing
 is ever written back to a map.
 
-Start it with **`RUN -- Medal of Honor Viewer.bat`** and press **1** (or drag a `.bsp` /
+Start it with **`MOH Model-Map Viewer (Windows x86-x64).bat`** and press **1** (or drag a `.bsp` /
 `.map` / `.bak` onto it), add your `.pk3` paks, and open any map from the `maps/` tree (`dm`, `obj`, the
 single-player levels), or a loose `.bsp` / `.map` / `.bak` from disk with File → `Open File...`.
 
@@ -372,8 +372,8 @@ really be the version offered. Every file it replaces is copied first to
 `output/previous-versions/<n>/` (one numbered folder per update, listed in
 `output/previous-versions/changelog.txt`), and if any file can't be written, the files
 already replaced are put back and the update reports what failed. Files the new version
-no longer has (such as the old per-program RUN launchers, now one `RUN -- Medal of Honor
-Viewer` file per system) are copied there too, then removed. To go back a version,
+no longer has (such as the old per-program RUN launchers, now one `MOH Model-Map Viewer`
+file per system) are copied there too, then removed. To go back a version,
 copy a numbered folder's contents over the program folder.
 
 # Where Your Files Go

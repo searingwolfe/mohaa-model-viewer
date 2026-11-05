@@ -88,7 +88,7 @@ Last updated: 4 November 2026
        privacy policy, not this one. It happens only when you open that window and
        click to install; nothing is ever checked automatically.
 
-     - The startup script (RUN -- Medal of Honor Viewer.bat, or the .sh
+     - The startup script (MOH Model-Map Viewer (Windows x86-x64).bat, or the .sh
        file on Linux and macOS) installs any missing Python packages from
        pypi.org into the program's own bin folder. On Windows, if no suitable
        Python is found and you agree when asked, it runs

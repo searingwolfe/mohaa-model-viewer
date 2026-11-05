@@ -196,7 +196,7 @@ Last updated: 4 November 2026
        privacy policy, not this one. It happens only when you open that window and
        click to install; nothing is ever checked automatically.
 
-     - The startup script (RUN -- Medal of Honor Viewer.bat, or the .sh
+     - The startup script (MOH Model-Map Viewer (Windows x86-x64).bat, or the .sh
        file on Linux and macOS) installs any missing Python packages from
        pypi.org into the program's own bin folder. On Windows, if no suitable
        Python is found and you agree when asked, it runs
@@ -522,9 +522,11 @@ UPDATE_SKIP_DIRS={"output","libs","libs-linux","libs-mac",".git","__pycache__"}
 # Files earlier versions shipped that the current one replaces: an update backs them up
 # with the files it replaces (output/previous-versions/<n>/) and then removes them, once
 # everything else is in place. The four RUN launchers became one per system,
-# "RUN -- Medal of Honor Viewer.bat" / ".sh", with a menu for the program.
+# "MOH Model-Map Viewer (Windows x86-x64).bat" / "(Linux - Mac OS).sh", with a menu for the
+# program (for a while named "RUN -- Medal of Honor Viewer").
 UPDATE_RETIRED=("RUN -- Medal of Honor Model Viewer.bat","RUN -- Medal of Honor Map Viewer.bat",
-                "RUN -- Medal of Honor Model Viewer.sh","RUN -- Medal of Honor Map Viewer.sh")
+                "RUN -- Medal of Honor Model Viewer.sh","RUN -- Medal of Honor Map Viewer.sh",
+                "RUN -- Medal of Honor Viewer.bat","RUN -- Medal of Honor Viewer.sh")
 # The restart helper run after an update whose files were locked: waits for each staged
 # <file>.new to move into place (up to 2 minutes), then starts the launcher again.
 UPDATE_FINISHER_SRC=r"""import json, os, subprocess, sys, time

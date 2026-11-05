@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  RUN -- Medal of Honor Viewer.sh   (Linux and macOS)
+#  MOH Model-Map Viewer (Linux - Mac OS).sh   (Linux and macOS)
 #  Starts the MOHAA Map Viewer or Model Viewer, picked from a menu: 1 / 2, or
 #  Up / Down and Enter (1, the Map Viewer, is selected at first); Q or Esc quits.
 #  Pass a .bsp / .map / .bak file to open it in the Map Viewer, or a .skd / .tik

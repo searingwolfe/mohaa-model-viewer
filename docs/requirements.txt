@@ -4,9 +4,9 @@
 # The RUN launchers install these for you, VENDORED into the program's own bin folder
 # (never into Python itself), one folder per operating system so a dual-boot copy of the
 # program works from both:
-#     Windows  bin\libs        RUN -- Medal of Honor Viewer.bat
-#     Linux    bin/libs-linux  RUN -- Medal of Honor Viewer.sh
-#     macOS    bin/libs-mac    RUN -- Medal of Honor Viewer.sh
+#     Windows  bin\libs        MOH Model-Map Viewer (Windows x86-x64).bat
+#     Linux    bin/libs-linux  MOH Model-Map Viewer (Linux - Mac OS).sh
+#     macOS    bin/libs-mac    MOH Model-Map Viewer (Linux - Mac OS).sh
 # The checks and installs are done by bin/mohaa_envcheck.py. To do it by hand:
 #     python -m pip install -r docs/requirements.txt --target bin/libs --no-user
 # (use the same python that runs the program, and the folder for your OS). --target also

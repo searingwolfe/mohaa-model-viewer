@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the two RUN launchers, one per system, each starting either program:
-    RUN -- Medal of Honor Viewer.bat   (Windows)
-    RUN -- Medal of Honor Viewer.sh    (Linux and macOS)
+    MOH Model-Map Viewer (Windows x86-x64).bat   (Windows)
+    MOH Model-Map Viewer (Linux - Mac OS).sh    (Linux and macOS)
 A menu picks the Map Viewer (1) or the Model Viewer (2); a file dropped on the launcher (or
 passed to it) skips the menu and opens in the program for its kind. The menu itself is
 bin/mohaa_envcheck.py's "menu" command, so it works the same on every system.
@@ -13,9 +13,11 @@ import os
 import sys
 
 ROOT = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# the launchers of earlier versions, one per program and system, which these two replace
+# the launchers of earlier versions (one per program and system, then the first pair's
+# names), which these two replace
 OLD = ["RUN -- Medal of Honor Model Viewer.bat", "RUN -- Medal of Honor Map Viewer.bat",
-       "RUN -- Medal of Honor Model Viewer.sh", "RUN -- Medal of Honor Map Viewer.sh"]
+       "RUN -- Medal of Honor Model Viewer.sh", "RUN -- Medal of Honor Map Viewer.sh",
+       "RUN -- Medal of Honor Viewer.bat", "RUN -- Medal of Honor Viewer.sh"]
 COMMON = ["mohaa_common.py", "mohaa_envcheck.py"]          # needed before the menu
 PROGRAMS = {
     "map": dict(NAME="Map Viewer", EXTS=[".bsp", ".map", ".bak"], LAUNCHER="mohaa_map_launcher.py",
@@ -27,7 +29,7 @@ PROGRAMS = {
 
 BAT = r'''@echo off
 REM ============================================================================
-REM  RUN -- Medal of Honor Viewer.bat
+REM  MOH Model-Map Viewer (Windows x86-x64).bat
 REM  Starts the MOHAA Map Viewer or Model Viewer, picked from a menu: 1 / 2, or
 REM  Up / Down and Enter (1, the Map Viewer, is selected at first); Q or Esc quits.
 REM  Drop a .bsp / .map / .bak file onto this to open it in the Map Viewer, or a
@@ -262,7 +264,7 @@ goto :eof
 
 SH = r'''#!/usr/bin/env bash
 # ==============================================================================
-#  RUN -- Medal of Honor Viewer.sh   (Linux and macOS)
+#  MOH Model-Map Viewer (Linux - Mac OS).sh   (Linux and macOS)
 #  Starts the MOHAA Map Viewer or Model Viewer, picked from a menu: 1 / 2, or
 #  Up / Down and Enter (1, the Map Viewer, is selected at first); Q or Esc quits.
 #  Pass a .bsp / .map / .bak file to open it in the Map Viewer, or a .skd / .tik
@@ -421,7 +423,7 @@ def main():
             .replace("@SET_map@", bat_set(PROGRAMS["map"], "map"))
             .replace("@SET_model@", bat_set(PROGRAMS["model"], "model")))
     b = b.replace("\r\n", "\n").replace("\n", "\r\n")
-    p = os.path.join(ROOT, "RUN -- Medal of Honor Viewer.bat")
+    p = os.path.join(ROOT, "MOH Model-Map Viewer (Windows x86-x64).bat")
     with open(p, "wb") as f:
         f.write(b.encode("ascii"))
     sh = (SH.replace("@COMMON@", " ".join(COMMON))
@@ -429,7 +431,7 @@ def main():
             .replace("@SH_model@", "|".join("*" + e for e in PROGRAMS["model"]["EXTS"]))
             .replace("@SHSET_map@", sh_set(PROGRAMS["map"]))
             .replace("@SHSET_model@", sh_set(PROGRAMS["model"])))
-    p2 = os.path.join(ROOT, "RUN -- Medal of Honor Viewer.sh")
+    p2 = os.path.join(ROOT, "MOH Model-Map Viewer (Linux - Mac OS).sh")
     with open(p2, "wb") as f:
         f.write(sh.encode("ascii"))
     os.chmod(p2, 0o755)

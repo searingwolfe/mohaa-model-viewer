@@ -7,7 +7,7 @@ REM                                      and the MOHAA Map Viewer
 REM
 REM  Finds the newest usable Python, or downloads one that supports this Windows
 REM  version and CPU, then installs the packages both viewers use (they need the
-REM  same ones). "RUN -- Medal of Honor Viewer.bat", which starts either of them,
+REM  same ones). "MOH Model-Map Viewer (Windows x86-x64).bat", which starts either of them,
 REM  offers to run this when it can't find a suitable Python,
 REM  passing /fromrun so it returns without the closing pause; it can also be run
 REM  on its own to update Python's packages.
@@ -247,7 +247,7 @@ if defined FROMRUN goto end
 echo.
 echo Your PATH was not modified by this script. If "python" is not recognised in
 echo a new Command Prompt, either re-run Python's installer and tick
-echo "Add python.exe to PATH", or just use "RUN -- Medal of Honor Viewer.bat",
+echo "Add python.exe to PATH", or just use "MOH Model-Map Viewer (Windows x86-x64).bat",
 echo which finds the interpreter on its own.
 
 REM The single exit point: one pause (skipped when a RUN file called us), then the code.
