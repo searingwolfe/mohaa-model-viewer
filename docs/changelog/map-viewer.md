@@ -964,9 +964,9 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
   status line (yellow; its tooltip lists them). Changing ai_fallheight works them out
   again, as the game's drawn routes and its path search follow it.
 - **Make path** sets the selected entity's `"target"`: a note in green says to click the
-  entity it should point at (a new one or one of the map's). That one keeps its
-  targetname, or gets the next free `t<N>` (as MOHRadiant names them; one of the map's
-  given one this way becomes a changed row, which a brush entity or static prop can't).
+  entity it should point at (a new one or one of the map's), which must have a
+  targetname: the target is set to it. One without is refused, with why (give it a
+  `targetname` in Edit parameters first); the selected entity needs none.
   The link is drawn as the map's are (Links, 7), with its arrowhead, and the clicked
   entity is selected after, so Make path again goes on along the path: `info_waypoint`,
   `info_splinepath`, `script_origin` chains. Esc or Make path again cancels.
@@ -974,16 +974,22 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
   class carry an angle; with none in the map, player starts, actors, turrets, vehicles)
   is placed with an `"angle"`: the camera's yaw to the nearest 45 degrees. Its facing
   arrow is drawn as the map's (Arrows, 5).
-- **Grid** (+; Display, under the backdrop): a slider of MOHRadiant's grid sizes (1, 2, 4
-  ... 512; { and } step it) and a colour beside the backdrop's (cyan by default; Default
-  resets both). On, a see-through 3D lattice of that size is drawn round Modify's moving or
-  selected entity, else a point ahead of the camera: 6 to 12 cells each way (fewer for the
-  big sizes), fading with the distance from its centre and fainter again where it is
-  behind or inside the map. Lines on multiples of 64 (or 8 grid sizes) are brighter, those
-  through ( 0 0 0 ) brightest; the centre's coordinates and every few lines' x / y / z
-  are written beside them. Add and Move snap the origin to the nearest corner, a grid size
-  higher when the nearest would put the entity's box into the floor. Trim origin keeps its
-  own trim step. On / off, size and colour are remembered (`mohaaMapViewerGrid`).
+- **Grid** (+; Display's buttons, after Decals): on, a see-through grid of MOHRadiant's
+  grid sizes is drawn round Modify's moving or selected entity, else round the first
+  surface the camera looks at (a trace straight ahead, a little this side of it). Under
+  the backdrop: a button picking its planes, in turn **Grid XY** (one flat plane, the
+  default), **Grid XZ** and **Grid YZ** (one upright plane) and **Grid all** (the whole 3D
+  lattice), then a slider of the sizes (1, 2, 4 ... 512; { and } step it); beside the
+  backdrop, its colour (cyan by default; Default resets both). A single plane is laid on
+  the grid line nearest the point on the camera's side of it (so on a floor it is just
+  above it), 8 to 24 cells each way; the lattice 6 to 12. It fades with the distance from
+  its centre and is drawn only in front of the map's surfaces, so nothing shows through
+  floors and walls. Lines on multiples of 64 (or 8 grid sizes) are brighter, those through
+  ( 0 0 0 ) brightest; the centre's coordinates and every few lines' values along the
+  plane's axes are written beside them, unless a floor or wall is in the way. Add and Move
+  snap the origin to the nearest corner, a grid size higher when the nearest would put
+  the entity's box into the floor. Trim origin keeps its own trim step. On / off, planes,
+  size and colour are remembered (`mohaaMapViewerGrid`).
 - **AI routes.** A new `info_pathnode` joins the paths whenever it isn't being edited or
   trimmed. Its links are worked out as `PathSearch::CreatePaths` makes them
   (`navigate.cpp`): dropped to the floor (`droptofloor`, a 31 x 31 box 36 up and 2048
@@ -1062,7 +1068,11 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
   takes the keyboard while it is open.
 - **Go to and angles** (under the sliders): `go to: x y z` flies the camera to a position
   typed or pasted (Enter; brackets and commas are fine), and **Copy pos** copies where it
-  is as `( x y z )`. `angles: pitch yaw roll` turns it where it stands to angles as the
+  is as `( x y z )`. **Ctrl+C** with the mouse over the 3D view copies the point under the
+  cursor instead (on the face it is over, or a marker's origin), the same way, rounded to
+  hundredths; with text picked out on the page, Ctrl+C copies that as usual. The note
+  under the view says which was copied: "Camera's origin", "Camera's angles" or "Mouse
+  cursor's origin", with the value. `angles: pitch yaw roll` turns it where it stands to angles as the
   game takes them (`AngleVectors`: looking down is a positive pitch), and **Copy ang**
   copies its own the same way, `( pitch yaw roll )`, pitch and roll in -180..180 and yaw
   in 0..360. The page's own roll turns the other way to the game's (`camAxes` tilts the

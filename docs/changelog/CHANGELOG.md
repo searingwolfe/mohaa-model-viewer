@@ -1411,3 +1411,25 @@ Changes to `python_installer_updater.bat` unless noted.
 - Map Viewer page rev 73 (`MAP_VIEWER_REV` 73, `MAP_VIEWER_REV_REQUIRED` 73): no more mention of
   the separate `.bsp` entity script, whose work `mohaa_bsp.write_bsp_entities` does: Save as
   .bsp outside the launcher says to open the map there.
+- Map Viewer page rev 74 (`MAP_VIEWER_REV` 74, `MAP_VIEWER_REV_REQUIRED` 74): the grid is
+  drawn only in front of the map's surfaces (the fainter pass through floors and walls is
+  gone), centred, when Modify has nothing selected or moving, on the first surface the
+  camera looks at (a trace straight ahead) instead of a point in the air, and its numbers
+  behind a floor or a wall aren't written.
+- Map Viewer page rev 75 (`MAP_VIEWER_REV` 75, `MAP_VIEWER_REV_REQUIRED` 75): **Ctrl+C** over
+  the 3D view copies the point under the cursor as `( x y z )` (the face's exact point, or
+  a marker's origin; not the camera's place), unless text is picked out on the page. In
+  the keyboard shortcuts window.
+- Map Viewer page rev 76 (`MAP_VIEWER_REV` 76, `MAP_VIEWER_REV_REQUIRED` 76): Make path only
+  takes an entity that has a targetname (a click on one without is refused, with why; the
+  selected one needs none); it no longer gives the clicked one a new `t<N>`.
+- Map Viewer page rev 77 (`MAP_VIEWER_REV` 77, `MAP_VIEWER_REV_REQUIRED` 77): **Grid** (+)
+  moves into Display's buttons after Decals, and the button left of the grid-size slider
+  picks its planes, in turn: **Grid XY** (one flat plane, the default), **Grid XZ** and
+  **Grid YZ** (one upright plane), **Grid all** (the 3D lattice as before). A single plane
+  is laid on the grid line nearest the point, on the camera's side of the surface, reaches
+  8 to 24 cells each way, and only its two axes are numbered. The choice is remembered.
+- Map Viewer page rev 78 (`MAP_VIEWER_REV` 78, `MAP_VIEWER_REV_REQUIRED` 78): the copy notes
+  say what was copied, with the value: "Camera's origin ( ... ) copied to the clipboard"
+  (Copy pos), "Camera's angles ( ... )" (Copy ang), "Mouse cursor's origin ( ... )"
+  (Ctrl+C over the 3D view).

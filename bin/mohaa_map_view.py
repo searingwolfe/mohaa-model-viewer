@@ -52,7 +52,7 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 73
+MAP_VIEWER_REV = 78
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
 INDEX_VERSION = 10
@@ -910,6 +910,8 @@ MAP_VIEWER_KEYS = {
             _kx("Ctrl+Shift+click|middle-click", "the clicked face's texture",
                 ("Ctrl+Shift+Click", "texture"), ("MClick", "texture")),
             _kx("N", "more info on the selection", ("N", "info")),
+            _kx("Ctrl+C", "over the 3D view: copy the point under the cursor as ( x y z ) (not the camera's place)",
+                ("Ctrl+C", "copy point", "copy the point under the cursor as ( x y z )")),
             _kx("Backspace", "hide the selection", ("Backspace", "hide")),
             _kx("Shift+H", "show everything hidden", ("Shift+H", "show all")),
             _kx("Ctrl+Z", "undo the last hide or show-all (again for the one before)", ("Ctrl+Z", "undo")),
@@ -993,8 +995,9 @@ MAP_VIEWER_KEYS = {
             _kx("P", "Leak trail on / off: the line the compiler wrote (the map's .lin) from the void to "
                 "the entity it reaches, seen through walls, and where it gets in; on, its card says how to fix it",
                 ("P", "leak", "Leak: the compiler's leak trail (.lin) on / off")),
-            _kx("+", "Grid on / off: a see-through 3D grid of the grid size round Modify's moving or selected "
-                "entity (else ahead of the camera), its coordinates counted from ( 0 0 0 ); on, Modify's Add and "
+            _kx("+", "Grid on / off (Display): a see-through grid of the grid size round Modify's moving or "
+                "selected entity (else the surface ahead of the camera), its coordinates counted from ( 0 0 0 ); "
+                "the button under the backdrop picks its planes (Grid XY, XZ, YZ or all); on, Modify's Add and "
                 "Move snap to its corners", ("Shift+=", "grid", "Grid: the 3D grid on / off (Add and Move snap to it)")),
             _kx("{|}", "grid size down / up: 1, 2, 4 ... 512 units, as MOHRadiant's",
                 ("Shift+[", "grid -", "a smaller grid size"), ("Shift+]", "grid +", "a larger grid size")),

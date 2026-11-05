@@ -352,7 +352,7 @@ __KEYS_CSS__
        <input type="color" id="gridcol" value="#6fd6e8" style="width:44px;height:22px;padding:1px;border:1px solid var(--line);border-radius:6px;background:var(--btn);cursor:pointer" title="Colour of the grid's lines and numbers (Grid, +). Remembered.">
        <button class="sm" id="bgReset" title="Return the backdrop and the grid to the theme's default colours">Default</button>
      </div>
-     <div class="row co" style="align-items:center"><button class="sm" id="bGrid" title="Grid (+): a see-through 3D grid of the grid size round what you work on (Modify's selected or moving entity, else ahead of the camera), with its coordinates counted from ( 0 0 0 ). While it is on, Add and Move in Modify snap to its corners, as MOHRadiant snaps to its grid. { and } (Shift+[ / ]) change the size.">Grid<span class="k">+</span></button><input type="range" id="gridSz" min="0" max="9" step="1" value="3" style="flex:1;min-width:0" title="Grid size: MOHRadiant's 1, 2, 4, 8, 16, 32, 64, 128, 256 or 512 units ({ and })"><span id="gridV" style="min-width:34px;text-align:right">8</span></div>
+     <div class="row co" style="align-items:center"><button class="sm" id="bGrid" style="min-width:66px" title="Which planes the grid draws: Grid XY (flat, like the floor), Grid XZ and Grid YZ (upright), or Grid all (the whole 3D lattice). Click for the next. The grid itself turns on and off with Grid in the buttons above (+)">Grid XY</button><input type="range" id="gridSz" min="0" max="9" step="1" value="3" style="flex:1;min-width:0" title="Grid size: MOHRadiant's 1, 2, 4, 8, 16, 32, 64, 128, 256 or 512 units ({ and })"><span id="gridV" style="min-width:34px;text-align:right">8</span></div>
      <div class="row co" id="cvarRow"><button id="cvarBtn" title="The game's debugging cvars, doing here what they do in game: what the renderer draws from where the camera is (r_showtris, r_shownormals, r_lockpvs, r_showsky, r_farplane...), its lightmaps and light grid (r_lightmap, r_light_showgrid), entity numbers, boxes and info (sv_showentnums, sv_showbboxes, g_entinfo), cameras, rain and the AI's path nodes. Type a cvar and a value in its box as in the game's console. (` like the game's console key)"><span class="albl">&mdash; game cvars &mdash;</span><span class="acar">&#9668;</span></button><span id="cvarCount">none set</span></div>
    </div>
    <div class="sect">
@@ -382,7 +382,7 @@ __KEYS_CSS__
        <button class="sm" id="bModEdit" title="Edit the entity as the .bsp's entity lump holds it: &quot;key&quot; &quot;value&quot; lines, applied as you type (double-click a row too). A path node joins the AI's paths again when you're done">Edit parameters</button>
        <button class="sm" id="bModMove" title="Move: the selected entity follows the mouse again; a click on the map puts it there (Esc or Move again cancels). Off while Trim origin is on">Move</button>
        <button class="sm" id="bModTrim" title="Trim origin: the camera stops and W A S D / the arrow keys move the entity along the map's axes (the way you face), Space / C up and down, by the trim step. Esc or T stops">Trim origin</button>
-       <button class="sm" id="bModLink" title="Make path: click another entity to set this one's &quot;target&quot; to it (its targetname, or a new t&lt;N&gt; given to it), drawn as a target link. The clicked one is selected after, so pressing Make path again goes on along the path (info_waypoint, info_splinepath, script_origin...). Esc cancels">Make path</button>
+       <button class="sm" id="bModLink" title="Make path: click another entity to set this one's &quot;target&quot; to its targetname (only entities that have one can be picked), drawn as a target link. The clicked one is selected after, so pressing Make path again goes on along the path (info_waypoint, info_splinepath, script_origin...). Esc cancels">Make path</button>
        <button class="sm" id="bModView" title="Move the entity to where the middle of the view meets the map">To view</button>
        <button class="sm" id="bModFly" title="Fly the camera to the entity">Fly to</button>
        <button class="sm" id="bModDel" title="Remove the entity">Delete</button>
@@ -1003,8 +1003,16 @@ function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'
 function fnum(x){if(!isFinite(x))return '0';const r=Math.round(x);if(Math.abs(x-r)<0.005)return String(r===0?0:r);
   return (Math.round(x*100)/100).toString();}
 function fvec(v){return '( '+v.map(fnum).join(' ')+' )';}
-function copyText(s){
-  const done=()=>flash('Copied to the clipboard');
+function copyCursorPos(){
+  const[x,y]=hoverAt;const h=hitInfo(pickAt(x,y),x,y);
+  let p=h&&h.point;
+  if(!p&&h&&h.ent>0&&ENTS[h.ent])p=ENTS[h.ent].origin||ENTS[h.ent].anchor;      // a marker: its origin
+  if(!p){flash('Nothing under the cursor to copy (the sky or the void)');return;}
+  const t='( '+p.map(v=>fnum(Math.round(v*100)/100)).join(' ')+' )';
+  copyText(t,'Mouse cursor\'s origin '+t+' copied to the clipboard');
+}
+function copyText(s,msg){
+  const done=()=>flash(msg||'Copied to the clipboard');
   try{if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(s).then(done,()=>fallback());return;}}catch(_e){}
   fallback();
   function fallback(){const ta=document.createElement('textarea');ta.value=s;ta.style.position='fixed';ta.style.opacity='0';
@@ -1049,42 +1057,67 @@ $('bgReset').onclick=()=>{applyBackdrop(null,true);gridColour(null);};
 // round a point (Modify's moving or selected entity, else ahead of the camera), fading out
 // over a dozen cells or so so the map stays in sight, with its coordinates written along
 // the three lines through that point. On, Modify's Add and Move snap to its corners.
-const GRID={on:false,i:3,col:null,key:'',n:0,buf:null,vao:null,prog:null,c:null,N:0};
+const GRID={on:false,i:3,mode:'xy',col:null,key:'',n:0,buf:null,vao:null,prog:null,c:null,N:0,fk:'',fp:null,vis:new Map(),vk:''};
 function gridSize(){return 1<<GRID.i;}
 function gridDefCol(){return '#6fd6e8';}   // a cyan the map's own colours rarely are
-function gridSave(){LS.set('mohaaMapViewerGrid',JSON.stringify({on:GRID.on,i:GRID.i,col:GRID.col}));}
+function gridSave(){LS.set('mohaaMapViewerGrid',JSON.stringify({on:GRID.on,i:GRID.i,col:GRID.col,mode:GRID.mode}));}
+// the planes drawn: one plane across two axes (its normal the third), or all three
+const GRID_MODES=['xy','xz','yz','all'];
+function gridNormal(){return GRID.mode==='xy'?2:GRID.mode==='xz'?1:GRID.mode==='yz'?0:-1;}
+function gridModeBtn(){$('bGrid').textContent='Grid '+(GRID.mode==='all'?'all':GRID.mode.toUpperCase());}
+function setGridMode(m,quiet){GRID.mode=GRID_MODES.includes(m)?m:'xy';gridModeBtn();GRID.key='';gridSave();requestDraw();
+  if(!quiet)flash('Grid '+(GRID.mode==='all'?'all: the whole 3D lattice':GRID.mode.toUpperCase()+': one plane')+(GRID.on?'':' (Grid is off: + turns it on)'));}
 function gridColour(c,save){GRID.col=c||null;$('gridcol').value=GRID.col||gridDefCol();GRID.key='';if(save!==false)gridSave();requestDraw();}
-function setGrid(on){GRID.on=!!on;$('bGrid').classList.toggle('on',GRID.on);GRID.key='';gridSave();requestDraw();
+function setGrid(on){GRID.on=!!on;{const b=$('d_grid');if(b)b.classList.toggle('on',GRID.on);}GRID.key='';gridSave();requestDraw();
   flash(GRID.on?'Grid '+gridSize()+' on: Modify\'s Add and Move snap to it ({ and } change the size)':'Grid off');}
 function setGridSize(i,quiet){GRID.i=Math.max(0,Math.min(9,i|0));$('gridSz').value=GRID.i;$('gridV').textContent=gridSize();
   GRID.key='';gridSave();requestDraw();if(!quiet)flash('Grid size '+gridSize()+(GRID.on?'':' (Grid is off: + turns it on)'));}
-$('bGrid').onclick=()=>setGrid(!GRID.on);
+$('bGrid').onclick=()=>setGridMode(GRID_MODES[(GRID_MODES.indexOf(GRID.mode)+1)%GRID_MODES.length]);
 $('gridSz').oninput=()=>setGridSize(+$('gridSz').value);
 $('gridcol').oninput=()=>gridColour($('gridcol').value);$('gridcol').onchange=$('gridcol').oninput;
 function gridLoad(){let g=null;try{g=JSON.parse(LS.get('mohaaMapViewerGrid')||'null');}catch(_e){}
-  if(g){GRID.on=!!g.on;GRID.i=g.i==null?3:g.i;GRID.col=g.col||null;}
-  $('bGrid').classList.toggle('on',GRID.on);setGridSize(GRID.i,true);gridColour(GRID.col,false);}
+  if(g){GRID.on=!!g.on;GRID.i=g.i==null?3:g.i;GRID.col=g.col||null;GRID.mode=GRID_MODES.includes(g.mode)?g.mode:'xy';}
+  {const b=$('d_grid');if(b)b.classList.toggle('on',GRID.on);}gridModeBtn();setGridSize(GRID.i,true);gridColour(GRID.col,false);}
 function gridSnap(v){const g=gridSize();return Math.round(v/g)*g;}
 // where the lattice is centred
 function gridFocus(){
   if(MOD.placing&&MOD.ghost)return MOD.ghost;
   if(MOD.sel>=0&&MOD.ents[MOD.sel]&&modDrawn(MOD.sel))return modOrigin(MOD.ents[MOD.sel]);
-  const a=camAxes(),d=Math.min(Math.max(gridSize()*5,96),3000);
-  return[cam.pos[0]+a.f[0]*d,cam.pos[1]+a.f[1]*d,cam.pos[2]+a.f[2]*d];
+  // else what the camera looks at: the first surface straight ahead (a little this side of
+  // it), or a point ahead when there is none near
+  const a=camAxes(),key=cam.pos.map(v=>Math.round(v)).join(',')+'|'+a.f.map(v=>v.toFixed(3)).join(',');
+  if(GRID.fk===key)return GRID.fp;
+  let d=Math.min(Math.max(gridSize()*5,96),3000);
+  try{const L=4096,e=[cam.pos[0]+a.f[0]*L,cam.pos[1]+a.f[1]*L,cam.pos[2]+a.f[2]*L],t=pgTrace(cam.pos,e,[0,0,0],[0,0,0],false);
+    if(t&&!t.startsolid&&t.f<1)d=Math.max(8,t.f*L-2);}catch(_e){}
+  GRID.fk=key;GRID.fp=[cam.pos[0]+a.f[0]*d,cam.pos[1]+a.f[1]*d,cam.pos[2]+a.f[2]*d];
+  return GRID.fp;
 }
-function gridCells(){return Math.max(6,Math.min(12,Math.round(192/gridSize())));}
+// whether the camera sees a point (nothing solid between): the grid's numbers behind a
+// floor or a wall aren't written
+function gridSees(p){
+  const k=p.join(',');let v=GRID.vis.get(k);if(v!=null)return v;
+  try{const t=pgTrace(cam.pos,p,[0,0,0],[0,0,0],false);v=!(t&&(t.startsolid||t.f<0.995));}catch(_e){v=true;}
+  GRID.vis.set(k,v);return v;
+}
+// cells each way: a single plane has room for more than the whole lattice
+function gridCells(){return gridNormal()>=0?Math.max(8,Math.min(24,Math.round(384/gridSize()))):Math.max(6,Math.min(12,Math.round(192/gridSize())));}
 function drawGrid(vp){
   if(!GRID.on||!gl)return;
-  const g=gridSize(),N=gridCells(),f=gridFocus(),c=[gridSnap(f[0]),gridSnap(f[1]),gridSnap(f[2])];
-  const key=GRID.i+'|'+c.join(',')+'|'+(GRID.col||gridDefCol());
+  const g=gridSize(),N=gridCells(),f=gridFocus(),c=[gridSnap(f[0]),gridSnap(f[1]),gridSnap(f[2])],nm=gridNormal();
+  // one plane: the grid line nearest the point on the camera's side of it, so a plane
+  // laid on a floor or a wall is just in front of it, not inside
+  if(nm>=0){const k=f[nm]/g;c[nm]=(cam.pos[nm]>=f[nm]?Math.ceil(k-0.01):Math.floor(k+0.01))*g;}
+  const key=GRID.i+'|'+GRID.mode+'|'+c.join(',')+'|'+(GRID.col||gridDefCol());
   if(!GRID.prog){GRID.prog=compile(VS_GVL,FS_LINE);GRID.buf=gl.createBuffer();GRID.vao=gvLineVAO(GRID.buf,true);gl.bindVertexArray(null);}
   if(key!==GRID.key){
     GRID.key=key;GRID.c=c;GRID.N=N;
     const col=hexRGB(GRID.col||gridDefCol()),R=N*g,step=Math.max(1,Math.round(N/4)),maj=Math.max(64,g*8);
     const L=[];
     const al=(p,base)=>{const d=Math.hypot(p[0]-c[0],p[1]-c[1],p[2]-c[2])/R;return d>=1?0:base*Math.pow(1-d,1.5);};
-    for(let ax=0;ax<3;ax++){const a1=(ax+1)%3,a2=(ax+2)%3;
+    for(let ax=0;ax<3;ax++){const a1=(ax+1)%3,a2=(ax+2)%3;if(ax===nm)continue;    // a plane: none across it
       for(let i=-N;i<=N;i++)for(let j=-N;j<=N;j++){
+        if(nm>=0&&((a1===nm&&i)||(a2===nm&&j)))continue;                                 // and only in it
         const v1=c[a1]+i*g,v2=c[a2]+j*g;if(Math.hypot(i,j)>N)continue;
         const base=(v1===0&&v2===0)?0.85:(v1%maj===0&&v2%maj===0)?0.55:(v1%maj===0||v2%maj===0)?0.45:0.36;
         for(let k=-N;k<N;k+=step){const p=[0,0,0],q=[0,0,0];p[a1]=q[a1]=v1;p[a2]=q[a2]=v2;
@@ -1096,10 +1129,8 @@ function drawGrid(vp){
   if(!GRID.n)return;
   gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(false);gl.disable(gl.CULL_FACE);
   gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
-  gvUniforms(GRID.prog,vp,0);gl.bindVertexArray(GRID.vao);gl.drawArrays(gl.LINES,0,GRID.n);
-  // and fainter where it goes behind or into the map, so the whole cube still reads
-  gl.depthFunc(gl.GREATER);gl.uniform1f(GRID.prog.u.uAlpha,0.3);gl.drawArrays(gl.LINES,0,GRID.n);
-  gl.depthFunc(gl.LEQUAL);gl.uniform1f(GRID.prog.u.uAlpha,1);gl.bindVertexArray(null);
+  // only in front of the map's surfaces: nothing through floors and walls
+  gvUniforms(GRID.prog,vp,0.001);gl.bindVertexArray(GRID.vao);gl.drawArrays(gl.LINES,0,GRID.n);gl.bindVertexArray(null);
   gl.disable(gl.BLEND);gl.depthMask(true);
 }
 // Modify's path problems in the view: a tag over each node that has one
@@ -1116,11 +1147,13 @@ function drawGrid2D(){
   if(!GRID.on||!GRID.c)return;
   const g=gridSize(),N=GRID.N,c=GRID.c,step=Math.max(1,Math.round(N/4)),R=N*g;
   ctx.font='10px ui-monospace,Menlo,Consolas,monospace';ctx.textBaseline='middle';ctx.fillStyle=GRID.col||gridDefCol();
+  const vk=GRID.key+'|'+cam.pos.map(v=>Math.round(v)).join(',');if(GRID.vk!==vk){GRID.vk=vk;GRID.vis.clear();}
   const nm=['x','y','z'];
   const sc=project(c);
-  if(sc&&sc[0]>=0&&sc[0]<=W&&sc[1]>=0&&sc[1]<=H){ctx.globalAlpha=0.9;ctx.fillText('( '+c.map(fnum).join(' ')+' )',sc[0]+3,sc[1]+8);}
-  for(let ax=0;ax<3;ax++)for(let k=-N;k<=N;k+=step){if(!k)continue;
-    const p=c.slice();p[ax]=c[ax]+k*g;const sp=project(p);if(!sp||sp[0]<0||sp[0]>W||sp[1]<0||sp[1]>H)continue;
+  if(sc&&sc[0]>=0&&sc[0]<=W&&sc[1]>=0&&sc[1]<=H&&gridSees(c)){ctx.globalAlpha=0.9;ctx.fillText('( '+c.map(fnum).join(' ')+' )',sc[0]+3,sc[1]+8);}
+  const nrm=gridNormal();
+  for(let ax=0;ax<3;ax++)for(let k=-N;k<=N;k+=step){if(!k||ax===nrm)continue;
+    const p=c.slice();p[ax]=c[ax]+k*g;const sp=project(p);if(!sp||sp[0]<0||sp[0]>W||sp[1]<0||sp[1]>H||!gridSees(p))continue;
     ctx.globalAlpha=0.85*Math.max(0.15,1-Math.abs(k*g)/R);
     ctx.fillText(nm[ax]+' '+fnum(p[ax]),sp[0]+3,sp[1]-6);}
   ctx.globalAlpha=1;
@@ -7552,6 +7585,10 @@ window.addEventListener('keydown',e=>{
   const kl=e.key.length===1?e.key.toLowerCase():e.key.toLowerCase();
   const combo=(e.ctrlKey||e.metaKey?'ctrl+':'')+(e.altKey?'alt+':'')+(/^digit\d$/i.test(e.code)?e.code.slice(5):kl);
   if(FILTER_KEYS[combo]!=null){toggleFilter(FILTER_KEYS[combo]);e.preventDefault();return;}
+  // Ctrl+C over the 3D view (and no text picked out on the page): the point under the
+  // cursor, as ( x y z ) for a script
+  if(combo==='ctrl+c'&&hoverAt){let t='';try{t=String(window.getSelection()||'');}catch(_e){}
+    if(!t){copyCursorPos();e.preventDefault();return;}}
   if(combo==='ctrl+z'){undoHide();e.preventDefault();return;}     // before Radiant-look's Z
   if(combo==='ctrl+a'){showAllGroups();flash('Every group is shown');e.preventDefault();return;}   // and A
   if((e.ctrlKey||e.metaKey)&&kl==='f'){$('findIn').focus();$('findIn').select();e.preventDefault();return;}
@@ -7655,6 +7692,7 @@ const DISPLAY=[
  {k:'lights',l:'Lights off',key:'0',t:'Every light entity of the map off, as if it had never been there: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the sun, the sky and the ambient light give it. Again: every light back on. Single lights turn off and on from Selection (Turn off / Turn on). The first time takes a moment, while the page works out how much of the baked light each light gave'},
  {k:'sun',l:'Sun light',key:'-',t:'The sun\'s and the sky\'s light on the map (worldspawn suncolor, sundirection, sundiffuse). Off: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the lights and the ambient light give it, so open ground goes dark. The sun flare (J) is separate. The first time takes a moment, as Lights off does'},
  {k:'decals',l:'Decals',key:'=',t:'The map\'s permanent decals (its .dcl: signs, cracks, numbers placed in MOHRadiant), as the game draws them, lit by the colour the file keeps (white with Full Brightness)'},
+ {k:'grid',l:'Grid',key:'+',t:'Grid: a see-through grid of MOHRadiant\'s grid size round what you work on (Modify\'s selected or moving entity, else the surface ahead of the camera), with its coordinates counted from ( 0 0 0 ). While it is on, Add and Move in Modify snap to it, as MOHRadiant snaps to its grid. Under the backdrop: which planes (Grid XY / XZ / YZ / all), the size ({ and }) and its colour'},
  {k:'weather',l:'Weather',key:'Y',t:'The game\'s rain and snow (cg_rain): drops start in the map\'s func_rain boxes near you as the client makes them, with the map\'s settings (its script\'s level.rain_*). The game cvars (`) have every setting: cg_weather snow / rain / blizzard ..., density, speed, size, shader, the client\'s frame rate'},
  {k:'leak',l:'Leak',key:'P',t:'The compiler\'s leak trail (the map\'s .lin): a red line through walls from the void outside the map to the entity it reaches, with a light blue circle where it gets in (the gap to fix). On: its card says where and how to fix it, with Go buttons; a click on the trail opens it'}];
 const FILTERS=[
@@ -7721,10 +7759,10 @@ function buildPanel(){
   $('bClip').onclick=toggleClip;$('bClip').classList.toggle('on',clipOn);
   $('gotoIn').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const v=vecNums($('gotoIn').value);
     if(v.length>=3){flyTo([v[0],v[1],v[2]],null,null);$('gotoIn').blur();}else flash('Type three numbers: x y z');});
-  $('bCopyCam').onclick=()=>copyText(fvec(cam.pos));
+  $('bCopyCam').onclick=()=>{const t=fvec(cam.pos);copyText(t,'Camera\'s origin '+t+' copied to the clipboard');};
   $('angIn').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const v=vecNums($('angIn').value);
     if(v.length>=3){turnTo(v[0],v[1],v[2]);$('angIn').blur();}else flash('Type three numbers: pitch yaw roll');});
-  $('bCopyAng').onclick=()=>copyText(fvec(camAngles()));
+  $('bCopyAng').onclick=()=>{const t=fvec(camAngles());copyText(t,'Camera\'s angles '+t+' copied to the clipboard');};
   $('bInfo').onclick=()=>showInfo('sel');$('bFocus').onclick=focusSelection;$('bHide').onclick=hideSelection;
   $('bClear').onclick=()=>{SEL.clear();selectionChanged();};$('bUnhide').onclick=unhideAll;$('bUndoHide').onclick=undoHide;
   $('bSame').onclick=()=>{if(lastHit)selectSameKind(lastHit,false);};
@@ -7752,7 +7790,8 @@ function editorLook(){hiddenMask=EDIT_LOOK;simpleSky=true;fullBright=true;setSun
 // a look's sun flare setting counts only on a map that has a flare
 function flareAs(on){return !sunHas()||sunFlare===on;}
 function syncButtons(){
-  for(const d of DISPLAY){const b=$('d_'+d.k);if(b&&d.k!=='lights'&&d.k!=='sun'&&d.k!=='weather')b.classList.toggle('on',!!view[d.k]&&!b.disabled);}
+  for(const d of DISPLAY){const b=$('d_'+d.k);if(b&&d.k!=='lights'&&d.k!=='sun'&&d.k!=='weather'&&d.k!=='grid')b.classList.toggle('on',!!view[d.k]&&!b.disabled);}
+  {const b=$('d_grid');if(b)b.classList.toggle('on',GRID.on);}
   {const b=$('d_weather');if(b){b.classList.toggle('on',!!CVARS.cg_rain);
     b.classList.toggle('part',!!CVARS.cg_rain&&(!(+CVARS.cg_rain_density>0)||(!WX.rainEnts.length&&!CVARS.cg_rain_wholemap&&!wxSkyBrushes().length)));}}
   {const b=$('d_sun');if(b)b.classList.toggle('on',LT.ok?(LT.sunHas&&!LT.sunOff):false);}
@@ -7779,7 +7818,7 @@ function syncButtons(){
   $('bFree').classList.toggle('on',camMode==='free');$('bRad').classList.toggle('on',camMode==='rad');
   $('camHelpFree').style.display=camMode==='free'?'':'none';$('camHelpRad').style.display=camMode==='rad'?'':'none';
 }
-function toggleDisplay(k){if(k==='lights'){toggleLightsOff();return;}if(k==='sun'){toggleSunLight();return;}if(k==='weather'){toggleWeather();return;}
+function toggleDisplay(k){if(k==='grid'){setGrid(!GRID.on);return;}if(k==='lights'){toggleLightsOff();return;}if(k==='sun'){toggleSunLight();return;}if(k==='weather'){toggleWeather();return;}
   view[k]=!view[k];syncButtons();saveOpts();
   if(k==='wire'&&view.wire)rebuildWire();
   if(k==='fog'&&view.fog&&!FOG.far)flash('This map has no farplane fog');
@@ -8691,22 +8730,16 @@ function modLinks(H,L,sc,selE){
   }
 }
 // ---- Make path: the selected entity's "target" set to the next entity clicked -------------
-// The clicked one keeps its targetname, or gets the next free "t<N>" (as MOHRadiant names
-// them); a map entity given one this way becomes a changed row. The clicked one is
-// selected after, so Make path again goes on along the path.
+// Only an entity that has a targetname can be clicked (the selected one needs none). The
+// clicked one is selected after, so Make path again goes on along the path.
 function modLinkStart(){
   if(MOD.linking){modLinkCancel();return;}
   const m=MOD.ents[MOD.sel];if(!m)return;
   if(MOD.placing)modPlaceCancel();if(MOD.trim)modTrim(false);if(MOD.edit>=0)modEditClose(true);
   MOD.linking={from:m};modRender();
-  flash('Make path: click the entity '+modName(m)+'\'s "target" should point at (Esc cancels)');
+  flash('Make path: click an entity with a targetname for '+modName(m)+'\'s "target" to point at (Esc cancels)');
 }
 function modLinkCancel(){if(!MOD.linking)return;MOD.linking=null;modRender();flash('No target set');}
-function modFreeName(){
-  const used=new Set(ENTS.tn.keys());for(const m of MOD.ents){const t=modKv(m,'targetname');if(t)used.add(t);}
-  let n=1;for(const t of used){const r=/^t(\d+)$/.exec(t);if(r)n=Math.max(n,+r[1]+1);}
-  while(used.has('t'+n))n++;return 't'+n;
-}
 function modLinkClick(x,y){
   const L=MOD.linking;if(!L)return false;
   const src=L.from,si=MOD.ents.indexOf(src);if(si<0){modLinkCancel();return true;}
@@ -8718,11 +8751,9 @@ function modLinkClick(x,y){
     to=MOD.ents.find(m=>m.ei===ei)||null;if(!to)toEi=ei;}
   if(to===src||(toEi>=0&&src.ei===toEi)){flash('An entity can\'t target itself: click another (Esc cancels)');return true;}
   let name=to?modKv(to,'targetname'):MAP.ents[toEi].kvl.targetname;
-  if(!name){
-    name=modFreeName();
-    if(!to){if(!modTakes(toEi)){flash(entName(toEi)+' has no targetname and isn\'t one Modify can change (a brush entity or static prop): give the source\'s target by hand');return true;}
-      const kv=MAP.ents[toEi].kv.map(x=>[x[0],x[1]]);to={id:MOD.nid++,ei:toEi,kv:kv,orig:kv.map(x=>x.slice())};MOD.ents.push(to);}
-    modSetKv(to,'targetname',name);}
+  // a target needs a targetname to point at: the one clicked must have one already (the
+  // selected one needs none)
+  if(!name){flash((to?modName(to):entName(toEi))+' has no targetname, so nothing can target it: click one that has one, or give it a "targetname" first (Esc cancels)');return true;}
   modSetKv(src,'target',name);
   MOD.linking=null;
   // the clicked one is selected next, to go on along the path
@@ -9188,7 +9219,7 @@ function modRender(){
   MOD.ents.forEach((m,i)=>{const o=modOrigin(m),c=modColour(m),rgb='rgb('+c.map(v=>Math.round(v*255)).join(',')+')',map=modIsMap(m),ch=map&&modEdited(m);
     const tag=map?'<span class="mtag'+(ch?' ch':'')+'" title="'+(ch?'one of the map\'s own entities, changed here (not saved yet)':'one of the map\'s own entities, as the map has it')+'">#'+m.ei+(ch?' changed':' map')+'</span>':'<span class="mtag nw" title="added here, not saved yet">new</span>';
     h+='<div class="li'+(i===MOD.sel?' sel':'')+(m.hid?' hid':'')+'" data-mi="'+i+'" title="'+esc(modText(m))+'\n\nShift+click the name: '+(i===MOD.sel?'deselect it':'select it')+' · Shift+click the square: '+(m.hid?'show':'hide')+' it"><span class="sw" style="'+(map?'border:2px solid '+rgb+';background:transparent':'background:'+rgb)+'"></span><span class="nm">'+esc(modName(m))+'</span>'+tag+'<span class="ct">( '+o.map(v=>+v.toFixed(1)).join(' ')+' )'+(modBusy(i)?' · editing':'')+'</span></div>';});
-  L.innerHTML=(MOD.linking?'<div class="co" style="color:var(--accent)">Click an entity to set '+esc(modName(MOD.linking.from))+'\'s "target" to it (Esc or Make path again cancels).</div>':'')+(MOD.placing?'<div class="co" style="color:var(--accent)">Click anywhere on the map to '+(MOD.placing.move!=null?'move':'place')+' the '+esc(MOD.placing.cls)+' (Esc or '+(MOD.placing.move!=null?'Move':'Add')+' again cancels).</div>':'')+
+  L.innerHTML=(MOD.linking?'<div class="co" style="color:var(--accent)">Click an entity that has a targetname to set '+esc(modName(MOD.linking.from))+'\'s "target" to it (Esc or Make path again cancels).</div>':'')+(MOD.placing?'<div class="co" style="color:var(--accent)">Click anywhere on the map to '+(MOD.placing.move!=null?'move':'place')+' the '+esc(MOD.placing.cls)+' (Esc or '+(MOD.placing.move!=null?'Move':'Add')+' again cancels).</div>':'')+
     (h||(MOD.placing?'':'<div class="co">Nothing added yet. Add, then click on the map to place it; new entities stay see-through until saved.</div>'));
   $('bModAdd').classList.toggle('on',!!MOD.placing&&MOD.placing.move==null);
   const has=MOD.ents[MOD.sel]!=null;
