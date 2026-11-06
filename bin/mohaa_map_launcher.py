@@ -55,7 +55,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 98
+MAP_VIEWER_REV_REQUIRED = 100
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".bak": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".lin": "bin", ".cfg": "scr"}
@@ -1238,7 +1238,8 @@ class MapApp(ML.App):
             title="Save the map with the new entities as" + (" a .bsp" if kind == "bsp" else " a .map"),
             initialdir=init_dir if os.path.isdir(init_dir) else None, initialfile=name + "_mod." + kind,
             defaultextension="." + kind, filetypes=[("MOHAA " + ("compiled map" if kind == "bsp" else "map source"), "*." + kind)])
-        if not out: return
+        if not out:
+            self._page_js("try{modSaveCancelled()}catch(e){}"); return
         out = os.path.abspath(out)
         made = set(self._cfg.get("modify_written") or [])
         same = lambda a, b: bool(a) and os.path.normcase(os.path.abspath(a)) == os.path.normcase(out)
@@ -1273,6 +1274,82 @@ class MapApp(ML.App):
             if stem.lower() != name.lower():
                 self._log_line(f"  (a new name is a new map: the game runs maps/{stem}.scr with it, not maps/{name}.scr - "
                                f"copy or rename the script, or keep the name {name}.bsp in another folder)", "dim")
+
+    # ------------------------------------------------ MODIFY: unsaved changes on close ---
+    def _close_ask(self, info):
+        """The viewer is closing (Esc past its last layer) with MODIFY's new or changed
+        entities not saved: Save as .bsp / Save as .map (the viewer closes once the file is
+        written), Discard changes (close now), or Cancel (stay; Esc and the window's X too)."""
+        def num(k):
+            try: return max(0, int(info.get(k) or 0))
+            except (TypeError, ValueError): return 0
+        nw, ch, is_bsp = num("new"), num("changed"), bool(info.get("isBsp"))
+        parts = []
+        if nw: parts.append(f"{nw} new entit{'y' if nw == 1 else 'ies'}")
+        if ch: parts.append(f"{ch} changed entit{'y' if ch == 1 else 'ies'}")
+        what = " and ".join(parts) or "changes"
+        name = str(info.get("name") or "this map")[:80]
+        choice = self._unsaved_dialog(
+            "Unsaved changes",
+            f"MODIFY has {what} in {name} that {'is' if (nw + ch) == 1 else 'are'} not saved.",
+            "Save them before closing the viewer?" + ("" if is_bsp else
+            "\n(this map was opened from a .map: Save as .bsp needs its .bsp)"),
+            [("bsp", "Save as .bsp", is_bsp), ("map", "Save as .map", True),
+             ("discard", "Discard changes", True), ("cancel", "Cancel", True)])
+        if choice in ("bsp", "map"):
+            self._page_js("try{modSaveThenClose(%s)}catch(e){}" % json.dumps(choice))
+        elif choice == "discard":
+            self._log_line("  (MODIFY's unsaved changes discarded)", "dim")
+            self._close_viewer()
+
+    def _unsaved_dialog(self, title, head, body, buttons):
+        """A modal choice in the launcher's look (dark / light), or the system's own look
+        with "Use old popup windows" on. buttons: (key, text, enabled); returns the key
+        picked, "cancel" for Esc or the window's X. Cancel has the focus, so Enter or Space
+        straight away doesn't throw anything away."""
+        old = ML.OLD_POPUPS
+        w = tk.Toplevel(self); w.title(title)
+        w.transient(self); w.resizable(False, False)
+        res = {"k": "cancel"}
+
+        def pick(k):
+            res["k"] = k; w.destroy()
+        if old:
+            frm = tk.Frame(w); frm.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+            tk.Label(frm, text=head, justify="left", anchor="w").pack(anchor="w", pady=(0, 4))
+            tk.Label(frm, text=body, justify="left", anchor="w").pack(anchor="w")
+            row = tk.Frame(w); row.pack(padx=10, pady=(6, 12))
+            mk = lambda t, c: tk.Button(row, text=t, command=c, width=max(10, len(t) + 2))
+        else:
+            w.configure(bg=ML.BG)
+            frm = ttk.Frame(w, style="Panel.TFrame"); frm.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+            ttk.Label(frm, text=head, style="Panel.TLabel", foreground=ML.ACCENT, justify="left"
+                      ).pack(anchor="w", padx=10, pady=(8, 4))
+            ttk.Label(frm, text=body, style="Panel.TLabel", justify="left").pack(anchor="w", padx=10, pady=(0, 8))
+            row = ttk.Frame(w, style="Panel.TFrame"); row.pack(fill="x", padx=10, pady=(0, 10), ipady=4)
+            mk = lambda t, c: ttk.Button(row, text=t, command=c, cursor="hand2")
+        cancel = None
+        for k, text, ok in buttons:
+            b = mk(text, lambda k=k: pick(k)); b.pack(side="left", padx=5)
+            if not ok: b.configure(state="disabled")
+            if k == "cancel": cancel = b
+        w.protocol("WM_DELETE_WINDOW", lambda: pick("cancel"))
+        w.bind("<Escape>", lambda e: pick("cancel"))
+        # Enter presses the button that has the focus (ttk's own buttons don't by themselves)
+        w.bind("<Return>", lambda e: (e.widget.invoke() if hasattr(e.widget, "invoke") else None))
+        try:
+            w.update_idletasks()
+            x = self.winfo_rootx() + (self.winfo_width() - w.winfo_width()) // 2
+            y = self.winfo_rooty() + (self.winfo_height() - w.winfo_height()) // 2
+            x0, y0, _x1, _y1 = ML._virtual_screen(w)
+            w.geometry(f"+{max(x0, x)}+{max(y0, y)}")
+        except Exception: MC.swallowed()
+        if not old: self._apply_titlebar(w)
+        try: w.grab_set()
+        except Exception: MC.swallowed()
+        if cancel is not None: cancel.focus_set()
+        self.wait_window(w)
+        return res["k"]
 
     # Text editors that open a file at a line, and how: {program name: args(file, line)}.
     _EDITOR_LINE = {
@@ -1435,6 +1512,12 @@ class MapApp(ML.App):
                     elif m == "mohaa-close":
                         # runs on the WebView2 thread: hand it to the Tk main thread
                         self._log_q.put(("closeview", None))
+                    elif m.startswith("mohaa-close-ask\n"):
+                        # closing with MODIFY's changes unsaved: "mohaa-close-ask\n{json}"
+                        try: info = json.loads(m.split("\n", 1)[1])
+                        except Exception: MC.swallowed(); info = None
+                        if not isinstance(info, dict): info = {}
+                        self._page_requests.append(lambda i=info: self._close_ask(i))
                     elif m.startswith("mohaa-open-map\n"):
                         # an info card's Open: the .map at a line (and the .map the page was built from)
                         parts = (m.split("\n") + ["", ""])[1:3]

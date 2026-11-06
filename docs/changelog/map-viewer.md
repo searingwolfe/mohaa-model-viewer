@@ -525,7 +525,11 @@ run at once.
     the earlier one is linked, so routes still end there; m1l1 has two `$friendlynode`s
     at one origin, entities 111 and 705). A map node's tag sits under its class label, a new
     node's over it; within `ai_showroutes_distance`, past 350 units only in sight.
-    Modify's own problems (48 paths, cut off, cell full) join the same tag. The `.pth` is `maps/<map>.pth` in the paks (else beside the file),
+    Modify's own problems (48 paths, cut off, cell full) join the same tag. **AI errors**
+    (SHOW, after AI routes; `AIERR`) shows or hides the tags that report a problem: no
+    paths, one-way, own group of N and in the wall. It turns on and off with AI routes and
+    can be turned off while AI routes stays on; DONT_LINK, duplicate, 48 paths and cell
+    full always show. The `.pth` is `maps/<map>.pth` in the paks (else beside the file),
     unpacked (`CSVG` + LZ77, `lz77.cpp`) and read as `PathSearch::ArchiveLoadNodes` reads
     it, typed (the game's own files) or untyped (OpenMoHAA's); node i is the map's i-th
     `info_pathnode`, and a count mismatch is flagged. A path node's info card lists its
@@ -1081,7 +1085,17 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
   refused. A map from a pak is copied out of the pak. A new file name is a new map: the
   game runs `maps/<newname>.scr` with it, so the map's script needs copying or renaming
   (the launcher's Output says so). Save as .map writes the `.map` with the new entities
-  added. Copy puts the new entities on the clipboard as entity-lump text. Outside the launcher, Save as .map downloads the file and
+  added. Copy puts the new entities on the clipboard as entity-lump text. **Unsaved
+  changes**: when Esc gets past its last layer and would close the viewer while Modify has
+  new or changed entities that no Save as wrote (`modUnsaved`: what Save would write,
+  compared with what the last successful save wrote, `MOD.savedKey`), the page sends
+  `mohaa-close-ask` instead of `mohaa-close`, and the launcher asks (`MapApp._close_ask`,
+  `_unsaved_dialog`, in the launcher's dark / light look or the system's with "Use old
+  popup windows"): **Save as .bsp** (greyed out for a map opened from a .map), **Save as
+  .map**, **Discard changes**, or **Cancel** (Esc, the window's X; Cancel has the focus).
+  A Save as closes the viewer once the file is written (`modSaveThenClose`); cancelling
+  its file box keeps the viewer open (`modSaveCancelled`). In a browser the page asks with
+  the browser's own box. Outside the launcher, Save as .map downloads the file and
   Save as .bsp isn't available.
 
 ## Simulate

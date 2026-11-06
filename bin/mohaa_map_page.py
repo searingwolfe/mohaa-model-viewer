@@ -409,7 +409,7 @@ __KEYS_CSS__
    </div>
    <div class="sect">
      <h2>Show</h2>
-     <div class="tg" style="margin-bottom:7px"><button id="bFull" title="Full Brightness (B). Off: the map lit the way the game lights it (lightmaps, vertex light). On: every texture at full brightness, as MOHRadiant shows it.">Full Brightness<span class="k">B</span></button><button id="bSimpleSky" title="Simple Sky (K). On: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off: the game's sky box and its moving clouds, drawn behind everything, so whatever is behind a sky brush shows through it as in game.">Simple Sky<span class="k">K</span></button><button id="bSimpleMod" title="Simple models (M). On: each tree that has a sprite version is drawn as that sprite alone, the way the game draws trees far away; it turns about its upright axis to face the camera. Off: the whole tree. Models with no sprite version (bushes, props) don't change.">Simple models<span class="k">M</span></button><button id="bRoutes" title="AI routes: the game cvar ai_showroutes (game cvars, `): the connections the AI can walk between path nodes, from the map's .pth file (worked out here when it has none, and for Modify's new nodes), green both ways, a red arrowhead one way. Only the nodes within ai_showroutes_distance of the camera (I)">AI routes<span class="k">I</span></button><button id="bSunFlare" title="Sun flare (J). On: the game's lens flare, drawn as the game draws it when the view looks toward the map's sun and nothing solid is between the camera and the sky that way, with the screen's glare that fades when the sun goes out of sight. Off: no flare, as in MOHRadiant.">Sun flare<span class="k">J</span></button></div>
+     <div class="tg" style="margin-bottom:7px"><button id="bFull" title="Full Brightness (B). Off: the map lit the way the game lights it (lightmaps, vertex light). On: every texture at full brightness, as MOHRadiant shows it.">Full Brightness<span class="k">B</span></button><button id="bSimpleSky" title="Simple Sky (K). On: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off: the game's sky box and its moving clouds, drawn behind everything, so whatever is behind a sky brush shows through it as in game.">Simple Sky<span class="k">K</span></button><button id="bSimpleMod" title="Simple models (M). On: each tree that has a sprite version is drawn as that sprite alone, the way the game draws trees far away; it turns about its upright axis to face the camera. Off: the whole tree. Models with no sprite version (bushes, props) don't change.">Simple models<span class="k">M</span></button><button id="bRoutes" title="AI routes: the game cvar ai_showroutes (game cvars, `): the connections the AI can walk between path nodes, from the map's .pth file (worked out here when it has none, and for Modify's new nodes), green both ways, a red arrowhead one way. Only the nodes within ai_showroutes_distance of the camera (I)">AI routes<span class="k">I</span></button><button id="bAiErr" title="AI errors: the tags over path nodes saying what is wrong with them: no paths, N one-way, own group of N (joined to each other but not to the map's other nodes), in the wall. On by itself when AI routes is turned on and off when it is turned off; click to hide or show them while AI routes stays on. Tags that aren't errors (DONT_LINK, a duplicate, 48 paths or a cell full) stay">AI errors</button><button id="bSunFlare" title="Sun flare (J). On: the game's lens flare, drawn as the game draws it when the view looks toward the map's sun and nothing solid is between the camera and the sky that way, with the screen's glare that fades when the sun goes out of sight. Off: no flare, as in MOHRadiant.">Sun flare<span class="k">J</span></button></div>
      <div class="tg" id="filtBtns" style="margin-bottom:7px"></div>
      <button id="bShowAll" title="Show every group (Ctrl+A)">All<span class="k">Ctrl+A</span></button>
      <!-- the two looks, as wide as the panel like the cameras' buttons; each is on while the
@@ -1225,6 +1225,10 @@ function nodeName(A,j){
 // red X: no connection the AI can take), "N one-way" (red arrowheads: it can go but not
 // come back, a drop past ai_fallheight back up), "DONT_LINK" (the blue circle: its
 // spawnflag keeps it unlinked, on purpose). One tag a node, over its label.
+// AI errors (the button by AI routes): its "no paths", "one-way", "own group" and "in the
+// wall" tags. It follows AI routes (setCvar), and can be turned off while AI routes is on.
+let AIERR=false;
+const AIERR_KINDS={none:1,island:1,wall:1};
 function drawPathIssues2D(){
   const R=PA_ISS,useR=!!(R&&(R.n||R.info)&&MOD.ents.length&&R.A===PA_C);
   const RT=CVARS.ai_showroutes&&ROUTES&&ROUTES.tags&&ROUTES.A===PA_C?ROUTES:null;
@@ -1232,20 +1236,20 @@ function drawPathIssues2D(){
   const A=useR?R.A:RT.A,lbl={links:'48 paths: full',none:'no paths',island:'own group',cell:'cell full: Node overflow',wall:'in the wall'};
   const out=new Map();          // node -> [texts], worst colour
   const add=(i,t,lv)=>{let o=out.get(i);if(!o){o={t:[],lv:0};out.set(i,o);}if(!o.t.includes(t))o.t.push(t);o.lv=Math.max(o.lv,lv);};
-  if(useR)for(const[i,l]of R.node)for(const x of l)add(i,x.lbl||lbl[x.k],x.lv==null?2:x.lv);
+  if(useR)for(const[i,l]of R.node)for(const x of l){if(!AIERR&&AIERR_KINDS[x.k])continue;add(i,x.lbl||lbl[x.k],x.lv==null?2:x.lv);}
   if(RT){const far=CVARS.ai_showroutes_distance;
     for(const[i,t]of RT.tags){const p=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40];
       const d=Math.hypot(p[0]-cam.pos[0],p[1]-cam.pos[1],p[2]-cam.pos[2]);
       if(d>far||(d>350&&!lblSeen('r'+i,p)))continue;
-      if(t.none)add(i,'no paths',2);
-      if(t.ow)add(i,t.ow+' one-way',1);
+      if(t.none&&AIERR)add(i,'no paths',2);
+      if(t.ow&&AIERR)add(i,t.ow+' one-way',1);
       // DONT_LINK from its own spawnflag is on purpose; without it the game set it while
       // loading: dropped to the floor, the node lands on the very spot of an earlier one
       // ("^~^~^ Duplicate node at (...) not linked", PathSearch::LoadNodes)
       if(t.dl){if(nodeSpawnflags(A,i)&1)add(i,'\u2298 DONT_LINK',0);
         else{if(t.dup===undefined)t.dup=nodeDupOf(A,i);
           add(i,'duplicate of '+(t.dup>=0?nodeName(A,t.dup):'another node')+': not linked',2);}}}
-    for(let i=0;i<A.n;i++){if(A.f[i]&1)continue;const p=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40];
+    if(AIERR)for(let i=0;i<A.n;i++){if(A.f[i]&1)continue;const p=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40];
       const d=Math.hypot(p[0]-cam.pos[0],p[1]-cam.pos[1],p[2]-cam.pos[2]);
       if(d>far||(d>350&&!lblSeen('r'+i,p)))continue;
       if(nodeWall([A.o[i*3],A.o[i*3+1],A.o[i*3+2]]))add(i,'in the wall',2);}}
@@ -1294,9 +1298,15 @@ function toggleHelp(force){const show=(force!==undefined)?force:(helpOv.style.di
   if(KX){if(show)KX.show(camMode==='rad'?'rad':'free');else KX.hide();}}
 $('bHelp').onclick=()=>toggleHelp();
 helpOv.addEventListener('click',e=>{if(e.target===helpOv)toggleHelp(false);});
-function closeViewer(){
+function closeViewer(force){
+  // MODIFY's new or changed entities not saved: the launcher asks first (Save as .bsp,
+  // Save as .map, Discard changes, Cancel); a browser asks with its own box
+  const un=!force&&typeof modUnsaved==='function'?modUnsaved():null;
   // In the launcher's pane the host returns to its start page; in a browser tab, just close.
-  try{if(window.chrome&&window.chrome.webview){window.chrome.webview.postMessage('mohaa-close');return;}}catch(_e){}
+  try{if(window.chrome&&window.chrome.webview){
+    if(un){window.chrome.webview.postMessage('mohaa-close-ask\n'+JSON.stringify({new:un.nw,changed:un.ch,isBsp:D.kind==='bsp',name:D.name||''}));return;}
+    window.chrome.webview.postMessage('mohaa-close');return;}}catch(_e){}
+  if(un&&!window.confirm('MODIFY has '+un.nw+' new and '+un.ch+' changed entities that are not saved. Close anyway and lose them?'))return;
   try{window.close();}catch(_e){}
 }
 
@@ -7177,6 +7187,7 @@ function setCvar(name,val){
   const n=CVAR_NAMES[String(name).toLowerCase()];if(!n)return false;
   const v=cvarClamp(n,val);if(v==null)return false;
   if(n==='cg_weather'){if(!wxPreset(v))return false;}
+  if(n==='ai_showroutes'&&!!v!==!!CVARS[n])AIERR=!!v;     // AI errors follows AI routes
   CVARS[n]=v;
   if(n==='cg_rain_wholemap')WX.world=null;
   if(n.startsWith('cg_rain')||n==='cg_weather'||n==='ai_showroutes')syncButtons();
@@ -8069,7 +8080,8 @@ function buildPanel(){
   const fb=$('filtBtns');
   for(const f of FILTERS){const b=document.createElement('button');b.innerHTML=esc(f.l)+(f.key?'<span class="k">'+f.key+'</span>':'');
     b.title=f.t+(f.key?' ('+f.key+')':'')+' - click to show / hide';f.el=b;b.onclick=()=>toggleFilter(f.m);fb.appendChild(b);}
-  fb.appendChild($('bRoutes'));          // AI routes and All go last, after Origin and Point ents
+  fb.appendChild($('bRoutes'));          // AI routes, AI errors and All go last, after Origin and Point ents
+  fb.appendChild($('bAiErr'));
   fb.appendChild($('bShowAll'));
   $('bFull').onclick=toggleFullBright;
   if(!LIT){$('bFull').disabled=true;
@@ -8080,6 +8092,9 @@ function buildPanel(){
   $('bSunFlare').onclick=toggleSunFlare;
   $('bRoutes').onclick=()=>{setCvar('ai_showroutes',CVARS.ai_showroutes?0:1);syncButtons();
     flash(CVARS.ai_showroutes?'AI routes on (ai_showroutes 1)':'AI routes off (ai_showroutes 0)');};
+  AIERR=!!CVARS.ai_showroutes;
+  $('bAiErr').onclick=()=>{AIERR=!AIERR;syncButtons();requestDraw();
+    flash(AIERR?'AI errors shown: no paths, one-way, own group, in the wall':'AI errors hidden');};
   if(!routesOk()){$('bRoutes').disabled=true;$('bRoutes').title='This map has no AI paths (no .pth file in the paks, or one the viewer couldn\'t read): ai_showroutes has nothing to draw';}
   if(!sunHas()){$('bSunFlare').disabled=true;$('bSunFlare').title=sunNone();}
   $('bShowAll').onclick=showAllGroups;$('bGameView').onclick=gameLook;$('bEditView').onclick=editorLook;
@@ -8145,6 +8160,7 @@ function syncButtons(){
   $('bSimpleMod').classList.toggle('on',simpleModels);
   $('bSunFlare').classList.toggle('on',sunFlare&&sunHas());
   $('bRoutes').classList.toggle('on',!!CVARS.ai_showroutes&&routesOk());
+  $('bAiErr').classList.toggle('on',AIERR);
   // a look is on while everything it sets is still as it set it
   $('bGameView').classList.toggle('on',hiddenMask===GAME_LOOK&&!simpleSky&&!fullBright&&flareAs(true));
   $('bEditView').classList.toggle('on',hiddenMask===EDIT_LOOK&&simpleSky&&fullBright&&flareAs(false));
@@ -9958,13 +9974,27 @@ function modMapText(){
 }
 function modCopyText(){const ch=MOD.ents.filter(m=>modIsMap(m)&&modEdited(m));
   return (ch.length?'// changed (entity number in the map)\n'+ch.map(m=>'// entity '+m.ei+'\n'+modText(m)).join('\n')+'\n// new\n':'')+modEntsText();}
+// What Save would write, to tell whether it has been saved: the new entities' text and the
+// map's changed ones (modSaved keeps it once a save goes through)
+function modSaveKey(){return JSON.stringify([modEntsText(),modSets().map(x=>[x.ei,x.kv])]);}
+// MODIFY's changes not saved yet as a .bsp or .map: {nw new, ch changed}, else null
+function modUnsaved(){
+  if(!MOD||!MOD.ents)return null;
+  const nw=MOD.ents.filter(m=>!modIsMap(m)).length,ch=MOD.ents.filter(m=>modIsMap(m)&&modEdited(m)).length;
+  if(!nw&&!ch)return null;
+  return modSaveKey()===MOD.savedKey?null:{nw:nw,ch:ch};
+}
+// the launcher's close question answered with Save as: save, then close once it is written
+function modSaveThenClose(kind){MOD.closeAfter=true;modSave(kind==='map'?'map':'bsp');}
+function modSaveCancelled(){MOD.closeAfter=false;MOD.pendKey=null;flash('Not saved');}
 function modSave(kind){
   if(MOD.edit>=0)modEditClose(true);
   if(MOD.trim)modTrim(false);
   const sets=modSets(),nw=MOD.ents.filter(m=>!modIsMap(m));
   if(!sets.length&&!nw.length)return;
   const nodes=nw.filter(modIsNode).length,have=pnEnts().length;
-  if(have+nodes>4096){flash('More than 4096 path nodes: the game can\'t load that many');return;}
+  if(have+nodes>4096){MOD.closeAfter=false;flash('More than 4096 path nodes: the game can\'t load that many');return;}
+  MOD.pendKey=modSaveKey();
   const req={kind:kind,ents:nw.length?modEntsText():'',set:sets,mapText:kind==='map'?modMapText():null,src:D.srcFile||'',vpath:D.path||'',mapFile:(D.bsp&&D.bsp.mapFile)||'',isBsp:D.kind==='bsp',name:D.name||''};
   try{if(window.chrome&&window.chrome.webview){window.chrome.webview.postMessage('mohaa-modify-save\n'+JSON.stringify(req));
     flash('Saving: choose where in the launcher');return;}}catch(_e){}
@@ -9975,7 +10005,11 @@ function modSave(kind){
   else flash('Save as .bsp works from the launcher (open this map there); Copy gives the new entities as entity-lump text');
 }
 // the launcher's answer
-function modSaved(ok,msg){flash(msg);$('modStat').textContent=msg;}
+function modSaved(ok,msg){flash(msg);$('modStat').textContent=msg;
+  if(ok&&MOD.pendKey!=null)MOD.savedKey=MOD.pendKey;
+  MOD.pendKey=null;
+  const close=MOD.closeAfter;MOD.closeAfter=false;
+  if(ok&&close)closeViewer();}
 function modInit(){
   $('modClsBtn').onclick=()=>MCL.el?mclClose():mclOpen();
   window.addEventListener('resize',()=>{if(MCL.el)mclClose();});

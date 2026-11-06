@@ -1538,6 +1538,27 @@ Changes to `python_installer_updater.bat` unless noted.
   green with its edges (`drawScriptTrigs`); under Script ents the trigger stays a small
   marker of its class's size (`markerBoxOf`), and selecting it outlines the whole volume.
   Tested with m3l1b's 11 respawned `$minefield` triggers.
+- Map Viewer page rev 100 (`MAP_VIEWER_REV` 100, `MAP_VIEWER_REV_REQUIRED` 100): a new
+  **AI errors** button in SHOW, after AI routes (no hotkey), shows or hides the path-node
+  tags that report a problem: "no paths", "N one-way", "own group of N" and "in the wall",
+  for the map's nodes and Modify's. It turns on when AI routes is turned on and off when
+  AI routes is turned off (whichever way: the button, `I`, the cvar list), and can be
+  turned off while AI routes stays on (`AIERR`, `AIERR_KINDS`; followed in `setCvar`). Tags
+  that aren't errors (DONT_LINK, a duplicate node, 48 paths full, cell full) are always
+  shown. A group of new nodes not yet joined to the map's no longer tags every node with
+  "own group of N" unless AI errors is on.
+- Map Viewer page rev 99 (`MAP_VIEWER_REV` 99, `MAP_VIEWER_REV_REQUIRED` 99): Esc can no
+  longer close the viewer and lose Modify's work without asking. When the last Esc would
+  close it while Modify has new entities or changed map entities that no Save as wrote
+  (`modUnsaved`, against what the last successful save wrote, `MOD.savedKey`), the page
+  sends `mohaa-close-ask` and the launcher shows a choice (`MapApp._close_ask`,
+  `_unsaved_dialog`; dark / light, or the system's look with "Use old popup windows"):
+  **Save as .bsp** (greyed out when the map came from a .map), **Save as .map**, **Discard
+  changes**, **Cancel** (also Esc and the window's X; it has the focus, so Enter can't
+  throw anything away). Saving closes the viewer once the file is written
+  (`modSaveThenClose`); cancelling the file box or a failed save leaves it open
+  (the launcher calls `modSaveCancelled` when the box is cancelled). In a
+  browser the page asks with the browser's own confirm box.
 - Map Viewer page rev 98 (`MAP_VIEWER_REV` 98, `MAP_VIEWER_REV_REQUIRED` 98): Modify.
   The class list leaves out classnames that are model paths (`human/dday_ranger_private`,
   `human//german_wehrmact_grenadier`: the game spawns those as the .tik's own class), so it

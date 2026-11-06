@@ -320,7 +320,9 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
   while the camera stays put, and **AI routes** show its links as soon as it is placed,
   worked out the way the game builds its `.pth`. **Save as .bsp** writes a copy of the
   map with the new entities and a new `map_time`, so the game rebuilds its paths; it
-  never writes over the original. **Save as .map** and **Copy** are there too. Selecting one of the map's own point entities (a broken
+  never writes over the original. **Save as .map** and **Copy** are there too. Closing the
+  viewer with Esc while changes aren't saved asks first: Save as .bsp, Save as .map,
+  Discard changes or Cancel. Selecting one of the map's own point entities (a broken
   path node, say) lists it in Modify too, to edit, move or trim it the same way. **Make path**
   sets the selected entity's `target` by clicking the next one (waypoints, spline paths,
   script origins), drawn as a target link. **Grid** (+) draws a see-through 3D grid of MOHRadiant's sizes (1 to 512)
