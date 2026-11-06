@@ -1538,6 +1538,40 @@ Changes to `python_installer_updater.bat` unless noted.
   green with its edges (`drawScriptTrigs`); under Script ents the trigger stays a small
   marker of its class's size (`markerBoxOf`), and selecting it outlines the whole volume.
   Tested with m3l1b's 11 respawned `$minefield` triggers.
+- Map Viewer page rev 98 (`MAP_VIEWER_REV` 98, `MAP_VIEWER_REV_REQUIRED` 98): Modify.
+  The class list leaves out classnames that are model paths (`human/dday_ranger_private`,
+  `human//german_wehrmact_grenadier`: the game spawns those as the .tik's own class), so it
+  lists classes only (`modClassOk`). An added entity whose class or "model" key names a
+  model is drawn with it (`modTik`, `modModelR`, `modModelsInst`): the map's own mesh when
+  the map places that model, else one the launcher builds from the paks as Simulate's
+  (`mohaa-sim-build`), its box only outlined meanwhile; before, every added entity was its
+  class's box. A path node in a group of its own (joined to Modify's other nodes but not to
+  the map's) is no longer a problem: "own group of N", blue, in the node's card in the
+  note colour, and left out of the problem count and the Output lines. It used to read
+  "cut off: Path not found", which only happens when someone is sent across. New check,
+  not one the game makes: **in the wall**, a path node where a man standing on it (the
+  actor's 30-by-94 capsule, lifted one 18-unit step) starts inside the map, with how far
+  and which way clears it (`nodeWall`), for Modify's nodes in their issues and for the
+  map's own in their card and, with AI routes on, as a tag. **Alt+A** is Add. In free-look,
+  **Ctrl+W** / **Ctrl+S** move forward and back level with the ground, as Up / Down do
+  (plain W / S still go along the view line). Modify's list is under its buttons, newest
+  first. Shift+click on added entities (in the view or the list) selects several
+  (`MOD.multi`); **Copy** (Alt+C) copies the selection, the map's own selected entities too,
+  without targetname or target, and the copies follow the mouse together, spaced as they
+  were, until a click puts them down (Esc takes them away); **Move** and **Trim origin** take
+  the whole selection, and **Delete** removes it. **Undo** (Alt+Z) and **Redo** (Alt+Y or
+  Alt+Shift+Z) step through every change to Modify's entities back to none added
+  (`modHist`, `modUndoGo`; a whole Trim origin is one step). The Save row's Copy is now
+  **Copy text**.
+  Every note the status line flashes (green, at the bottom of the view: "No .pth for this
+  map: its AI paths were worked out here", "Placed ...", "Undone ...") is also a line in the
+  launcher's Output pane (`hostLog`, tag `ok`); the same note again within 2 s only once.
+- Map Viewer page rev 97 (`MAP_VIEWER_REV` 97, `MAP_VIEWER_REV_REQUIRED` 97): a script
+  trigger's volume (Script trigs) can be clicked: its sides go into the pick pass with the
+  entity's pick id (`pickScriptTrigs`), so a click on one selects the whole trigger, as a
+  click on a trigger brush does, and the mouse-over outlines it. While selected it is
+  tinted with the selection's colour instead of a brighter green. With Script trigs off it
+  can't be clicked. Before, a click went through it to the terrain.
 - Map Viewer page rev 96 (`MAP_VIEWER_REV` 96, `MAP_VIEWER_REV_REQUIRED` 96): Simulate's
   controls. **Simulate** and **Reset** moved from SELECTION to the top of the SIMULATE
   section. Follow with the camera is split into **Follow** and **Eye view**: Follow alone

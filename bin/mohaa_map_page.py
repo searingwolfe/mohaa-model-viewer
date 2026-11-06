@@ -425,9 +425,8 @@ __KEYS_CSS__
      <h2>Modify</h2>
      <div class="row" style="gap:5px">
        <button id="modClsBtn" style="flex:1;min-width:0" title="The class of the entity to add. Type to search every class - the entity definitions' and the map's - then click a row or press Enter to take the top match."><span class="albl">info_pathnode</span><span class="acar">&#9668;</span></button>
-       <button class="sm" id="bModAdd" title="Add an entity of this class: then click anywhere on the map to place it there (a path node goes 16 units over the spot; the game drops it to the floor). Esc or Add again cancels. It stays see-through, and out of the map's own lists, until saved">Add</button>
+       <button class="sm" id="bModAdd" title="Add an entity of this class: then click anywhere on the map to place it there (a path node goes 16 units over the spot; the game drops it to the floor). Esc or Add again cancels. It stays see-through, and out of the map's own lists, until saved&#10;&#10;Hotkey: Alt+A">Add</button>
      </div>
-     <div id="modList" style="margin-top:6px"></div>
      <div class="row" style="gap:4px;flex-wrap:wrap;margin-top:6px">
        <button class="sm" id="bModEdit" title="Edit the entity as the .bsp's entity lump holds it: &quot;key&quot; &quot;value&quot; lines, applied as you type. A path node joins the AI's paths again when you're done&#10;&#10;Hotkey: Alt+E">Edit parameters</button>
        <button class="sm" id="bModMove" title="Move: the selected entity follows the mouse again; a click on the map puts it there (Esc or Move again cancels). Off while Trim origin is on&#10;&#10;Hotkey: Alt+M">Move</button>
@@ -436,14 +435,19 @@ __KEYS_CSS__
        <button class="sm" id="bModEye" title="Eye view: put the camera where the entity sees from, as Eye view does for the map's entities: a path node, a player start or an AI 82 units above the floor under it, anything else at its origin, facing its angles, else its target, else yaw 0">Eye view</button>
        <button class="sm" id="bModFly" title="Fly the camera to the entity&#10;&#10;Hotkey: click its row in the list again once it is selected (green), or double-click the row">Fly to</button>
        <button class="sm" id="bModDel" title="Remove the entity&#10;&#10;Hotkey: Delete">Delete</button>
+       <button class="sm" id="bModDup" title="Copy: the selected entities again (Shift+click adds more to the selection, the map's own entities selected in the view too), without targetname or target. They follow the mouse together, spaced as they are, until a click puts them down; Esc takes them away&#10;&#10;Hotkey: Alt+C">Copy</button>
+       <button class="sm" id="bModHUndo" title="Undo the last change to Modify's entities, back to none added&#10;&#10;Hotkey: Alt+Z">Undo</button>
+       <button class="sm" id="bModHRedo" title="Redo the last change undone&#10;&#10;Hotkey: Alt+Y or Alt+Shift+Z">Redo</button>
      </div>
      <div class="row co" style="margin-top:6px">trim step <input type="range" id="modStep" min="0" max="13" step="1" value="4" title="How far one key press of Trim origin moves it, 1 to 50 units"><span id="modStepV" style="min-width:22px;text-align:right">5</span></div>
      <div class="row" style="gap:4px;flex-wrap:wrap">
        <button class="sm" id="bModSaveBsp" title="Save a copy of the .bsp with the new entities in its entity lump (everything else byte for byte) and a new &quot;map_time&quot;, so the game rebuilds the AI's .pth. Never over the original">Save as .bsp</button>
        <button class="sm" id="bModSaveMap" title="Save the .map with the new entities added, as a new file">Save as .map</button>
-       <button class="sm" id="bModCopy" title="Copy the new entities as entity-lump text">Copy</button>
+       <button class="sm" id="bModCopy" title="Copy the new entities as entity-lump text">Copy text</button>
      </div>
      <div class="co" id="modStat" style="margin-top:4px"></div>
+     <!-- the entities, newest first, under the buttons so Add stays beside them however long it gets -->
+     <div id="modList" style="margin-top:6px"></div>
    </div>
    <div class="sect">
      <h2>Find</h2>
@@ -1070,9 +1074,15 @@ function copyText(s,msg){
   function fallback(){const ta=document.createElement('textarea');ta.value=s;ta.style.position='fixed';ta.style.opacity='0';
     document.body.appendChild(ta);ta.select();try{document.execCommand('copy');done();}catch(_e){}ta.remove();}
 }
-let _flashT=null;
+let _flashT=null,_flashLog='',_flashLogT=0;
+// a note in the status line, for a moment; the same line goes in the launcher's Output pane
+// too (in a browser, the console), once: the same note again within 2 s (a held key, a
+// repeated click) isn't written again
 function flash(msg){const h=$('hintHover');h.textContent=msg;h.style.color='var(--accent)';
-  clearTimeout(_flashT);_flashT=setTimeout(()=>{h.style.color='';h.textContent='';},1600);}
+  clearTimeout(_flashT);_flashT=setTimeout(()=>{h.style.color='';h.textContent='';},1600);
+  const s=String(msg==null?'':msg),now=performance.now();
+  if(s&&(s!==_flashLog||now-_flashLogT>2000))hostLog('ok',s);
+  _flashLog=s;_flashLogT=now;}
 
 // Side-panel collapse tab (wired first so it works even if the map fails to load).
 {const tab=$('sideTab'),side=$('side');
@@ -1216,13 +1226,13 @@ function nodeName(A,j){
 // come back, a drop past ai_fallheight back up), "DONT_LINK" (the blue circle: its
 // spawnflag keeps it unlinked, on purpose). One tag a node, over its label.
 function drawPathIssues2D(){
-  const R=PA_ISS,useR=!!(R&&R.n&&MOD.ents.length&&R.A===PA_C);
+  const R=PA_ISS,useR=!!(R&&(R.n||R.info)&&MOD.ents.length&&R.A===PA_C);
   const RT=CVARS.ai_showroutes&&ROUTES&&ROUTES.tags&&ROUTES.A===PA_C?ROUTES:null;
   if(!useR&&!(RT&&RT.tags.size))return;
-  const A=useR?R.A:RT.A,lbl={links:'48 paths: full',none:'no paths',island:'cut off: Path not found',cell:'cell full: Node overflow'};
+  const A=useR?R.A:RT.A,lbl={links:'48 paths: full',none:'no paths',island:'own group',cell:'cell full: Node overflow',wall:'in the wall'};
   const out=new Map();          // node -> [texts], worst colour
   const add=(i,t,lv)=>{let o=out.get(i);if(!o){o={t:[],lv:0};out.set(i,o);}if(!o.t.includes(t))o.t.push(t);o.lv=Math.max(o.lv,lv);};
-  if(useR)for(const[i,l]of R.node)for(const x of l)add(i,lbl[x.k],2);
+  if(useR)for(const[i,l]of R.node)for(const x of l)add(i,x.lbl||lbl[x.k],x.lv==null?2:x.lv);
   if(RT){const far=CVARS.ai_showroutes_distance;
     for(const[i,t]of RT.tags){const p=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40];
       const d=Math.hypot(p[0]-cam.pos[0],p[1]-cam.pos[1],p[2]-cam.pos[2]);
@@ -1234,7 +1244,11 @@ function drawPathIssues2D(){
       // ("^~^~^ Duplicate node at (...) not linked", PathSearch::LoadNodes)
       if(t.dl){if(nodeSpawnflags(A,i)&1)add(i,'\u2298 DONT_LINK',0);
         else{if(t.dup===undefined)t.dup=nodeDupOf(A,i);
-          add(i,'duplicate of '+(t.dup>=0?nodeName(A,t.dup):'another node')+': not linked',2);}}}}
+          add(i,'duplicate of '+(t.dup>=0?nodeName(A,t.dup):'another node')+': not linked',2);}}}
+    for(let i=0;i<A.n;i++){if(A.f[i]&1)continue;const p=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40];
+      const d=Math.hypot(p[0]-cam.pos[0],p[1]-cam.pos[1],p[2]-cam.pos[2]);
+      if(d>far||(d>350&&!lblSeen('r'+i,p)))continue;
+      if(nodeWall([A.o[i*3],A.o[i*3+1],A.o[i*3+2]]))add(i,'in the wall',2);}}
   const col=['#6ea8ff','#ff6b5b','#ffb020'];
   // a map node's tag goes just under its class label (on its entity, where the label is
   // whether or not it is drawn); a new node's, which has no label, 40 units over its spot
@@ -2089,7 +2103,10 @@ function modelR(M,A){
 }
 // the models drawScene draws: the map's, and Simulate's while it flies (not in the pick
 // pass: it is clicked through)
-function modelsDrawn(mode){return(mode===0&&SIM.R&&SIM.R.n)?MODELS.concat([SIM.R]):MODELS;}
+function modelsDrawn(mode){
+  let L=(mode===0&&SIM.R&&SIM.R.n)?MODELS.concat([SIM.R]):MODELS;
+  if(mode===0&&MOD.ents.length){const mr=modModelsInst();if(mr.length)L=L.concat(mr);}
+  return L;}
 // Which of a model's surfaces are drawn: never its camera-facing sprites (drawSprites
 // draws those); a tree that has a sprite version shows the sprite alone with Simple models
 // on, and everything but the sprite with it off.
@@ -2593,6 +2610,8 @@ function drawScene(vp,mode){
     if(gameSky){gl.depthRange(1,1);
       for(const op of drawOps)if(op.sky){bindMat(PW,op.ti,1);drawRuns(op);}
       gl.depthRange(0,1);}
+    // the level script's trigger volumes, as the map's trigger brushes (Script trigs)
+    pickScriptTrigs(vp);
     gl.bindVertexArray(null);return;
   }
   // See-through surfaces, in layers: the game's own (water, glass, glows; a blended
@@ -7606,10 +7625,12 @@ function loop(t){
   const k=c=>keys.has(c), fast=k('Shift')?4:1, a=camAxes(), sp=moveSpeed*fast*dt;
   if(keys.size&&!typing()){
     if(camMode==='free'){
-      const F=k('w')?1:k('s')?-1:0, R=k('d')?1:k('a')?-1:0, U=(k(' ')?1:0)-(k('c')?1:0);
-      // Up / Down: forward and back level with the ground (the way the camera faces, its
-      // pitch taken out), whichever way it looks up or down
-      const FH=k('arrowup')?1:k('arrowdown')?-1:0;
+      // W / S along the view line; with Ctrl held, level with the ground as Up / Down
+      const WS=k('w')?1:k('s')?-1:0, ctl=k('Control');
+      const F=ctl?0:WS, R=k('d')?1:k('a')?-1:0, U=(k(' ')?1:0)-(k('c')?1:0);
+      // Up / Down (and Ctrl+W / Ctrl+S): forward and back level with the ground (the way the
+      // camera faces, its pitch taken out), whichever way it looks up or down
+      const FH=k('arrowup')?1:k('arrowdown')?-1:ctl?WS:0;
       if(FH){const y=cam.yaw*Math.PI/180;moveBy([Math.cos(y),Math.sin(y),0],sp*FH);moved=true;}
       // A / D strafe along the screen's right (the tilted one, a.r) and Space / C rise along
       // the screen's up: world up turned about the view line by the tilt, so with no tilt
@@ -7801,7 +7822,7 @@ window.addEventListener('mouseup',e=>{
   if(d.b===0&&!d.m.shift&&!d.m.ctrl&&!d.m.alt&&!MOD.placing&&leakClick(x,y))return;
   if(d.b===0&&MOD.placing){modPlaceClick(x,y);return;}
   if(d.b===0&&!d.m.alt){const mi=modPick(x,y);if(mi>=0){
-    if(d.m.shift&&mi===MOD.sel)modDeselect();                 // Shift+click: deselect, as a map entity
+    if(d.m.shift&&(MOD.sel>=0||MOD.multi.size))modToggleSel(mi);   // Shift+click: into or out of the selection
     else{
       // a plain click selects only it, so the map's selection (brushes, entities) goes, as
       // a plain click on anything does; Shift+click adds it and keeps them
@@ -7814,6 +7835,8 @@ window.addEventListener('mouseup',e=>{
   // Ctrl+Shift+click only reads the face, so they keep it, and so does one being edited,
   // trimmed or moved
   if(d.b===0&&!d.m.shift&&MOD.sel>=0){const cur=MOD.ents[MOD.sel];if(cur&&!modIsMap(cur)&&!modBusy(MOD.sel))modDeselect();}
+  // and of the others selected with it (a plain click selects only what it picks)
+  if(d.b===0&&!d.m.shift&&MOD.multi.size&&!MOD.trim&&!MOD.placing)MOD.multi.clear();
   if(d.b===0)clickSelect(h,d.m);
   else if(d.b===1)faceInfoAt(h);
 });
@@ -7879,10 +7902,20 @@ window.addEventListener('keydown',e=>{
   // start the camera again, and its release goes to the launcher.
   const camSet=camMode==='free'?CAM_KEYS_FREE:CAM_KEYS_RAD;
   if(e.key==='Shift'||e.key==='Control'){if(!e.repeat||keys.has(e.key))keys.add(e.key);return;}
-  if(camSet.has(kl)&&!e.altKey&&!(e.ctrlKey&&camMode==='free')){
+  // (Ctrl+W / Ctrl+S in free-look: W and S level with the ground; the other Ctrl chords
+  // are left to their own uses)
+  if(camSet.has(kl)&&!e.altKey&&!(e.ctrlKey&&camMode==='free'&&kl!=='w'&&kl!=='s')){
     if(camMode==='rad'&&e.ctrlKey){if(['arrowup','arrowdown',',','.'].includes(kl)){gridStep(kl);e.preventDefault();}return;}
     if(!e.repeat||keys.has(kl))keys.add(kl);
     e.preventDefault();return;}
+  // Alt+C Copy, Alt+Z Undo, Alt+Y / Alt+Shift+Z Redo: Modify's buttons, as clicked
+  if(e.altKey&&!e.ctrlKey&&!e.metaKey&&(kl==='c'||kl==='z'||kl==='y')){
+    const id=kl==='c'?'bModDup':(kl==='y'||e.shiftKey)?'bModHRedo':'bModHUndo',b=$(id);
+    if(b&&!b.disabled)b.click();else if(kl!=='c')flash(id==='bModHUndo'?'Nothing to undo in Modify':'Nothing to redo in Modify');
+    else flash('Select what to copy first (Shift+click adds more)');
+    e.preventDefault();return;}
+  // Alt+A Add: Modify's Add, as clicked (again cancels the placing)
+  if(e.altKey&&!e.ctrlKey&&!e.metaKey&&kl==='a'){const b=$('bModAdd');if(b&&!b.disabled)b.click();e.preventDefault();return;}
   // Alt+M Move, Alt+T Trim origin, Alt+E Edit parameters: Modify's buttons for its selected
   // entity (as clicked, so not while one is off)
   if(e.altKey&&!e.ctrlKey&&!e.metaKey&&(kl==='m'||kl==='t'||kl==='e')){
@@ -7925,9 +7958,9 @@ window.addEventListener('keydown',e=>{
     case 'backspace':{const m=MOD.ents[MOD.sel];
       if(m&&!modIsMap(m)&&!m.hid){const i=MOD.sel;modToggleHide(i);if(MOD.ents[i]&&MOD.ents[i].hid)modDeselect();}
       if(SEL.size)hideSelection();e.preventDefault();break;}
-    case 'delete':{const m=MOD.ents[MOD.sel];
-      if(m&&!modIsMap(m)){const nm=modName(m);modRemove(MOD.sel);MOD.sel=-1;modRender();requestDraw();
-        flash('Deleted: '+nm+' (it was only added in Modify, not saved)');}
+    case 'delete':{const Ln=modSelEnts(false).filter(x=>!modIsMap(x));
+      if(Ln.length){const nm=Ln.length===1?modName(Ln[0]):Ln.length+' entities';modRemoveSel();MOD.sel=-1;MOD.multi.clear();modRender();requestDraw();
+        flash('Deleted: '+nm+' (only added in Modify, not saved; Undo, Alt+Z, puts it back)');}
       else if(SEL.size)flash('Delete removes an entity added in Modify; map entities stay (Backspace hides them)');
       e.preventDefault();break;}
     case '/':$('findIn').focus();e.preventDefault();break;
@@ -8747,7 +8780,7 @@ function infoModDyn(i){
       if(two.length)h+='<div>both ways ('+two.length+'): '+lst(two)+'</div>';
       if(to.length)h+='<div>one way to ('+to.length+'): '+lst(to)+'</div>';
       if(from.length)h+='<div>one way from ('+from.length+'): '+lst(from)+'</div>';
-      for(const x of paIssueList(n))h+='<div class="warn">'+esc(x.t)+'</div>';
+      for(const x of paIssueList(n))h+='<div class="'+(x.lv===0?'note':'warn')+'">'+esc(x.t)+'</div>';
       h+='<div class="note">Links are at most 384 units across the ground, 48 a node and 128 nodes a 256-unit cell; a drop deeper than ai_fallheight ('+fh+', or the actor\'s own fallheight) isn\'t taken, shallower ones one way only.</div>';}
   }
   const d=(D.defs||{})[cls];
@@ -8843,7 +8876,10 @@ function pathNodeInfo(ei){
   if(two.length)h+='<div>both ways ('+two.length+'): '+lst(two)+'</div>';
   if(to.length)h+='<div>one way to ('+to.length+'): '+lst(to)+'</div>';
   if(from.length)h+='<div>one way from ('+from.length+'): '+lst(from)+'</div>';
-  for(const x of paIssueList(i))h+='<div class="warn">'+esc(x.t)+'</div>';
+  const iss=paIssueList(i);
+  for(const x of iss)h+='<div class="'+(x.lv===0?'note':'warn')+'">'+esc(x.t)+'</div>';
+  // the map's own node: room for a man on it (Modify's nodes have it in their issues)
+  if(!(F[i]&1)&&!iss.some(x=>x.k==='wall')){const w=nodeWall([O[i*3],O[i*3+1],O[i*3+2]]);if(w)h+='<div class="warn">'+esc(nodeWallText(w))+'</div>';}
   return h;
 }
 // What a marker's colour (and a path node's outline) means, since MOHRadiant shows no legend.
@@ -9000,7 +9036,8 @@ $('hintLeg').onclick=()=>toggleLegend();
 // all of its paths worked out the first time. Save as .bsp writes a copy of the .bsp with
 // the new entities in its entity lump (the launcher does it, mohaa_bsp.write_bsp_entities);
 // Save as .map writes the .map with them added.
-const MOD={cls:'info_pathnode',ents:[],sel:-1,nid:1,trim:false,edit:-1,flash:{},stepI:4,placing:null,ghost:null,edPos:null};
+const MOD={cls:'info_pathnode',ents:[],sel:-1,nid:1,trim:false,edit:-1,flash:{},stepI:4,placing:null,ghost:null,edPos:null,
+  multi:new Set(),undo:[],redo:[]};
 const MOD_STEPS=[1,2,3,4,5,8,10,12,16,20,25,32,40,50];
 let PA_C=null,PA_GEN=null,PA_PEND=false;
 function modKv(m,k){for(const[a,v]of m.kv)if(a.toLowerCase()===k)return v;return null;}
@@ -9067,7 +9104,7 @@ function modLinkClick(x,y){
   // a target needs a targetname to point at: the one clicked must have one already (the
   // selected one needs none)
   if(!name){flash((to?modName(to):entName(toEi))+' has no targetname, so nothing can target it: click one that has one, or give it a "targetname" first (Esc cancels)');return true;}
-  modSetKv(src,'target',name);
+  modHist();modSetKv(src,'target',name);
   MOD.linking=null;
   // the clicked one is selected next, to go on along the path
   if(to&&!modIsMap(to))modSelect(MOD.ents.indexOf(to));
@@ -9100,7 +9137,63 @@ function modSyncSel(){
   modRender();
 }
 // a temporary node is part of the paths unless it is being edited or trimmed
-function modBusy(i){return MOD.edit===i||(MOD.trim&&MOD.sel===i)||(!!MOD.placing&&MOD.placing.move===i);}
+function modBusy(i){const m=MOD.ents[i],P=MOD.placing;
+  return MOD.edit===i||(MOD.trim&&modIsSel(i))||(!!P&&P.move!=null&&(P.move===i||(!!P.group&&P.group.includes(m))));}
+// ---- the selection: one entity or several ---------------------------------------------------
+// MOD.sel is the one the single-entity buttons act on (Edit parameters, Make path, Eye view,
+// Fly to); MOD.multi holds the others Shift+click added. Copy, Move, Trim origin and Delete
+// take them all, and with Copy, Move and Trim origin also the map's own entities selected in
+// the view that Modify can take (each gets its row).
+function modIsSel(i){const m=MOD.ents[i];return !!m&&(i===MOD.sel||MOD.multi.has(m));}
+function modRowFor(ei){let m=MOD.ents.find(x=>x.ei===ei);
+  if(!m){const kv=MAP.ents[ei].kv.map(x=>[x[0],x[1]]);m={id:MOD.nid++,ei:ei,kv:kv,orig:kv.map(x=>x.slice())};MOD.ents.push(m);}
+  return m;}
+function modSelEnts(withMap){
+  const out=[],cur=MOD.ents[MOD.sel];if(cur)out.push(cur);
+  for(const m of MOD.ents)if(m!==cur&&MOD.multi.has(m))out.push(m);
+  if(withMap)for(const ei of selectedEnts())if(modTakes(ei)){const m=modRowFor(ei);if(!out.includes(m))out.push(m);}
+  return out;}
+// how many a Copy / Move / Trim origin would take (without making the map's rows)
+function modSelCount(){let n=modSelEnts(false).length;
+  for(const ei of selectedEnts())if(modTakes(ei)){const m=MOD.ents.find(x=>x.ei===ei);if(!m||!modIsSel(MOD.ents.indexOf(m)))n++;}
+  return n;}
+function modMultiPrune(){for(const m of[...MOD.multi])if(!MOD.ents.includes(m)||MOD.ents[MOD.sel]===m)MOD.multi.delete(m);}
+// Shift+click on an added entity (in the view or its row): into the selection, or out of it
+function modToggleSel(i){const m=MOD.ents[i];if(!m)return;
+  if(MOD.trim||(MOD.placing&&MOD.placing.move!=null)){flash('Finish moving or trimming first');return;}
+  if(i===MOD.sel){const next=MOD.ents.findIndex(x=>MOD.multi.has(x));
+    if(next>=0){MOD.multi.delete(MOD.ents[next]);MOD.sel=next;modRender();requestDraw();}else modDeselect();return;}
+  if(MOD.multi.has(m)){MOD.multi.delete(m);modRender();requestDraw();return;}
+  if(MOD.sel<0){modSelect(i);return;}
+  MOD.multi.add(m);modRender();requestDraw();
+  flash((MOD.multi.size+1)+' selected: Copy, Move, Trim origin and Delete take them all');}
+
+// ---- Undo / Redo: every change to Modify's entities, back to none added -------------------
+// Each change keeps the state before it (modHist): placing, moving, Trim origin (all its key
+// presses one step), Edit parameters (once closed), Make path, Copy, Delete and Restore. Hiding
+// isn't a change (Ctrl+Z undoes that). Undo and Redo first finish whatever is under way.
+const MOD_UNDO_MAX=1000;
+function modSnap(){return{ents:MOD.ents.map(m=>({id:m.id,ei:m.ei,kv:m.kv.map(x=>x.slice()),orig:m.orig?m.orig.map(x=>x.slice()):null,hid:!!m.hid})),
+  sel:MOD.ents[MOD.sel]?MOD.ents[MOD.sel].id:null,multi:[...MOD.multi].map(m=>m.id)};}
+function modHist(s){MOD.undo.push(s||modSnap());if(MOD.undo.length>MOD_UNDO_MAX)MOD.undo.shift();MOD.redo.length=0;}
+function modRestore(s){
+  MOD.ents=s.ents.map(e=>{const m={id:e.id,kv:e.kv.map(x=>x.slice())};
+    if(e.ei!=null){m.ei=e.ei;m.orig=e.orig.map(x=>x.slice());}if(e.hid)m.hid=true;return m;});
+  const by=new Map(MOD.ents.map(m=>[m.id,m])),cur=by.get(s.sel);
+  MOD.sel=cur?MOD.ents.indexOf(cur):-1;MOD.multi=new Set(s.multi.map(id=>by.get(id)).filter(Boolean));MOD.edit=-1;
+}
+function modUndoGo(d){
+  if(MOD.edit>=0)modEditClose(true);
+  // a Copy not put down yet: Undo takes just that away
+  if(MOD.placing){const cp=!!MOD.placing.copy;modPlaceCancel();if(cp&&d<0)return;}
+  if(MOD.trim)modTrim(false);
+  if(MOD.linking)modLinkCancel();
+  const from=d<0?MOD.undo:MOD.redo,to=d<0?MOD.redo:MOD.undo;
+  if(!from.length){flash(d<0?'Nothing to undo in Modify':'Nothing to redo in Modify');return;}
+  to.push(modSnap());modRestore(from.pop());
+  modChanged(true);lineDirty=true;
+  flash((d<0?'Undone':'Redone')+': '+MOD.undo.length+' more to undo, '+MOD.redo.length+' to redo');
+}
 // its box: "setsize", else its model's size, else its class's editor box, else 16 units
 function modBox(m){
   const ss=parseVec(modKv(m,'setsize'),6);if(ss)return{mins:ss.slice(0,3),maxs:ss.slice(3)};
@@ -9123,6 +9216,69 @@ function modLook(m){
   radiantLook(X,e);return X;
 }
 function modColour(m){const X=modLook(m);return X.mcol||X.col;}
+// ---- Modify's entities with their model ---------------------------------------------------
+// The .tik it draws, as the map build picks one for a map entity (entity_model_path): its
+// "model" key, else its class's .tik (the /*QUAKED*/ header the class came from), else a
+// classname that is a model path. '' for none (a brush model "*N" too).
+function modTik(m){
+  let p=(modKv(m,'model')||'').toLowerCase().replace(/\\/g,'/').trim();
+  if(p.startsWith('*'))return '';
+  if(!p){const d=(D.defs||{})[modCls(m)];if(d&&d.t)p=String(d.t).toLowerCase();}
+  if(!p){const c=modCls(m);if(c.includes('/'))p=c;}
+  if(!p)return '';
+  while(p.includes('//'))p=p.replace('//','/');
+  if(!p.startsWith('models/'))p='models/'+p;
+  if(!/\.(tik|skd|skb)$/.test(p))p+='.tik';
+  return p;
+}
+// Its mesh (one per model, its own instance buffer): the map's when the map places that
+// model, else built by the launcher from the paks (mohaa-sim-build, as Simulate's). null
+// until it is here, or when it can't be drawn (in a browser: only the map's own models);
+// the box is drawn meanwhile.
+function modModelR(p){
+  if(!gl||!p)return null;
+  if(!MOD.mr)MOD.mr=new Map();
+  if(MOD.mr.has(p))return MOD.mr.get(p);
+  // (asked for in the middle of a draw: modelR binds its index buffer, which would land in
+  // whichever vertex array is bound, so none is while it runs)
+  const build=(M,A)=>{const prev=gl.getParameter(gl.VERTEX_ARRAY_BINDING);gl.bindVertexArray(null);
+    let r=null;try{r=modelR(M,A);}catch(_e){r=null;}gl.bindVertexArray(prev);return r;};
+  let R=null;
+  const mi=(D.models||[]).findIndex(M=>String(M.p||'').toLowerCase()===p);
+  if(mi>=0){R=build(D.models[mi],D);MOD.mr.set(p,R);return R;}
+  if(SIM.src&&SIM.src.has(p)){const s=SIM.src.get(p);R=build(s[0],s[1]);MOD.mr.set(p,R);return R;}
+  if(SIM.fail.has(p)||!/\.tik$/.test(p)){MOD.mr.set(p,null);return null;}
+  if(!MOD.mwant)MOD.mwant=new Set();
+  if(!MOD.mwant.has(p)){MOD.mwant.add(p);if(!simPost('mohaa-sim-build\n'+p)){MOD.mwant.delete(p);MOD.mr.set(p,null);}}
+  return null;
+}
+// one instance: its placement (angles, scale), the light grid's light there, not pickable
+// (a click finds it by its box, modPick)
+function modInst(m){
+  const kvl={};for(const[k,v]of m.kv){const kl=k.toLowerCase();if(!(kl in kvl))kvl[kl]=v;}
+  const ax=anglesAxis(entAngles(kvl)),s=parseFloat(kvl.scale)||1,o=modOrigin(m),G=lightGrid();let c=[255,255,255];
+  if(G){const v=lgFast(G,o).slice(0,3).map(x=>x*2),mx=Math.max(v[0],v[1],v[2]);c=mx>255?v.map(x=>x*255/mx):v;}
+  return [ax[0][0]*s,ax[1][0]*s,ax[2][0]*s,o[0], ax[0][1]*s,ax[1][1]*s,ax[2][1]*s,o[1], ax[0][2]*s,ax[1][2]*s,ax[2][2]*s,o[2],
+    0, c[0]/255,c[1]/255,c[2]/255, -1, -1, 0];
+}
+// the models of the drawn Modify entities, their instance buffers filled again only when a
+// placement changed
+function modModelsInst(){
+  if(!gl)return [];
+  const G=new Map();
+  MOD.ents.forEach((m,i)=>{if(!modDrawn(i))return;const R=modModelR(modTik(m));if(!R)return;
+    let l=G.get(R);if(!l){l=[];G.set(R,l);}l.push(m);});
+  const out=[];
+  for(const[R,list]of G){
+    const key=list.map(m=>modOrigin(m).join(',')+'|'+(modKv(m,'angles')||'')+'|'+(modKv(m,'angle')||'')+'|'+(modKv(m,'scale')||'')).join(';');
+    if(R.modKey!==key){R.modKey=key;const a=[];for(const m of list)a.push(...modInst(m));
+      gl.bindBuffer(gl.ARRAY_BUFFER,R.instBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(a),gl.DYNAMIC_DRAW);R.n=list.length;}
+    out.push(R);}
+  if(MOD.mr)for(const R of MOD.mr.values())if(R&&!G.has(R)){R.n=0;R.modKey='';}
+  return out;
+}
+// whether Modify's entity m is drawn with its model (then its box is only outlined)
+function modHasModel(m){const p=modTik(m);return !!(p&&MOD.mr&&MOD.mr.get(p));}
 function modText(m){return '{\n'+m.kv.map(([k,v])=>'"'+k+'" "'+v+'"').join('\n')+'\n}';}
 function modName(m){const tn=modKv(m,'targetname');return(modKv(m,'classname')||'?')+(tn?' $'+tn:'');}
 
@@ -9213,17 +9369,21 @@ function paIssues(){
   for(let k=0;k<nc;k++){const a=C[k*9]|0,b=C[k*9+1]|0,f=C[k*9+2];out[a]++;
     if(f>fh){high[a]++;continue;}adj[a].push(b);adj[b].push(a);deg[a]++;deg[b]++;}
   // the parts the usable paths join, and whether each has a node of the map's own
-  const comp=new Int32Array(n).fill(-1),hasBase=[];let nc2=0;
-  for(let i=0;i<n;i++){if(comp[i]>=0||(A.f[i]&1))continue;const q=[i];comp[i]=nc2;let b=false;
-    while(q.length){const v=q.pop();if(v<A.n0&&!A.edits.has(v))b=true;for(const w of adj[v])if(comp[w]<0){comp[w]=nc2;q.push(w);}}
-    hasBase.push(b);nc2++;}
-  const R={A:A,fh:fh,node:new Map(),n:0};
-  const note=(i,t)=>{let l=R.node.get(i);if(!l){l=[];R.node.set(i,l);}l.push(t);R.n++;};
+  const comp=new Int32Array(n).fill(-1),hasBase=[],csize=[];let nc2=0;
+  for(let i=0;i<n;i++){if(comp[i]>=0||(A.f[i]&1))continue;const q=[i];comp[i]=nc2;let b=false,sz=0;
+    while(q.length){const v=q.pop();sz++;if(v<A.n0&&!A.edits.has(v))b=true;for(const w of adj[v])if(comp[w]<0){comp[w]=nc2;q.push(w);}}
+    hasBase.push(b);csize.push(sz);nc2++;}
+  // n counts the problems; info the notes that are only information (lv 0: an own group)
+  const R={A:A,fh:fh,node:new Map(),n:0,info:0};
+  const note=(i,t)=>{let l=R.node.get(i);if(!l){l=[];R.node.set(i,l);}if(t.lv==null)t.lv=2;l.push(t);if(t.lv)R.n++;else R.info++;};
   const P=i=>fvec([A.o[i*3],A.o[i*3+1],A.o[i*3+2]].map(v=>Math.round(v*100)/100));
   for(const i of A.redo){if(A.f[i]&1)continue;
     if(A.linkOver.has(i))note(i,{k:'links',t:'48 paths: ^~^~^ 48 paths per node at '+P(i)+' exceeded. The game links it no further (and g_nodecheck 1 stops the level: "Node check failed"). Use DONT_LINK on some nodes round it, or fewer nodes here.'});
     if(!deg[i])note(i,{k:'none',t:high[i]?'only drops past ai_fallheight ('+fh+'): no path the AI takes; ai_showroutes draws a red X':'no path: no node within 384 units it can walk to (and none walks to it); ai_showroutes draws a red X'});
-    else if(A.n0>0&&!hasBase[comp[i]])note(i,{k:'island',t:'cut off from the map\'s other nodes: an AI sent across gets "^~^~^ Path not found" (g_patherror 1). Join it with nodes under 384 units apart.'});}
+    else if(A.n0>0&&!hasBase[comp[i]]){const sz=csize[comp[i]];
+      note(i,{k:'island',lv:0,lbl:'own group of '+sz,t:'its own group: '+sz+' node'+(sz===1?'':'s')+' joined to each other but not to the map\'s others. Nothing wrong with that for men who start in here and stay; one sent from here to a spot outside it, or from outside to in here, gets "^~^~^ Path not found" (g_patherror 1). If they must come and go, join it to the rest with a node under 384 units away.'});}
+    const w=nodeWall([A.o[i*3],A.o[i*3+1],A.o[i*3+2]]);
+    if(w)note(i,{k:'wall',t:nodeWallText(w)});}
   // the links of the map's own nodes the new ones crowd out
   for(const a of A.linkOver)if(a<A.n0&&!A.edits.has(a)&&!(A.f[a]&1))note(a,{k:'links',t:'48 paths: ^~^~^ 48 paths per node at '+P(a)+' exceeded (a node of the map\'s that Modify\'s new ones crowd)'});
   const seen=new Set();
@@ -9234,6 +9394,36 @@ function paIssues(){
 }
 // a node's issues as one line each, for the cards and the status
 function paIssueList(i){const R=paIssues();return R&&R.node.get(i)||[];}
+// ---- room for an actor at a path node (not a game check: the game never tests it) -------
+// An actor's box is 30 units across and 94 tall (MINS -15 -15 0, MAXS 15 15 94; the path
+// links test 31, CheckMove's 15.5). A node nearer a wall than that puts part of a man
+// standing on it inside the wall. The game links the node anyway where its own test lets
+// it, so the trouble only shows when someone is sent there: he stops against the wall short
+// of the node (it may then never count as reached, so a runto there can hang without
+// movedone), links out of it can fail in some directions (the red one-way arrowheads), and
+// a failsafe noclip can leave him inside the wall. So: the actor's capsule, as the AI's
+// movement traces see it, stood on the node's floor point, lifted one step (18) so stairs,
+// slopes and kerbs don't count; if it starts inside the map, the nearest spot in eight
+// directions out to 32 units where it doesn't. Kept per spot (the map's solids don't move).
+const NW_MIN=[-15,-15,0],NW_MAX=[15,15,94-18],NW_LIFT=18,PA_WALL=new Map();
+const NW_DIRS=['+X','+X +Y','+Y','-X +Y','-X','-X -Y','-Y','+X -Y'];
+function nodeWall(o){
+  const key=Math.round(o[0]*4)+','+Math.round(o[1]*4)+','+Math.round(o[2]*4);
+  if(PA_WALL.has(key))return PA_WALL.get(key);
+  const hit=p=>{const s=[p[0],p[1],p[2]+NW_LIFT],t=pgTrace(s,s,NW_MIN,NW_MAX,true);return !!(t&&t.startsolid);};
+  let r=null;
+  try{if(hit(o)){r={d:0,k:-1};let found=false;
+    for(const d of[4,8,12,16,20,24,32]){if(found)break;
+      for(let k=0;k<8;k++){const a=k*Math.PI/4;
+        if(!hit([o[0]+Math.cos(a)*d,o[1]+Math.sin(a)*d,o[2]])){r={d:d,k:k};found=true;break;}}}}}
+  catch(_e){r=null;}
+  PA_WALL.set(key,r);return r;
+}
+function nodeWallText(w){
+  return 'in the wall: a man standing on this node (30 units across, 94 tall) is partly inside the map'+
+    (w.d?'; about '+w.d+' units toward '+NW_DIRS[w.k]+' clears it':'; nowhere within 32 units clears it')+
+    '. Sent here he stops against the wall short of it (a runto may never report movedone), paths out of it can fail one way, and a failsafe noclip can leave him inside the wall. Keep a node at least 16 units off a wall (a corner or cover node too: the animations lean out from there).';
+}
 // the yaw of path node i (new nodes: their own angles)
 function paYaw(i){const A=PA(),yaw=m=>entAngles(Object.fromEntries(m.kv.map(([k,v])=>[k.toLowerCase(),v])))[1];
   if(A&&A.mod&&i>=A.n0)return yaw(A.mod[i-A.n0]);
@@ -9250,15 +9440,27 @@ function modAdd(cls){
   MOD.placing={cls:cls};MOD.ghost=null;modRender();
   flash('Click anywhere on the map to place the '+cls+' (Esc cancels)');
 }
-function modPlaceCancel(){if(!MOD.placing)return;const mv=MOD.placing.move!=null;MOD.placing=null;MOD.ghost=null;
+function modPlaceCancel(){if(!MOD.placing)return;const P=MOD.placing,mv=P.move!=null;MOD.placing=null;MOD.ghost=null;
+  // a Copy not put down: the copies go again, as if it never happened
+  if(P.copy&&MOD.undo.length){modRestore(MOD.undo.pop());modChanged(true);flash('Not copied');return;}
   if(mv)paDirty();modRender();requestDraw();flash(mv?'Not moved':'Not placed');}
+// Move (and Copy): the selected entities follow the mouse together, each kept where it is
+// from the first (the one placed under the cursor)
+function modGroupStart(lead,others,copy){
+  const a=modOrigin(lead);
+  MOD.placing={cls:modCls(lead)||'info_null',move:MOD.ents.indexOf(lead),group:others,
+    offs:others.map(m=>{const o=modOrigin(m);return[o[0]-a[0],o[1]-a[1],o[2]-a[2]];}),copy:!!copy};
+  MOD.ghost=null;paDirty();modRender();
+}
 // Move: the selected new entity follows the mouse again until a click puts it down
 function modMove(){
   if(MOD.placing&&MOD.placing.move!=null){modPlaceCancel();return;}
-  const m=MOD.ents[MOD.sel];if(!m||MOD.trim)return;
+  if(MOD.trim)return;
   if(MOD.edit>=0)modEditClose(true);
-  MOD.placing={cls:modCls(m)||'info_null',move:MOD.sel};MOD.ghost=null;paDirty();modRender();
-  flash('Move: click anywhere on the map to put the '+modCls(m)+' there (Esc or Move again cancels)');
+  const L=modSelEnts(true),m=L[0];if(!m)return;
+  MOD.sel=MOD.ents.indexOf(m);for(const x of L.slice(1))MOD.multi.add(x);
+  modGroupStart(m,L.slice(1),false);
+  flash('Move: click anywhere on the map to put the '+(L.length>1?L.length+' selected (as they are spaced now)':modCls(m))+' there (Esc or Move again cancels)');
 }
 // where a click at hit h puts a new entity of class cls: a path node 16 units over the
 // spot (the game drops it to the floor from 36 up), anything else with its box's bottom on it
@@ -9285,9 +9487,13 @@ function modPlaceClick(x,y){
   const o=modPlaceAt(hitInfo(pickAt(x,y),x,y),P.cls);
   if(!o){flash('Nothing under the cursor there: click on the map (Esc cancels)');return true;}
   if(P.move!=null){const m=MOD.ents[P.move];MOD.placing=null;MOD.ghost=null;
-    if(m){modSetKv(m,'origin',o.join(' '));MOD.sel=P.move;}
-    modChanged(true);flash('Moved to ( '+o.join(' ')+' )');return true;}
+    if(!P.copy)modHist();                       // (a Copy's step was kept when it was made)
+    if(m){modSetKv(m,'origin',o.join(' '));MOD.sel=P.move;
+      (P.group||[]).forEach((g,k)=>{const d=P.offs[k];modSetKv(g,'origin',[o[0]+d[0],o[1]+d[1],o[2]+d[2]].map(v=>+v.toFixed(3)).join(' '));});}
+    const n=1+(P.group?P.group.length:0);
+    modChanged(true);flash((P.copy?'Copied ':'Moved ')+(n>1?n+' ':'')+'to ( '+o.join(' ')+' )');return true;}
   if(!modLimitCheck(P.cls)){modPlaceCancel();return true;}
+  modHist();
   const m={id:MOD.nid++,kv:[['classname',P.cls],['origin',o.join(' ')]]};
   // a class that faces somewhere gets an "angle": the way the camera looks, to 45 degrees
   if(modFaces(P.cls))m.kv.push(['angle',String(((Math.round(cam.yaw/45)*45)%360+360)%360)]);
@@ -9304,22 +9510,57 @@ function modGhost(h){
 function modRemove(i){
   if(i<0||i>=MOD.ents.length)return;
   if(MOD.edit===i)modEditClose(false);
-  if(MOD.trim&&MOD.sel===i)modTrim(false);
-  if(MOD.placing&&MOD.placing.move!=null){MOD.placing=null;MOD.ghost=null;}
+  if(MOD.trim&&modIsSel(i))modTrim(false);
+  if(MOD.placing&&MOD.placing.move!=null)modPlaceCancel();
+  if(!MOD.ents[i])return;
+  modHist();
   // a map entity isn't removed: Restore puts back the map's keys
-  const m=MOD.ents[i];
+  const m=MOD.ents[i];MOD.multi.delete(m);
   if(modIsMap(m)){m.kv=m.orig.map(x=>x.slice());modChanged(true);flash(entName(m.ei)+' is as the map has it again');return;}
   MOD.ents.splice(i,1);
   if(MOD.edit>i)MOD.edit--;
   MOD.sel=Math.min(MOD.sel,MOD.ents.length-1);
   modChanged(true);
 }
+// Delete (Restore) for everything selected: new ones removed, the map's own put back
+function modRemoveSel(){
+  const L=modSelEnts(false);if(!L.length)return;
+  if(L.length===1){modRemove(MOD.ents.indexOf(L[0]));return;}
+  if(MOD.edit>=0)modEditClose(false);
+  if(MOD.trim)modTrim(false);
+  if(MOD.placing)modPlaceCancel();
+  modHist();let nd=0,nr=0;
+  for(const m of L){if(modIsMap(m)){if(modEdited(m)){m.kv=m.orig.map(x=>x.slice());nr++;}}
+    else{const k=MOD.ents.indexOf(m);if(k>=0){MOD.ents.splice(k,1);nd++;}}}
+  MOD.sel=-1;MOD.multi.clear();modChanged(true);
+  flash((nd?'Deleted '+nd:'')+(nd&&nr?', ':'')+(nr?'restored '+nr+' of the map\'s own':'')+' (Undo, Alt+Z, puts them back)');
+}
+// Copy: the selected entities again (no targetname or target, so nothing is named twice),
+// following the mouse together as Move does until a click puts them down; Esc takes them away
+function modCopySel(){
+  if(MOD.placing&&MOD.placing.copy){modPlaceCancel();return;}
+  if(MOD.edit>=0)modEditClose(true);
+  if(MOD.trim)modTrim(false);
+  if(MOD.placing)modPlaceCancel();
+  if(MOD.linking)modLinkCancel();
+  const L=modSelEnts(true);if(!L.length){flash('Select what to copy first (Shift+click adds more)');return;}
+  modHist();
+  const copies=[];let dropped=false;
+  for(const m of L){if(!modLimitCheck(modCls(m))){modRestore(MOD.undo.pop());modChanged(true);return;}
+    const kv=m.kv.filter(x=>{const k=x[0].toLowerCase();if(k==='targetname'||k==='target'){dropped=true;return false;}return true;}).map(x=>x.slice());
+    const c={id:MOD.nid++,kv:kv};MOD.ents.push(c);copies.push(c);}
+  MOD.sel=MOD.ents.indexOf(copies[0]);MOD.multi=new Set(copies.slice(1));
+  // the copies are the selection now: the map's lets go
+  if(SEL.size){SEL.clear();lastHit=null;selectionChanged();}
+  modGroupStart(MOD.ents[MOD.sel],copies.slice(1),true);
+  flash('Copied '+(copies.length>1?copies.length+' (as they are spaced)':modName(copies[0]))+': click on the map to put '+(copies.length>1?'them':'it')+' down (Esc takes '+(copies.length>1?'them':'it')+' away)'+(dropped?'. Their targetname and target were left out':''));
+}
 // after any change: the list, the drawing, and the paths when nodes changed
 function modChanged(paths){if(paths)paDirty();modHideSync();modRender();requestDraw();}
 function modDeselect(){const m=MOD.ents[MOD.sel];
   if(MOD.trim)modTrim(false);
   if(MOD.placing&&MOD.placing.move!=null)modPlaceCancel();
-  MOD.sel=-1;
+  MOD.sel=-1;MOD.multi.clear();
   if(m&&modIsMap(m)&&SEL.has('e'+m.ei)){SEL.delete('e'+m.ei);selectionChanged();}
   if($('info').classList.contains('on')&&infoMode==='sel')showInfo('sel');
   modRender();requestDraw();}
@@ -9328,7 +9569,7 @@ function modToggleHide(i){const m=MOD.ents[i];if(!m)return;
   HIDE_UNDO.push({mod:m,was:!!m.hid,e:[],p:[]});if(HIDE_UNDO.length>500)HIDE_UNDO.shift();     // Ctrl+Z puts it back
   m.hid=!m.hid;modChanged(false);flash((m.hid?'Hidden: ':'Shown again: ')+modName(m)+(m.hid?' (Shift+click its square to show it)':''));}
 // a row picked: an entry for a map entity selects that entity in the map as well
-function modSelect(i){MOD.sel=i;const m=MOD.ents[i];
+function modSelect(i){MOD.sel=i;MOD.multi.clear();const m=MOD.ents[i];
   if(m&&modIsMap(m)&&!(SEL.size===1&&SEL.has('e'+m.ei))){SEL.clear();SEL.add('e'+m.ei);lastHit={ent:m.ei,face:-1,prim:-1,point:null};selectionChanged();}
   if(m&&!modIsMap(m)&&$('info').classList.contains('on')&&infoMode==='sel')showInfo('sel');
   modHideSync();modRender();requestDraw();}
@@ -9356,7 +9597,7 @@ function modEditOpen(i){
   if(i<0||i>=MOD.ents.length)return;
   if(MOD.placing)modPlaceCancel();
   if(MOD.trim)modTrim(false);
-  MOD.edit=i;MOD.sel=i;MOD.editKv=MOD.ents[i].kv.map(x=>x.slice());
+  MOD.edit=i;MOD.sel=i;MOD.editKv=MOD.ents[i].kv.map(x=>x.slice());MOD.editSnap=modSnap();
   MOD.hist=[modText(MOD.ents[i])];MOD.hpos=0;
   $('modEdT').textContent='Edit parameters: '+modName(MOD.ents[i]);
   $('modTxt').value=modText(MOD.ents[i]);$('modErr').textContent='';
@@ -9387,8 +9628,10 @@ function modEditInput(){
 function modEditClose(keep){
   const i=MOD.edit;if(i<0)return;
   const m=MOD.ents[i];
-  if(m){if(keep){try{m.kv=modParse($('modTxt').value);}catch(err){$('modErr').textContent=err.message;return;}}
+  if(m){if(keep){try{m.kv=modParse($('modTxt').value);}catch(err){$('modErr').textContent=err.message;return;}
+      if(MOD.editSnap&&JSON.stringify(m.kv)!==JSON.stringify(MOD.editKv))modHist(MOD.editSnap);}
     else m.kv=MOD.editKv;}
+  MOD.editSnap=null;
   MOD.edit=-1;$('modEd').classList.remove('on');
   if(document.activeElement===$('modTxt'))$('modTxt').blur();
   modChanged(true);
@@ -9397,9 +9640,11 @@ function modEditClose(keep){
 // ---- Trim origin: the arrow keys / WASD move the entity, the camera stays ----------------
 function modTrim(on){
   if(on==null)on=!MOD.trim;
-  if(on&&!MOD.ents[MOD.sel]){flash('Select a new entity first');return;}
   if(on&&MOD.edit>=0)modEditClose(true);
   if(on&&MOD.placing)modPlaceCancel();
+  if(on){const L=modSelEnts(true);if(!L.length){flash('Select an entity first');return;}
+    MOD.sel=MOD.ents.indexOf(L[0]);for(const x of L.slice(1))MOD.multi.add(x);
+    MOD.trimSnap=modSnap();MOD.trimHist=false;}
   if(on&&MOD.placing&&MOD.placing.move!=null)return;
   MOD.trim=on;if(on){stopCamera();}
   paDirty();modRender();
@@ -9416,16 +9661,18 @@ function modTrimKey(e){
   else if(kl===' '){d=[0,0,1];dir='u';}else if(kl==='c'){d=[0,0,-1];dir='d';}
   else if(kl==='escape'||kl==='t'){modTrim(false);return true;}
   if(!d)return CAM_KEYS_FREE.has(kl)||CAM_KEYS_RAD.has(kl);   // the camera stays put
-  const m=MOD.ents[MOD.sel];if(!m){modTrim(false);return true;}
-  const o=modOrigin(m);modSetKv(m,'origin',[o[0]+d[0]*st,o[1]+d[1]*st,o[2]+d[2]*st].map(v=>+v.toFixed(3)).join(' '));
+  const L=modSelEnts(false);if(!L.length){modTrim(false);return true;}
+  if(!MOD.trimHist){modHist(MOD.trimSnap);MOD.trimHist=true;}     // one step for the whole trim
+  for(const m of L){const o=modOrigin(m);modSetKv(m,'origin',[o[0]+d[0]*st,o[1]+d[1]*st,o[2]+d[2]*st].map(v=>+v.toFixed(3)).join(' '));}
   MOD.flash[dir]=performance.now();setTimeout(requestDraw,230);
   modRender();requestDraw();return true;
 }
 
 // ---- the volumes of the level script's triggers (Script trigs) ---------------------------
 // Each trigger the .scr spawns with a setsize, as a see-through box in the common/trigger
-// green with its edges, the way the map's own trigger brushes look; brighter while it is
-// selected. Drawn with Modify's line program, behind the map's surfaces like them.
+// green with its edges, the way the map's own trigger brushes look; tinted with the
+// selection's colour while it is selected. Drawn with Modify's line program, behind the map's
+// surfaces like them; pickScriptTrigs makes their sides clickable.
 let SCRTRIGS=null;
 function drawScriptTrigs(vp){
   if(!gl||(hiddenMask&C_SCRTRIG))return;
@@ -9435,7 +9682,8 @@ function drawScriptTrigs(vp){
   const E=[[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7]];
   for(const X of SCRTRIGS){
     if(hidEnt.has(X.ei)||!X.box)continue;
-    const P=boxCorners(X.box),sel=selE.has(X.ei),fc=[G[0],G[1],G[2],sel?0.3:0.18],lc=[G[0],G[1],G[2],sel?1:0.8];
+    // selected: tinted with the selection's colour, as a selected trigger brush is
+    const P=boxCorners(X.box),sel=selE.has(X.ei),C=sel?hexRGB(TH.sel):G,fc=[C[0],C[1],C[2],sel?0.38:0.18],lc=[C[0],C[1],C[2],sel?1:0.8];
     for(const q of[[0,2,3,1],[4,5,7,6],[0,1,5,4],[2,6,7,3],[0,4,6,2],[1,3,7,5]])
       for(const k of[q[0],q[1],q[2],q[0],q[2],q[3]]){const p=P[k];T.push(p[0],p[1],p[2],p[0],p[1],p[2],fc[0],fc[1],fc[2],fc[3]);}
     for(const[a,d]of E){const p=P[a],q=P[d];
@@ -9450,6 +9698,26 @@ function drawScriptTrigs(vp){
   gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(T),gl.STREAM_DRAW);gl.drawArrays(gl.TRIANGLES,0,T.length/10);
   gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(L),gl.STREAM_DRAW);gl.drawArrays(gl.LINES,0,L.length/10);
   gl.bindVertexArray(null);gl.disable(gl.BLEND);gl.depthMask(true);
+}
+// The same boxes in the pick pass: a click on one's side selects the trigger, as a click on
+// a trigger brush does (its pick id is the entity's, as a marker's)
+function pickScriptTrigs(vp){
+  if(!gl||(hiddenMask&C_SCRTRIG))return;
+  if(!SCRTRIGS)SCRTRIGS=ENTS.filter(X=>X.scrTrig);
+  if(!SCRTRIGS.length)return;
+  const P=[],K=[];
+  for(const X of SCRTRIGS){
+    if(hidEnt.has(X.ei)||!X.box)continue;
+    const C=boxCorners(X.box),id=NF+1+X.ei;
+    for(const q of[[0,2,3,1],[4,5,7,6],[0,1,5,4],[2,6,7,3],[0,4,6,2],[1,3,7,5]])
+      for(const k of[q[0],q[1],q[2],q[0],q[2],q[3]]){const p=C[k];P.push(p[0],p[1],p[2]);K.push(id);}}
+  if(!P.length)return;
+  if(!B.stPick){B.stPick=gl.createBuffer();B.stPickK=gl.createBuffer();B.vStPick=gl.createVertexArray();gl.bindVertexArray(B.vStPick);
+    attr(0,B.stPick,3);attr(2,B.stPickK,1);gl.disableVertexAttribArray(7);gl.bindVertexArray(null);}
+  gl.bindBuffer(gl.ARRAY_BUFFER,B.stPick);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(P),gl.STREAM_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER,B.stPickK);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(K),gl.STREAM_DRAW);
+  setCommon(PC,vp,1);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);
+  gl.bindVertexArray(B.vStPick);gl.vertexAttrib4f(7,1,1,1,1);gl.drawArrays(gl.TRIANGLES,0,P.length/3);gl.bindVertexArray(null);
 }
 // ---- drawing: see-through boxes, their edges, facing and the trim arrows -------------------
 let PMODT=null,PMODM=null;
@@ -9471,11 +9739,12 @@ function drawModify(vp){
   const Mb=[],Mn=[];       // still / being edited (fainter)
   MOD.ents.forEach((m,i)=>{
     if(!modDrawn(i))return;
-    const o=modOrigin(m),b=modBox(m),X=modLook(m),c=X.mcol||X.col,sel=i===MOD.sel,busy=modBusy(i);
+    const o=modOrigin(m),b=modBox(m),X=modLook(m),c=X.mcol||X.col,sel=modIsSel(i),busy=modBusy(i);
     const mn=[o[0]+b.mins[0],o[1]+b.mins[1],o[2]+b.mins[2]],mx=[o[0]+b.maxs[0],o[1]+b.maxs[1],o[2]+b.maxs[2]];
-    const st=M.length;mark(mn,mx,c,X.mk==null?1:X.mk,X.ol);(busy?Mb:Mn).push([st,M.length]);
+    const hasM=modHasModel(m);
+    if(!hasM){const st=M.length;mark(mn,mx,c,X.mk==null?1:X.mk,X.ol);(busy?Mb:Mn).push([st,M.length]);}
     const P=k=>[(k&1)?mx[0]:mn[0],(k&2)?mx[1]:mn[1],(k&4)?mx[2]:mn[2]];
-    if(!X.ol)for(const[a,d]of E)lin(P(a),P(d),[c[0]*0.6,c[1]*0.6,c[2]*0.6,0.8]);
+    if(!X.ol||hasM)for(const[a,d]of E)lin(P(a),P(d),[c[0]*0.6,c[1]*0.6,c[2]*0.6,0.8]);
     if(sel){const g=2,Q=k=>[(k&1)?mx[0]+g:mn[0]-g,(k&2)?mx[1]+g:mn[1]-g,(k&4)?mx[2]+g:mn[2]-g];for(const[a,d]of E)lin(Q(a),Q(d),[1,1,0.35,1]);}
     // (its facing arrow and target links are drawn with the map's: rebuildLines)
     if(sel&&MOD.trim){
@@ -9491,13 +9760,15 @@ function drawModify(vp){
     }
   });
   // the one being placed, under the cursor
-  if(MOD.placing&&MOD.ghost){const g=MOD.ghost,src=MOD.placing.move!=null?MOD.ents[MOD.placing.move]:null;
+  if(MOD.placing&&MOD.ghost){const G0=MOD.ghost,P0=MOD.placing,lead=P0.move!=null?MOD.ents[P0.move]:null;
+    const list=[[lead,G0]];if(P0.group)P0.group.forEach((m,k)=>{const d=P0.offs[k];list.push([m,[G0[0]+d[0],G0[1]+d[1],G0[2]+d[2]]]);});
+    for(const[src,g]of list){
     const gm={kv:(src?src.kv.filter(x=>x[0].toLowerCase()!=='origin'):[['classname',MOD.placing.cls]]).concat([['origin',g.join(' ')]])},b=modBox(gm),c=modColour(gm);
     const mn=[g[0]+b.mins[0],g[1]+b.mins[1],g[2]+b.mins[2]],mx=[g[0]+b.maxs[0],g[1]+b.maxs[1],g[2]+b.maxs[2]];
     const P=k=>[(k&1)?mx[0]:mn[0],(k&2)?mx[1]:mn[1],(k&4)?mx[2]:mn[2]],fc=[c[0],c[1],c[2],0.18];
     for(const q of[[0,2,3,1],[4,5,7,6],[0,1,5,4],[2,6,7,3],[0,4,6,2],[1,3,7,5]]){tri(P(q[0]),P(q[1]),P(q[2]),fc);tri(P(q[0]),P(q[2]),P(q[3]),fc);}
     for(const[a,d]of E)lin(P(a),P(d),[1,1,1,0.85]);
-    lin([g[0],g[1],mn[2]-24],[g[0],g[1],mx[2]+24],[1,1,1,0.6]);}
+    lin([g[0],g[1],mn[2]-24],[g[0],g[1],mx[2]+24],[1,1,1,0.6]);}}
   gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(false);
   gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
   if(M.length){
@@ -9539,28 +9810,42 @@ function modPick(x,y){
 }
 
 // ---- the panel ---------------------------------------------------------------------------
+// Classes only: a map can also name a model as an entity's classname ("human/dday_ranger_private",
+// "human//german_wehrmact_grenadier"), which G_SpawnEntity spawns as that .tik's own class.
+// Those are model paths, not classes, so they stay out of the list (add the class and give
+// it a "model" key instead).
+function modClassOk(c){return !!c&&!/[\/\\]|\.(tik|skd|skb)$/i.test(c);}
 function modClasses(){
   const s=new Set(['info_pathnode']);
-  const defs=Object.keys(D.defs||{}).filter(c=>{const d=D.defs[c];return d&&d.b;}).sort();
+  const defs=Object.keys(D.defs||{}).filter(c=>{const d=D.defs[c];return d&&d.b&&modClassOk(c);}).sort();
   for(const c of defs)s.add(c);
-  for(const e of MAP.ents)if(e.cls&&!e.prims.length&&!WORLDLIKE[e.cls])s.add(e.cls);
+  for(const e of MAP.ents)if(e.cls&&!e.prims.length&&!WORLDLIKE[e.cls]&&modClassOk(e.cls))s.add(e.cls);
   return [...s];
 }
 function modRender(){
   const L=$('modList');if(!L)return;
-  modHideSync();
+  modMultiPrune();modHideSync();
   let h='';
   // new ones: a filled square and "new"; the map's own: a hollow square and its entity
-  // number, "changed" in yellow once their keys differ from the map's
+  // number, "changed" in yellow once their keys differ from the map's. Newest first: each
+  // row goes in front of the ones before it (data-mi keeps its place in MOD.ents)
   MOD.ents.forEach((m,i)=>{const o=modOrigin(m),c=modColour(m),rgb='rgb('+c.map(v=>Math.round(v*255)).join(',')+')',map=modIsMap(m),ch=map&&modEdited(m);
     const tag=map?'<span class="mtag'+(ch?' ch':'')+'" title="'+(ch?'one of the map\'s own entities, changed here (not saved yet)':'one of the map\'s own entities, as the map has it')+'">#'+m.ei+(ch?' changed':' map')+'</span>':'<span class="mtag nw" title="added here, not saved yet">new</span>';
-    h+='<div class="li'+(i===MOD.sel?' sel':'')+(m.hid?' hid':'')+'" data-mi="'+i+'" title="'+esc(modText(m))+'\n\nShift+click the name: '+(i===MOD.sel?'deselect it':'select it')+' · Shift+click the square: '+(m.hid?'show':'hide')+' it"><span class="sw" style="'+(map?'border:2px solid '+rgb+';background:transparent':'background:'+rgb)+'"></span><span class="nm">'+esc(modName(m))+'</span>'+tag+'<span class="ct">( '+o.map(v=>+v.toFixed(1)).join(' ')+' )'+(modBusy(i)?' · editing':'')+'</span></div>';});
+    h='<div class="li'+(modIsSel(i)?' sel':'')+(m.hid?' hid':'')+'" data-mi="'+i+'" title="'+esc(modText(m))+'\n\nShift+click the name: '+(modIsSel(i)?'take it out of the selection':'add it to the selection')+' · Shift+click the square: '+(m.hid?'show':'hide')+' it"><span class="sw" style="'+(map?'border:2px solid '+rgb+';background:transparent':'background:'+rgb)+'"></span><span class="nm">'+esc(modName(m))+'</span>'+tag+'<span class="ct">( '+o.map(v=>+v.toFixed(1)).join(' ')+' )'+(modBusy(i)?' · editing':'')+'</span></div>'+h;});
   L.innerHTML=(MOD.linking?'<div class="co" style="color:var(--accent)">Click an entity that has a targetname to set '+esc(modName(MOD.linking.from))+'\'s "target" to it (Esc or Make path again cancels).</div>':'')+(MOD.placing?'<div class="co" style="color:var(--accent)">Click anywhere on the map to '+(MOD.placing.move!=null?'move':'place')+' the '+esc(MOD.placing.cls)+' (Esc or '+(MOD.placing.move!=null?'Move':'Add')+' again cancels).</div>':'')+
     (h||(MOD.placing?'':'<div class="co">Nothing added yet. Add, then click on the map to place it; new entities stay see-through until saved.</div>'));
   $('bModAdd').classList.toggle('on',!!MOD.placing&&MOD.placing.move==null);
   const has=MOD.ents[MOD.sel]!=null;
   for(const id of['bModEdit','bModMove','bModTrim','bModLink','bModEye','bModFly','bModDel'])$(id).disabled=!has;
   $('bModLink').classList.toggle('on',!!MOD.linking);
+  const nsel=modSelCount();
+  $('bModDup').disabled=!nsel&&!(MOD.placing&&MOD.placing.copy);
+  $('bModDup').classList.toggle('on',!!MOD.placing&&!!MOD.placing.copy);
+  $('bModDup').textContent=nsel>1?'Copy ('+nsel+')':'Copy';
+  $('bModHUndo').disabled=!MOD.undo.length;$('bModHRedo').disabled=!MOD.redo.length;
+  $('bModHUndo').title='Undo the last change to Modify\'s entities ('+MOD.undo.length+' to undo), back to none added\n\nHotkey: Alt+Z';
+  $('bModHRedo').title='Redo the last change undone ('+MOD.redo.length+' to redo)\n\nHotkey: Alt+Y or Alt+Shift+Z';
+  if(nsel>1&&!MOD.trim&&!(MOD.placing&&MOD.placing.move!=null))$('bModMove').disabled=$('bModTrim').disabled=false;
   lineDirty=true;                                   // its links and facing arrows
   // Move and Trim origin each shut the other off while on
   const moving=!!MOD.placing&&MOD.placing.move!=null;
@@ -9570,16 +9855,17 @@ function modRender(){
   $('bModTrim').classList.toggle('on',MOD.trim);$('bModEdit').classList.toggle('on',MOD.edit>=0);
   const cur=MOD.ents[MOD.sel];
   $('bModDel').textContent=cur&&modIsMap(cur)?'Restore':'Delete';
-  $('bModDel').title=cur&&modIsMap(cur)?'Put back the map\'s own keys for this entity':'Remove the entity\n\nHotkey: Delete';
+  $('bModDel').title=cur&&modIsMap(cur)?'Put back the map\'s own keys for this entity':'Remove the entity (every selected one)\n\nHotkey: Delete';
+  if(modSelEnts(false).length>1)$('bModDel').textContent='Delete ('+modSelEnts(false).length+')';
   if(cur&&modIsMap(cur)&&!modEdited(cur))$('bModDel').disabled=true;
   const nw=MOD.ents.filter(m=>!modIsMap(m)),ch=MOD.ents.filter(m=>modIsMap(m)&&modEdited(m));
   $('bModSaveBsp').disabled=$('bModSaveMap').disabled=$('bModCopy').disabled=!(nw.length||ch.length);
   const A=PA_C&&PA_C.n0!=null?PA_C:null,nn=nw.filter(modIsNode).length;
   const LM=(nw.length||ch.length)?modLimits():null;
   const IS=(nw.length||ch.length)?paIssues():null;
-  if(IS&&IS.n){const keys=[...IS.node.keys()].map(String).join(',');
+  if(IS&&IS.n){const keys=[...IS.node].filter(([i,l])=>l.some(x=>x.lv)).map(([i])=>String(i)).join(',');
     if(keys!==MOD.issKeys){MOD.issKeys=keys;
-      const lines=[];for(const[i,l]of IS.node)for(const x of l)lines.push(x.t);
+      const lines=[];for(const[i,l]of IS.node)for(const x of l)if(x.lv)lines.push(x.t);
       flash('AI paths: '+lines[0]+(lines.length>1?' (+'+(lines.length-1)+' more: the node cards say)':''));
       for(const t of lines)hostLog('paths',t);}}
   else MOD.issKeys='';
@@ -9589,7 +9875,7 @@ function modRender(){
   // over a limit (a classname changed in Edit parameters can get there): red, and why
   const over=LM&&(LM.real>LM.rmax||LM.nodes>MAX_PATHNODES),near=LM&&!over&&(LM.real>LM.rmax-(LM.mp?96:64)||LM.nodes>MAX_PATHNODES-200||(IS&&IS.n));
   $('modStat').style.color=over?'var(--selcol)':near?'#ffd040':'';
-  $('modStat').title=over?'Past the game\'s limit: '+(LM.real>LM.rmax?'more real entities than its '+LM.rmax+' slots (with one player; "no free edicts") ':'')+(LM.nodes>MAX_PATHNODES?'more than 4096 path nodes ("Exceeded MAX_PATHNODES!")':'')+'. The saved map won\'t load.':near?(IS&&IS.n?[...IS.node.values()].flat().map(x=>x.t).join('\n'):'Close to the game\'s limit'+(LM.mp?' (in multiplayer each player slot takes one more entity slot)':'')):'';
+  $('modStat').title=over?'Past the game\'s limit: '+(LM.real>LM.rmax?'more real entities than its '+LM.rmax+' slots (with one player; "no free edicts") ':'')+(LM.nodes>MAX_PATHNODES?'more than 4096 path nodes ("Exceeded MAX_PATHNODES!")':'')+'. The saved map won\'t load.':near?(IS&&IS.n?[...IS.node.values()].flat().filter(x=>x.lv).map(x=>x.t).join('\n'):'Close to the game\'s limit'+(LM.mp?' (in multiplayer each player slot takes one more entity slot)':'')):'';
   simPanel();
 }
 // Edit parameters' place: where it was dragged, kept inside the 3D view
@@ -9702,7 +9988,10 @@ function modInit(){
     const v=eyeViewFrom(modCls(m),modKvl(m),modOrigin(m),modName(m),-1,true);if(!v)return;
     flyTo(v.pos,v.ang[1],v.ang[0],-v.ang[2]);requestDraw();flash(v.flash);};
   $('bModFly').onclick=modFly;
-  $('bModDel').onclick=()=>modRemove(MOD.sel);
+  $('bModDel').onclick=()=>modRemoveSel();
+  $('bModDup').onclick=()=>modCopySel();
+  $('bModHUndo').onclick=()=>modUndoGo(-1);
+  $('bModHRedo').onclick=()=>modUndoGo(1);
   $('bModSaveBsp').onclick=()=>modSave('bsp');
   $('bModSaveMap').onclick=()=>modSave('map');
   $('bModCopy').onclick=()=>{copyText(modCopyText());flash('The new and changed entities are copied');};
@@ -9712,7 +10001,7 @@ function modInit(){
   // (green) row deselects it
   $('modList').addEventListener('click',e=>{const r=e.target.closest('[data-mi]');if(!r)return;const i=+r.dataset.mi;
     if(e.shiftKey&&e.target.closest('.sw')){modToggleHide(i);return;}
-    if(e.shiftKey&&i===MOD.sel){modDeselect();return;}
+    if(e.shiftKey){modToggleSel(i);return;}
     // a click on the row already selected (green), so also the second click of a
     // double-click: Fly to
     if(!e.shiftKey&&i===MOD.sel){modFly();return;}
@@ -10000,13 +10289,17 @@ window.MOHAA_SIMMODEL=async function(path,b64){
     const M=(P.models||[])[0];if(!M)throw new Error('the build sent no model');
     const ti=(P.tex||[]).map(t=>simTexIndex(t,P));
     const M2=Object.assign({},M,{s:M.s.map(s=>{const c=s.slice();c[2]=ti[s[2]]!=null?ti[s[2]]:0;return c;})});
+    if(!SIM.src)SIM.src=new Map();SIM.src.set(p,[M2,P]);         // Modify builds its own from it
     SIM.cache.set(p,modelR(M2,P));
-  }catch(e){SIM.fail.set(p,String(e&&e.message||e));flash('Simulate: '+p+' can\'t be drawn ('+(e&&e.message||e)+'): the box flies instead');}
+  }catch(e){SIM.fail.set(p,String(e&&e.message||e));
+    if(SIM.pick===p)flash('Simulate: '+p+' can\'t be drawn ('+(e&&e.message||e)+'): the box flies instead');}
+  if(MOD.mwant&&MOD.mwant.delete(p)){if(MOD.mr)MOD.mr.delete(p);requestDraw();}
   if(SIM.pick===p)simUseModel();else simModelText();
 };
 window.MOHAA_SIMMODEL_FAIL=function(path,why){
   const p=String(path||'').toLowerCase();if(SIM.busy===p)SIM.busy='';
   SIM.fail.set(p,String(why||'not built'));
+  if(MOD.mwant&&MOD.mwant.delete(p)){if(!MOD.mr)MOD.mr=new Map();MOD.mr.set(p,null);requestDraw();}
   if(SIM.pick===p){flash('Simulate: '+p+' can\'t be drawn ('+why+'): the box flies instead');simUseModel();}
 };
 window.MOHAA_SIM_MODELS=function(list,why){

@@ -905,8 +905,9 @@ game, and the page adds what it spawns.
   among them with a `setsize` keeps a marker of its class's size (`X.mbox`, `markerBoxOf`),
   and **Show → Script trigs** (`C_SCRTRIG`, on by default, off in the In-game look)
   draws its volume as a see-through box in the trigger green with its edges
-  (`drawScriptTrigs`, brighter when selected); its selection box and info card give the
-  whole setsize. The reader keeps the script's own fields of an entity
+  (`drawScriptTrigs`, tinted with the selection's colour when selected). Its sides are
+  clickable, as a trigger brush's are (`pickScriptTrigs`, in the pick pass), and select the
+  whole trigger; its selection box and info card give the whole setsize. The reader keeps the script's own fields of an entity
   (`local.t.setsize1 = ( ... )`, `LevelScript.fields`), so a later
   `local.t setsize local.t.setsize1 local.t.setsize2` gets its values. Their info
   card has a Level script section with the spawn line and the lines that placed it, and

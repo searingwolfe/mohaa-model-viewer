@@ -65,7 +65,7 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 96
+MAP_VIEWER_REV = 98
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
 INDEX_VERSION = 10
@@ -867,6 +867,8 @@ MAP_VIEWER_KEYS = {
             _kx("W|S", "move forward / back", ("W", "forward", "move forward"), ("S", "back", "move back")),
             _kx("Up|Down", "move forward / back level with the ground", ("Up", "forward", "move forward, level"),
                 ("Down", "back", "move back, level")),
+            _kx("Ctrl+W|S", "move forward / back level with the ground, as Up / Down",
+                ("Ctrl+W", "forward", "move forward, level"), ("Ctrl+S", "back", "move back, level")),
             _kx("A|D", "strafe left / right", ("A", "left", "strafe left"), ("D", "right", "strafe right")),
             _kx("Space|C", "move up / down", ("Space", "up", "move up"), ("C", "down", "move down")),
             _kx("Q|E", "tilt (roll) left / right", ("Q", "tilt L", "tilt (roll) left"),
@@ -927,6 +929,15 @@ MAP_VIEWER_KEYS = {
                 ("Ctrl+C", "copy point", "copy the point under the cursor as ( x y z )")),
             _kx("Backspace", "hide the selection (an entity added in Modify too)", ("Backspace", "hide")),
             _kx("Delete", "remove the entity added in Modify that is selected (map entities stay)", ("Delete", "remove")),
+            _kx("Alt+A", "Modify: Add (then click on the map to place it; again cancels)",
+                ("Alt+A", "Add", "Modify's Add: the next click on the map places one")),
+            _kx("Alt+C", "Modify: Copy the selected entities; they follow the mouse together until a click puts them down",
+                ("Alt+C", "Copy", "copy the selection, then click to put it down")),
+            _kx("Alt+Z|Y", "Modify: Undo / Redo its changes (Alt+Shift+Z redoes too)",
+                ("Alt+Z", "Undo", "undo the last change to Modify's entities"),
+                ("Alt+Y", "Redo", "redo the last change undone")),
+            _kx("Shift+click", "on an added entity (in the view or Modify's list): add it to the selection or take it out",
+                ("Shift+Click", "multi-select", "Modify: add to or take out of the selection")),
             _kx("Alt+M|T|E", "Modify, its selected entity: Move · Trim origin · Edit parameters",
                 ("Alt+M", "Move", "the selected entity follows the mouse; a click puts it down"),
                 ("Alt+T", "Trim origin", "move it by the trim step with W A S D, Space and C"),
