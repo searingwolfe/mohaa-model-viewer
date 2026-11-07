@@ -1538,6 +1538,56 @@ Changes to `python_installer_updater.bat` unless noted.
   green with its edges (`drawScriptTrigs`); under Script ents the trigger stays a small
   marker of its class's size (`markerBoxOf`), and selecting it outlines the whole volume.
   Tested with m3l1b's 11 respawned `$minefield` triggers.
+- Map Viewer page rev 105 (`MAP_VIEWER_REV` 105, `MAP_VIEWER_REV_REQUIRED` 105): a new AI
+  error tag, **no angle: CORNER_RIGHT** (or CORNER_LEFT, CRATE, LOW_WALL_ARC), on a path
+  node with one of the spawnflags whose special attack faces the node's way but with no
+  "angle" or "angles" key, so it faces yaw 0 (east) whatever the wall
+  (`PathNode::GetSpecialAttack` measures the enemy's angle from the node's yaw and
+  actor_cover.cpp turns the man to it; `nodeNoAngle`). For the map's nodes, Modify's
+  changed ones and its new ones, with AI errors on. Retail m3l1b has three (two corners
+  and a crate). The other flags don't use the node's facing (COVER, CONCEALMENT, DUCK,
+  SNIPER).
+- Map Viewer page rev 104 (`MAP_VIEWER_REV` 104, `MAP_VIEWER_REV_REQUIRED` 104): putting
+  down an entity Modify places (Add / Alt+A, Copy / Alt+C, Move) makes it the selection
+  everywhere: a new one lets go of the map's selected brushes and entities, as a click on
+  it does, and More info (N), when open, turns to it (`modPlacedSel`). Before, the card
+  stayed on what was selected before, so editing parameters there changed that entity.
+- Map Viewer page rev 103 (`MAP_VIEWER_REV` 103, `MAP_VIEWER_REV_REQUIRED` 103): turning AI
+  routes on says in Output where its paths come from: "from maps/m3l1b.pth (Pak5.pk3), 258
+  nodes", "worked out here (no .pth for this map)", plus Modify's new nodes (`routesFrom`).
+  A .pth made for another version of the map is no longer used: the game keeps a .pth only
+  when the map_time stored in it is the .bsp's worldspawn "map_time" and builds the paths
+  again otherwise (`PathSearch::ArchiveLoadNodes`), which is what happens to a copy Save
+  as .bsp wrote (it bumps map_time) given the map's own name, so the paks' .pth was
+  being drawn for it. Now the page works the paths out instead (`pathsStale`) and says
+  why, with both times; the build's Output says it too (`paths_payload`, `map_time`). A
+  .map, which has no map_time yet, keeps using the .pth.
+- Map Viewer page rev 102 (`MAP_VIEWER_REV` 102, `MAP_VIEWER_REV_REQUIRED` 102): a .bsp
+  saved with a broken Modify entity, and the viewer's misreading of it. Edit parameters
+  took a quote left open as running on into the next lines (`"([^"]*)"` matched across
+  them), so a slip like a lone `"` line turned the rest of the text, braces included, into
+  keys and values of one entity; Save as .bsp wrote it as it was. The game reads it the
+  same way (`COM_ParseExt`'s quoted strings run across lines; `SpawnArgs::Parse`), so the
+  map loads, but that entity gets junk keys and the node written after the slip is lost.
+  The viewer's decompiler then wrote the multi-line value into the .map as it was, the
+  .map read back with one entity more than the lump, and every entity after it was one
+  place out: static props showed their neighbour's model (a chair where the radar is) and
+  the level script's entities lost theirs. Now: Edit parameters reads one `"key" "value"`
+  pair per line and refuses a quote not closed on its line, a key without a value on its
+  line, and a { or } inside a key or value, naming the line (`modParse`); Save as .bsp
+  refuses an added entity with a line break, quote or brace in a key or value, or an empty
+  key (`write_bsp_entities`, as it already did for changed ones); and the decompiler
+  writes such a key or value on one line with braces taken out (`_map_safe`), with an
+  Output line naming the entity, so the .map always has the lump's entities, one for one.
+- Map Viewer page rev 101 (`MAP_VIEWER_REV` 101, `MAP_VIEWER_REV_REQUIRED` 101): Modify's
+  entities get labels (Labels, 6), as the map's do: class, a path node's flag tag
+  (`[COVER]`, `[CORNER_RIGHT]`, ...) and `$targetname`, with the same distances, fading,
+  sight checks and no-overlap rule, and the selection colour when selected. A small
+  filled tab in front tells them apart: **NEW** (amber) on an added entity, **EDIT** (blue)
+  on one of the map's that Modify has changed (Modify draws that one instead of the
+  map's marker, so it had lost its label too). `$targetname` / `#spawnflags` keys count as
+  the game reads them (`simKvl`). A new node's AI tag now sits under its label, as a map
+  node's does, instead of 40 units over its spot.
 - Map Viewer page rev 100 (`MAP_VIEWER_REV` 100, `MAP_VIEWER_REV_REQUIRED` 100): a new
   **AI errors** button in SHOW, after AI routes (no hotkey), shows or hides the path-node
   tags that report a problem: "no paths", "N one-way", "own group of N" and "in the wall",

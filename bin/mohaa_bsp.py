@@ -1032,10 +1032,23 @@ def decompile(bsp, tex_size=None, static_classname=None, log=None):
         out.append("// entity %d" % ei)
         out.append("{")
         cls = ent_get(e, "classname").lower()
+        bad = False
         for k, v in e:
             if k.lower() == "model" and v.startswith("*"):
                 continue           # brush model number: the brushes are written inline below
-            out.append('"%s" "%s"' % (k, v.replace('"', "'")))
+            # A key or value with a line break or a brace in it (a damaged lump: the game's
+            # parser reads a quoted string across lines) would split the entity in two in
+            # the .map and put every entity after it one place out; it is written on one
+            # line, braces taken out, and reported.
+            ck, cv = _map_safe(k), _map_safe(v)
+            if (ck, cv) != (k.replace('"', "'"), v.replace('"', "'")):
+                bad = True
+            out.append('"%s" "%s"' % (ck, cv))
+        if bad:
+            if log:
+                log("! entity %d (%s): a key or value holds a line break or a brace (a damaged entity lump), "
+                    "written on one line" % (ei, cls or "no classname"))
+            stats.setdefault("badkeys", []).append(ei)
         origin = (0.0, 0.0, 0.0)
         models = by_ent.get(ei, [])
         if any(mi > 0 for mi in models):
@@ -1921,6 +1934,15 @@ def _clean(s):
     return s
 
 
+def _map_safe(s):
+    """A key or value as one .map line can hold it: quotes as ', line breaks as spaces,
+    no braces."""
+    s = str(s).replace('"', "'")
+    for c in "\r\n\t":
+        s = s.replace(c, " ")
+    return s.replace("{", "(").replace("}", ")")
+
+
 def write_bsp_entities(data, added, out_path, src_path=None, replace=None):
     """Write data (a .bsp's bytes) to out_path with the entities in added (entity-lump
     text) after its own, the map's entities in replace ([{ei, cls, origin, kv}]) given their
@@ -1938,6 +1960,12 @@ def write_bsp_entities(data, added, out_path, src_path=None, replace=None):
     for e in new:
         if not any(k.lower() == "classname" and v for k, v in e):
             raise BspError("an added entity has no classname")
+        # no line break, quote or brace in a key or value: the game's parser would read a
+        # quoted string across lines, and the entity would come back broken
+        for k, v in e:
+            if not str(k).strip():
+                raise BspError("an added entity has an empty key")
+            _clean(k), _clean(v)
     if not old or not any(k.lower() == "classname" and v.lower() == "worldspawn" for k, v in old[0]):
         raise BspError("the .bsp's first entity isn't the worldspawn")
     count = lambda ents: sum(1 for e in ents if any(k.lower() == "classname" and v.lower() == "info_pathnode" for k, v in e))

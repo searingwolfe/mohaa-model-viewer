@@ -55,7 +55,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 100
+MAP_VIEWER_REV_REQUIRED = 105
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".bak": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".lin": "bin", ".cfg": "scr"}

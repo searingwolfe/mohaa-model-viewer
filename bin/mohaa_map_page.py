@@ -409,7 +409,7 @@ __KEYS_CSS__
    </div>
    <div class="sect">
      <h2>Show</h2>
-     <div class="tg" style="margin-bottom:7px"><button id="bFull" title="Full Brightness (B). Off: the map lit the way the game lights it (lightmaps, vertex light). On: every texture at full brightness, as MOHRadiant shows it.">Full Brightness<span class="k">B</span></button><button id="bSimpleSky" title="Simple Sky (K). On: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off: the game's sky box and its moving clouds, drawn behind everything, so whatever is behind a sky brush shows through it as in game.">Simple Sky<span class="k">K</span></button><button id="bSimpleMod" title="Simple models (M). On: each tree that has a sprite version is drawn as that sprite alone, the way the game draws trees far away; it turns about its upright axis to face the camera. Off: the whole tree. Models with no sprite version (bushes, props) don't change.">Simple models<span class="k">M</span></button><button id="bRoutes" title="AI routes: the game cvar ai_showroutes (game cvars, `): the connections the AI can walk between path nodes, from the map's .pth file (worked out here when it has none, and for Modify's new nodes), green both ways, a red arrowhead one way. Only the nodes within ai_showroutes_distance of the camera (I)">AI routes<span class="k">I</span></button><button id="bAiErr" title="AI errors: the tags over path nodes saying what is wrong with them: no paths, N one-way, own group of N (joined to each other but not to the map's other nodes), in the wall. On by itself when AI routes is turned on and off when it is turned off; click to hide or show them while AI routes stays on. Tags that aren't errors (DONT_LINK, a duplicate, 48 paths or a cell full) stay">AI errors</button><button id="bSunFlare" title="Sun flare (J). On: the game's lens flare, drawn as the game draws it when the view looks toward the map's sun and nothing solid is between the camera and the sky that way, with the screen's glare that fades when the sun goes out of sight. Off: no flare, as in MOHRadiant.">Sun flare<span class="k">J</span></button></div>
+     <div class="tg" style="margin-bottom:7px"><button id="bFull" title="Full Brightness (B). Off: the map lit the way the game lights it (lightmaps, vertex light). On: every texture at full brightness, as MOHRadiant shows it.">Full Brightness<span class="k">B</span></button><button id="bSimpleSky" title="Simple Sky (K). On: the sky brushes solid, their picture tiled, as MOHRadiant draws them. Off: the game's sky box and its moving clouds, drawn behind everything, so whatever is behind a sky brush shows through it as in game.">Simple Sky<span class="k">K</span></button><button id="bSimpleMod" title="Simple models (M). On: each tree that has a sprite version is drawn as that sprite alone, the way the game draws trees far away; it turns about its upright axis to face the camera. Off: the whole tree. Models with no sprite version (bushes, props) don't change.">Simple models<span class="k">M</span></button><button id="bRoutes" title="AI routes: the game cvar ai_showroutes (game cvars, `): the connections the AI can walk between path nodes, from the map's .pth file (worked out here when it has none, and for Modify's new nodes), green both ways, a red arrowhead one way. Only the nodes within ai_showroutes_distance of the camera (I)">AI routes<span class="k">I</span></button><button id="bAiErr" title="AI errors: the tags over path nodes saying what is wrong with them: no paths, N one-way, own group of N (joined to each other but not to the map's other nodes), in the wall, no angle (a CORNER_LEFT, CORNER_RIGHT, CRATE or LOW_WALL_ARC node without an angle). On by itself when AI routes is turned on and off when it is turned off; click to hide or show them while AI routes stays on. Tags that aren't errors (DONT_LINK, a duplicate, 48 paths or a cell full) stay">AI errors</button><button id="bSunFlare" title="Sun flare (J). On: the game's lens flare, drawn as the game draws it when the view looks toward the map's sun and nothing solid is between the camera and the sky that way, with the screen's glare that fades when the sun goes out of sight. Off: no flare, as in MOHRadiant.">Sun flare<span class="k">J</span></button></div>
      <div class="tg" id="filtBtns" style="margin-bottom:7px"></div>
      <button id="bShowAll" title="Show every group (Ctrl+A)">All<span class="k">Ctrl+A</span></button>
      <!-- the two looks, as wide as the panel like the cameras' buttons; each is on while the
@@ -1204,6 +1204,21 @@ function nodeSpawnflags(A,i){
   if(A.edits&&A.edits.has(i))return kvOf(A.edits.get(i));
   const pn=pnEnts();return pn.length===n0&&pn[i]!=null?parseInt(MAP.ents[pn[i]].kvl.spawnflags||'0',10)|0:0;
 }
+// A node whose spawnflags make the AI face its way (CORNER_LEFT 16, CORNER_RIGHT 32, CRATE
+// 128, LOW_WALL_ARC 256: their special attacks, PathNode::GetSpecialAttack, take the
+// node's yaw for the way the man turns and the arc he fires in; actor_cover.cpp turns him
+// to it) but that has no "angle" or "angles": it faces yaw 0, east, whatever the wall.
+// The names of those flags, else ''.
+const NODE_FACES=[[16,'CORNER_LEFT'],[32,'CORNER_RIGHT'],[128,'CRATE'],[256,'LOW_WALL_ARC']];
+function nodeNoAngle(A,i){
+  const sf=nodeSpawnflags(A,i);if(!(sf&(16|32|128|256)))return '';
+  const n0=A.n0==null?A.n:A.n0;let k=null;
+  if(A.mod&&i>=n0){const m=A.mod[i-n0];if(!m)return '';k=simKvl(m);}
+  else if(A.edits&&A.edits.has(i))k=simKvl(A.edits.get(i));
+  else{const pn=pnEnts();if(pn.length!==n0||pn[i]==null)return '';k=MAP.ents[pn[i]].kvl;}
+  if(k.angle!=null&&String(k.angle).trim()!==''||k.angles!=null&&String(k.angles).trim()!=='')return '';
+  return NODE_FACES.filter(x=>sf&x[0]).map(x=>x[1]).join(' + ');
+}
 // the earlier node on the very spot of node i, once both are dropped to the floor (the one
 // the game links: PathSearch::LoadNodes checks the nodes before it), or -1
 function nodeDupOf(A,i){
@@ -1249,18 +1264,22 @@ function drawPathIssues2D(){
       if(t.dl){if(nodeSpawnflags(A,i)&1)add(i,'\u2298 DONT_LINK',0);
         else{if(t.dup===undefined)t.dup=nodeDupOf(A,i);
           add(i,'duplicate of '+(t.dup>=0?nodeName(A,t.dup):'another node')+': not linked',2);}}}
-    if(AIERR)for(let i=0;i<A.n;i++){if(A.f[i]&1)continue;const p=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40];
+    if(AIERR)for(let i=0;i<A.n;i++){const p=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40];
       const d=Math.hypot(p[0]-cam.pos[0],p[1]-cam.pos[1],p[2]-cam.pos[2]);
       if(d>far||(d>350&&!lblSeen('r'+i,p)))continue;
+      const na=nodeNoAngle(A,i);if(na)add(i,'no angle: '+na,2);
+      if(A.f[i]&1)continue;
       if(nodeWall([A.o[i*3],A.o[i*3+1],A.o[i*3+2]]))add(i,'in the wall',2);}}
   const col=['#6ea8ff','#ff6b5b','#ffb020'];
-  // a map node's tag goes just under its class label (on its entity, where the label is
-  // whether or not it is drawn); a new node's, which has no label, 40 units over its spot
+  // a node's tag goes just under its class label (on its entity, where the label is
+  // whether or not it is drawn; a new node's on Modify's entity), else 40 units over its spot
   const pn=pnEnts(),nMap=A.n0==null?A.n:A.n0,mapEi=pn.length===nMap?pn:null;
   ctx.font='bold 11px ui-monospace,Menlo,Consolas,monospace';ctx.textBaseline='middle';
   for(const[i,o]of out){
     let s;const ei=mapEi&&i<nMap?mapEi[i]:-1,X=ei>=0?ENTS[ei]:null;
+    const mm=!X&&A.mod&&i>=nMap?A.mod[i-nMap]:null;
     if(X&&X.anchor){s=project([X.anchor[0],X.anchor[1],X.anchor[2]+(X.box?X.box.maxs[2]+6:0)]);if(s)s=[s[0],s[1]+7];}
+    else if(mm){const o=modOrigin(mm),b=modBox(mm);s=project([o[0],o[1],o[2]+b.maxs[2]+6]);if(s)s=[s[0],s[1]+7];}
     else s=project([A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40]);
     if(!s||s[0]<0||s[0]>W||s[1]<0||s[1]>H)continue;
     const txt=(o.lv?'\u26a0 ':'')+o.t.join(', '),tw=ctx.measureText(txt).width;
@@ -4545,6 +4564,15 @@ function draw2D(){
       const d=Math.hypot(X.anchor[0]-cam.pos[0],X.anchor[1]-cam.pos[1],X.anchor[2]-cam.pos[2]);
       if(!sel&&d>(tn?2048:700))continue;
       cand.push([sel?-1:d,X]);}
+    // Modify's entities, labelled the same way with a badge in front: NEW for an added one,
+    // EDIT for one of the map's that Modify has changed (Modify draws it instead of the
+    // map's marker, so the map's label isn't drawn)
+    MOD.ents.forEach((m,i)=>{if(!modDrawn(i))return;
+      const o=modOrigin(m),b=modBox(m),k=simKvl(m),tn=k.targetname,sel=modIsSel(i);
+      const d=Math.hypot(o[0]-cam.pos[0],o[1]-cam.pos[1],o[2]-cam.pos[2]);
+      if(!sel&&d>(tn?2048:700))return;
+      cand.push([sel?-1:d,{mod:m,anchor:o,top:[o[0],o[1],o[2]+b.maxs[2]+6],e:{cls:modCls(m),kvl:k},
+        badge:modIsMap(m)?(modEdited(m)?'EDIT':''):'NEW'}]);});
     cand.sort((a,b)=>a[0]-b[0]);
     ctx.font='11px ui-monospace,Menlo,Consolas,monospace';ctx.textBaseline='middle';
     const taken=[];let shown=0;
@@ -4552,21 +4580,28 @@ function draw2D(){
       // a brush entity's in the middle of its box (a door's origin is its hinge, often in
       // the wall), where it is now if it has moved
       let top;
-      if(X.hasGeo&&X.box){const b=X.box,dx=doorXf(X.ei),c=[b.origin[0]+(b.mins[0]+b.maxs[0])/2,b.origin[1]+(b.mins[1]+b.maxs[1])/2,b.origin[2]+(b.mins[2]+b.maxs[2])/2];
+      if(X.mod)top=X.top;
+      else if(X.hasGeo&&X.box){const b=X.box,dx=doorXf(X.ei),c=[b.origin[0]+(b.mins[0]+b.maxs[0])/2,b.origin[1]+(b.mins[1]+b.maxs[1])/2,b.origin[2]+(b.mins[2]+b.maxs[2])/2];
         top=dx?xfP(dx,c):c;}
       else{const mb=X.mbox||X.box;top=mb?[X.anchor[0],X.anchor[1],X.anchor[2]+(X.marker?mb.maxs[2]+6:0)]:X.anchor;}
       const sp=project(top);if(!sp||sp[0]<-50||sp[0]>W+50||sp[1]<-20||sp[1]>H+20)continue;
-      const e=MAP.ents[X.ei], tn=e.kvl.targetname;
+      const e=X.mod?X.e:MAP.ents[X.ei], tn=e.kvl.targetname;
       let lim=tn?2048:700;const wall=tn?512:350;
-      if(d>=0&&d>wall*0.6&&!lblSeen(X.ei,top))lim=wall;
+      if(d>=0&&d>wall*0.6&&!lblSeen(X.mod?'m'+X.mod.id:X.ei,top))lim=wall;
       const al=d<0?1:Math.min(1,(lim-d)/(lim*0.4));
       if(al<0.04)continue;
-      const txt=(e.kvl.classname||'?')+nodeFlagTag(e)+(tn?'  $'+tn:'');
-      const tw=ctx.measureText(txt).width, r=[sp[0]-tw/2-4,sp[1]-16,tw+8,14];
+      const txt=(e.kvl.classname||e.cls||'?')+nodeFlagTag(e)+(tn?'  $'+tn:'');
+      // the badge: small bold capitals on a filled tab, inside the label's left end
+      const bg=X.badge||'';let bw=0;
+      if(bg){ctx.font='bold 9px ui-monospace,Menlo,Consolas,monospace';bw=ctx.measureText(bg).width+8;ctx.font='11px ui-monospace,Menlo,Consolas,monospace';}
+      const tw=ctx.measureText(txt).width, full=tw+(bw?bw+4:0), x0=sp[0]-full/2, r=[x0-4,sp[1]-16,full+8,14];
       if(d>=0&&taken.some(q=>r[0]<q[0]+q[2]&&q[0]<r[0]+r[2]&&r[1]<q[1]+q[3]&&q[1]<r[1]+r[3]))continue;
       taken.push(r);
       ctx.globalAlpha=al;ctx.fillStyle='rgba('+TH.labelbg+',.8)';ctx.fillRect(r[0],r[1],r[2],r[3]);
-      ctx.fillStyle=d<0?TH.sel:(tn?TH.accent:TH.txt);ctx.fillText(txt,sp[0]-tw/2,sp[1]-9);
+      if(bw){ctx.fillStyle=bg==='NEW'?'#ffb020':'#6ea8ff';ctx.fillRect(x0-2,sp[1]-15,bw,12);
+        ctx.font='bold 9px ui-monospace,Menlo,Consolas,monospace';ctx.fillStyle='#14181d';ctx.fillText(bg,x0+2,sp[1]-9);
+        ctx.font='11px ui-monospace,Menlo,Consolas,monospace';}
+      ctx.fillStyle=d<0?TH.sel:(tn?TH.accent:TH.txt);ctx.fillText(txt,x0+(bw?bw+4:0),sp[1]-9);
       shown++;}
     ctx.globalAlpha=1;
   }
@@ -5089,7 +5124,24 @@ void main(){vC=aCol;
   if(distance(aNode,uEye)>uDist){gl_Position=vec4(2.0,2.0,2.0,1.0);return;}
   gl_Position=clipEnd(aPos,aOther);}`;
 let PROUTE=null;
-function pathsOk(){return !!(D.paths&&!D.paths.err&&D.paths.n>=0&&D.paths.o!=null);}
+// The .pth is used only when it was made for this very map: the game checks the map_time
+// stored in it against the .bsp's worldspawn "map_time" and builds its paths again when
+// they differ (PathSearch::ArchiveLoadNodes), as for a copy Modify saved (bump_map_time)
+// under the map's own name. Such a .pth is left out here too.
+function pathsStale(){
+  if(!(D.paths&&!D.paths.err&&D.paths.o!=null)||D.paths.time==null)return false;
+  const mt=String((MAP.ents[0]&&MAP.ents[0].kvl.map_time)||'').trim();
+  return !!mt&&String(D.paths.time).trim()!==mt;        // (a .map has none: it isn't compiled yet)
+}
+function pathsOk(){return !!(D.paths&&!D.paths.err&&D.paths.n>=0&&D.paths.o!=null)&&!pathsStale();}
+// where AI routes come from, for the Output line when they are turned on
+function routesFrom(){
+  const nn=MOD.ents.filter(m=>!modIsMap(m)&&modIsNode(m)).length,plus=nn?' + '+nn+' new node'+(nn===1?'':'s')+' from Modify':'';
+  if(pathsOk())return 'from '+(D.paths.src||'the map\'s .pth')+', '+D.paths.n+' nodes'+plus;
+  if(pathsStale())return 'worked out here: '+(D.paths.src||'the .pth')+' is for another version of this map (its map_time "'+D.paths.time+
+    '" isn\'t the .bsp\'s "'+((MAP.ents[0]&&MAP.ents[0].kvl.map_time)||'')+'"), so the game builds its paths again'+plus;
+  return 'worked out here (no .pth for this map)'+plus;
+}
 // paths to draw: the .pth's, else the map's nodes worked out here (pgCreate), with MODIFY's
 // new nodes added (PA)
 function routesOk(){return pathsOk()||pnEnts().length>0||MOD.ents.some(modIsNode);}
@@ -8091,10 +8143,10 @@ function buildPanel(){
   $('bSimpleMod').onclick=toggleSimpleModels;
   $('bSunFlare').onclick=toggleSunFlare;
   $('bRoutes').onclick=()=>{setCvar('ai_showroutes',CVARS.ai_showroutes?0:1);syncButtons();
-    flash(CVARS.ai_showroutes?'AI routes on (ai_showroutes 1)':'AI routes off (ai_showroutes 0)');};
+    flash(CVARS.ai_showroutes?'AI routes on (ai_showroutes 1): '+routesFrom():'AI routes off (ai_showroutes 0)');};
   AIERR=!!CVARS.ai_showroutes;
   $('bAiErr').onclick=()=>{AIERR=!AIERR;syncButtons();requestDraw();
-    flash(AIERR?'AI errors shown: no paths, one-way, own group, in the wall':'AI errors hidden');};
+    flash(AIERR?'AI errors shown: no paths, one-way, own group, in the wall, no angle':'AI errors hidden');};
   if(!routesOk()){$('bRoutes').disabled=true;$('bRoutes').title='This map has no AI paths (no .pth file in the paks, or one the viewer couldn\'t read): ai_showroutes has nothing to draw';}
   if(!sunHas()){$('bSunFlare').disabled=true;$('bSunFlare').title=sunNone();}
   $('bShowAll').onclick=showAllGroups;$('bGameView').onclick=gameLook;$('bEditView').onclick=editorLook;
@@ -8875,7 +8927,7 @@ function pathNodeInfo(ei){
   if(!pathsOk()&&!PA_GEN)return '';
   if(!PN_ENTS){PN_ENTS=[];MAP.ents.forEach((e,i)=>{if(e.cls==='info_pathnode'&&!e.scr)PN_ENTS.push(i);});}
   const P=PA();if(!P)return '';
-  const src=pathsOk()?D.paths.src:'the paths worked out here (no .pth)',n0=P.n0!=null?P.n0:P.n;
+  const src=pathsOk()?D.paths.src:pathsStale()?'the paths worked out here ('+(D.paths.src||'the .pth')+' is for another version of the map)':'the paths worked out here (no .pth)',n0=P.n0!=null?P.n0:P.n;
   const pn=PN_ENTS,i=pn.indexOf(ei);if(i<0)return '';
   let h='<h4>AI paths (ai_showroutes)</h4>';
   if(pn.length!==n0)return h+'<div class="note warn">'+esc(src)+' has '+n0+' nodes but the map has '+pn.length+' info_pathnode: it was made for another version of the map (the game rebuilds it).</div>';
@@ -9312,7 +9364,8 @@ function paGenerate(){
   const t0=performance.now(),G=pgCreate(org,fl);
   const O=new Float32Array(G.o.length*3);G.o.forEach((p,i)=>O.set(p,i*3));
   PA_GEN={n:G.o.length,o:O,f:Int32Array.from(G.f),c:Float32Array.from(G.c),gen:true,ms:Math.round(performance.now()-t0)};
-  flash('No .pth for this map: its AI paths were worked out here ('+PA_GEN.n+' nodes, '+PA_GEN.ms+' ms)');
+  flash((pathsStale()?(D.paths.src||'The .pth')+' is for another version of this map (map_time differs)':'No .pth for this map')+
+    ': its AI paths were worked out here ('+PA_GEN.n+' nodes, '+PA_GEN.ms+' ms)');
 }
 function paOk(){return !!PA();}
 function paDirty(){PA_C=null;ROUTES=null;PATHCELLS=null;NODELIST=null;requestDraw();}
@@ -9321,7 +9374,7 @@ function PA(){
   const nodes=[];MOD.ents.forEach((m,i)=>{if(!modIsMap(m)&&modIsNode(m)&&!modBusy(i))nodes.push(m);});
   // no .pth: work the map's paths out first, a moment later so the note shows before it
   if(!pathsOk()&&!PA_GEN){
-    if(!PA_PEND){PA_PEND=true;flash('No .pth for this map: working out its AI paths...');
+    if(!PA_PEND){PA_PEND=true;flash((pathsStale()?'The .pth is for another version of this map':'No .pth for this map')+': working out its AI paths...');
       setTimeout(()=>{try{paGenerate();}finally{PA_PEND=false;paDirty();}},40);}
     return null;}
   const B0=paBase();if(!B0)return null;
@@ -9507,15 +9560,24 @@ function modPlaceClick(x,y){
     if(m){modSetKv(m,'origin',o.join(' '));MOD.sel=P.move;
       (P.group||[]).forEach((g,k)=>{const d=P.offs[k];modSetKv(g,'origin',[o[0]+d[0],o[1]+d[1],o[2]+d[2]].map(v=>+v.toFixed(3)).join(' '));});}
     const n=1+(P.group?P.group.length:0);
-    modChanged(true);flash((P.copy?'Copied ':'Moved ')+(n>1?n+' ':'')+'to ( '+o.join(' ')+' )');return true;}
+    modChanged(true);modPlacedSel();flash((P.copy?'Copied ':'Moved ')+(n>1?n+' ':'')+'to ( '+o.join(' ')+' )');return true;}
   if(!modLimitCheck(P.cls)){modPlaceCancel();return true;}
   modHist();
   const m={id:MOD.nid++,kv:[['classname',P.cls],['origin',o.join(' ')]]};
   // a class that faces somewhere gets an "angle": the way the camera looks, to 45 degrees
   if(modFaces(P.cls))m.kv.push(['angle',String(((Math.round(cam.yaw/45)*45)%360+360)%360)]);
   MOD.ents.push(m);MOD.sel=MOD.ents.length-1;MOD.placing=null;MOD.ghost=null;
-  modChanged(true);flash('Placed '+P.cls+' at ( '+o.join(' ')+' ): Edit parameters, Move or Trim origin to adjust it');
+  modChanged(true);modPlacedSel();flash('Placed '+P.cls+' at ( '+o.join(' ')+' ): Edit parameters, Move or Trim origin to adjust it');
   return true;
+}
+// The one just put down is the selection: a new one (added or a copy) lets go of the map's
+// selected brushes and entities, as a click on it does, and More info (N), when open,
+// turns to it, so Edit parameters there edits it and not what was selected before.
+function modPlacedSel(){
+  const m=MOD.ents[MOD.sel];if(!m)return;
+  if(!modIsMap(m)&&SEL.size){SEL.clear();lastHit=null;selectionChanged();}
+  if($('info').classList.contains('on')&&infoMode==='sel')showInfo('sel');
+  modRender();requestDraw();
 }
 // while placing: where it would go under the cursor (the hover read-out finds it)
 function modGhost(h){
@@ -9595,15 +9657,29 @@ function modSelect(i){MOD.sel=i;MOD.multi.clear();const m=MOD.ents[i];
 function modFly(){const m=MOD.ents[MOD.sel];if(!m)return;flyTo(lookFrom(modOrigin(m),220),null,null);requestDraw();}
 
 // ---- Edit parameters: the entity as the .bsp's entity lump has it --------------------------
+// One entity as "key" "value" lines. A quoted key or value ends on its own line (the
+// game's parser would read a quote left open on into the next lines and take the rest of
+// the entity, braces and all, as keys and values), and holds no { or }.
 function modParse(txt){
-  const T=[];const re=/"([^"]*)"|(\/\/[^\n]*)|([{}])|(\S+)/g;let r;
-  while((r=re.exec(txt))){if(r[2]!=null)continue;T.push(r[3]!=null?{b:r[3]}:{s:r[1]!=null?r[1]:r[4]});}
-  let i=0;if(T[0]&&T[0].b==='{')i=1;
-  const kv=[];
-  for(;i<T.length;i++){const t=T[i];if(t.b==='}')break;if(t.b)throw new Error('a "{" inside the entity');
-    const v=T[i+1];if(!v||v.b!=null)throw new Error('"'+t.s+'" has no value');
-    if(!t.s)throw new Error('an empty key');
-    kv.push([t.s,v.s]);i++;}
+  const re=/"([^"]*)"|(\/\/.*$)|([{}])|(\S+)/g,kv=[];let opened=false,closed=false,key=null,keyLn=0;
+  const lines=String(txt).split(/\r?\n/);
+  for(let n=0;n<lines.length&&!closed;n++){
+    const ln=lines[n],L=n+1;
+    const q=(ln.replace(/\/\/.*$/,'').match(/"/g)||[]).length;
+    if(q%2)throw new Error('line '+L+': a quote isn\'t closed on its line');
+    let r;re.lastIndex=0;
+    while((r=re.exec(ln))){
+      if(r[2]!=null)break;
+      if(r[3]!=null){
+        if(r[3]==='{'){if(opened||kv.length||key!=null)throw new Error('line '+L+': a "{" inside the entity');opened=true;continue;}
+        closed=true;break;}
+      const t=r[1]!=null?r[1]:r[4];
+      if(/[{}]/.test(t))throw new Error('line '+L+': a { or } inside a key or value');
+      if(key==null){if(!t)throw new Error('line '+L+': an empty key');key=t;keyLn=L;}
+      else{kv.push([key,t]);key=null;}
+    }
+    if(key!=null&&keyLn===L)throw new Error('line '+L+': "'+key+'" has no value on its line');
+  }
   if(!kv.some(x=>x[0].toLowerCase()==='classname'&&x[1]))throw new Error('no "classname"');
   if(kv.some(x=>x[0].toLowerCase()==='origin')&&!parseVec(kv.find(x=>x[0].toLowerCase()==='origin')[1],3))throw new Error('"origin" needs three numbers');
   return kv;

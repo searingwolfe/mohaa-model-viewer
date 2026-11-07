@@ -65,7 +65,7 @@ except Exception:                         # pragma: no cover
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 100
+MAP_VIEWER_REV = 105
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
 INDEX_VERSION = 10
@@ -2724,7 +2724,7 @@ def vis_payload(bsp, stats, texs, blobs, say=log):
 
 
 # AI path files: maps/<map>.pth in the paks (the game's own), else beside the map
-def paths_payload(vfs, vpath, src, blobs, say=log):
+def paths_payload(vfs, vpath, src, blobs, say=log, map_time=None):
     """The path nodes and connections the game built for this map (what ai_showroutes
     draws), from maps/<map>.pth: {"src": where it was found, "n": nodes, "o": their
     origins, "f": their flags, "c": per connection [from, to, fallheight, pos1, pos2]
@@ -2763,6 +2763,12 @@ def paths_payload(vfs, vpath, src, blobs, say=log):
             C.extend(p1)
             C.extend(p2)
     say("AI paths: %d nodes, %d connections (%s)" % (len(pf["nodes"]), len(C) // 9, where))
+    # the game uses a .pth only when its map_time is the .bsp's (PathSearch::ArchiveLoadNodes);
+    # a copy saved with Modify under the map's own name has a new one, so the page works the
+    # paths out as the game builds them again
+    if map_time and (pf["maptime"] or "").strip() != map_time.strip():
+        say("! %s is for another version of this map (its map_time %r, the .bsp's %r): the game builds "
+            "the paths again, so the viewer works them out" % (where, pf["maptime"], map_time))
     # "fail": the file's node check failed flag (PathSearch::m_NodeCheckFailed), which
     # g_nodecheck 1 acts on when the map loads
     return {"src": where, "n": len(pf["nodes"]), "time": pf["maptime"], "fail": int(bool(pf["failed"])),
@@ -4416,7 +4422,8 @@ def build(src, args):
             MC.swallowed()
             log("! r_showtris left out: %s" % e)
     try:
-        paths = paths_payload(vfs, vpath, src, blobs)
+        paths = paths_payload(vfs, vpath, src, blobs,
+                              map_time=(ents[0]["kvd"].get("map_time") if ents else None))
     except Exception as e:
         MC.swallowed()
         log("! AI paths left out: %s" % e)

@@ -61,6 +61,11 @@ run at once.
 
 ## The decompiler
 
+- **Entities** are written one key a line. A key or value with a line break or a brace
+  in it (a damaged lump: the game reads a quoted string across lines) is written on one
+  line, braces as ( ), with an Output line naming the entity (`_map_safe`), so the .map
+  has the lump's entities one for one; otherwise every entity after it would be one place
+  out (static props with their neighbour's model, script entities without theirs).
 - **Brushes** are rebuilt from their planes (a large square on each plane, cut down by
   the brush's other planes, as `polylib.c` does). Brushes of an entity with an origin
   are stored around (0,0,0) and are moved back; an origin brush is added back where the
@@ -204,7 +209,9 @@ run at once.
   behind a wall) to nothing at its end. Selected entities are always labelled, fully. A path node with spawnflags
   names its highest one after its class, `info_pathnode [CORNER_RIGHT]` for COVER +
   CORNER_RIGHT (`nodeFlagTag`; one name, the more particular kind, so labels stay short),
-  since its outline colour is otherwise the only sign.
+  since its outline colour is otherwise the only sign. Modify's entities are labelled the
+  same way, with a filled tab in front: **NEW** (amber) on an added one, **EDIT** (blue)
+  on one of the map's that Modify has changed and draws instead of the map's marker.
 - **Sky.** With Simple Sky off (the default) the sky is drawn as the game draws it: the
   shader's far box (`skyParms env/<name>`, the six `_rt _bk _lf _ft _up _dn` pictures),
   looked up per pixel as `vec_to_st` in `tr_sky.c`, at the far end of the depth range
@@ -523,15 +530,18 @@ run at once.
     while loading because the node, dropped to the floor, lands on the very spot of an
     earlier one, `^~^~^ Duplicate node at (...) not linked` in `PathSearch::LoadNodes`;
     the earlier one is linked, so routes still end there; m1l1 has two `$friendlynode`s
-    at one origin, entities 111 and 705). A map node's tag sits under its class label, a new
-    node's over it; within `ai_showroutes_distance`, past 350 units only in sight.
+    at one origin, entities 111 and 705). A node's tag sits under its class label (a new
+    node's under its NEW label); within `ai_showroutes_distance`, past 350 units only in sight.
     Modify's own problems (48 paths, cut off, cell full) join the same tag. **AI errors**
     (SHOW, after AI routes; `AIERR`) shows or hides the tags that report a problem: no
-    paths, one-way, own group of N and in the wall. It turns on and off with AI routes and
+    paths, one-way, own group of N, in the wall, and no angle (a CORNER_LEFT,
+    CORNER_RIGHT, CRATE or LOW_WALL_ARC node with no "angle" / "angles": its special
+    attack faces the node's yaw, `PathNode::GetSpecialAttack`, so it faces east; `nodeNoAngle`). It turns on and off with AI routes and
     can be turned off while AI routes stays on; DONT_LINK, duplicate, 48 paths and cell
     full always show. The `.pth` is `maps/<map>.pth` in the paks (else beside the file),
     unpacked (`CSVG` + LZ77, `lz77.cpp`) and read as `PathSearch::ArchiveLoadNodes` reads
-    it, typed (the game's own files) or untyped (OpenMoHAA's); node i is the map's i-th
+    it (and, as the game, used only when the map_time in it is the .bsp's; else the paths
+    are worked out here, `pathsStale`; turning AI routes on says in Output which), typed (the game's own files) or untyped (OpenMoHAA's); node i is the map's i-th
     `info_pathnode`, and a count mismatch is flagged. A path node's info card lists its
     connections.
     A map with path nodes but no `.pth` gets its paths worked out by the page the first
@@ -981,10 +991,14 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
   again, both ways, as a new node's are, and the `.pth`'s links to and from it are left
   out; a node whose classname is changed away from `info_pathnode` loses its links (and
   gets them again if changed back), once Edit parameters is closed.
+- **Putting one down** (Add, Copy, Move) selects it: a new one lets go of the map's
+  selection, and an open More info card (N) turns to it (`modPlacedSel`).
 - **Edit parameters** (Alt+E) opens a box, which moves by its title bar
   and stays where it was left, with the entity as
   the `.bsp`'s entity lump holds it, `"key" "value"` lines in `{ }`. What is typed applies
-  a moment later when it reads (an error says why it doesn't): origin, angles, spawnflags,
+  a moment later when it reads (an error says why it doesn't, with its line: one
+  `"key" "value"` pair a line, every quote closed on its line, no { or } in a key or
+  value; the game would read a quote left open on across the lines that follow): origin, angles, spawnflags,
   setsize, a model the page has (its size), classname. Undo and Redo step
   through the changes made since the box opened (Ctrl+Z, Ctrl+Y; greyed when there is
   none), each pause in typing one step; Done (Esc), at the bottom right, keeps it. Light isn't worked out for new entities.
