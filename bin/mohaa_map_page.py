@@ -7942,6 +7942,11 @@ const FILTER_KEYS={'alt+1':C_WORLD,'alt+2':C_ENTITIES,'alt+3':C_PATCH,'alt+4':C_
   'alt+7':C_CLIP,'alt+8':C_PATH,'alt+9':C_AINODE,'alt+0':C_LIGHT,'ctrl+d':C_DETAIL,'ctrl+h':C_HINT,'ctrl+m':C_MODEL,
   'ctrl+r':C_TERRAIN,'ctrl+t':C_TRIGGER,'ctrl+p':C_PORTAL,'ctrl+k':C_SKY,'ctrl+o':C_NODRAW,'ctrl+i':C_RAIN,'ctrl+g':C_FOLIAGE,'ctrl+e':C_SCRIPT,'ctrl+b':C_SCRTRIG};
 window.addEventListener('keydown',e=>{
+  // never the browser's reload or back / forward, even from a text box: they would throw
+  // away Modify's work (the launcher turns the pane's own browser keys off too)
+  if(e.key==='F5'||e.key==='BrowserRefresh'||e.key==='BrowserBack'||e.key==='BrowserForward'||
+     ((e.ctrlKey||e.metaKey)&&(e.key==='r'||e.key==='R'))||(e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key==='Home'))){
+    e.preventDefault();if(typing()&&!(e.ctrlKey||e.metaKey))return;}
   if(typing()){if(e.key==='Escape'){document.activeElement.blur();e.preventDefault();}return;}
   // MODIFY's Trim origin takes the movement keys: the camera stays where it is
   if(MOD.trim&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&modTrimKey(e)){e.preventDefault();return;}
@@ -9634,7 +9639,59 @@ function modCopySel(){
   flash('Copied '+(copies.length>1?copies.length+' (as they are spaced)':modName(copies[0]))+': click on the map to put '+(copies.length>1?'them':'it')+' down (Esc takes '+(copies.length>1?'them':'it')+' away)'+(dropped?'. Their targetname and target were left out':''));
 }
 // after any change: the list, the drawing, and the paths when nodes changed
-function modChanged(paths){if(paths)paDirty();modHideSync();modRender();requestDraw();}
+function modChanged(paths){if(paths)paDirty();modHideSync();modRender();requestDraw();modBackupSoon();}
+// ---- Modify's work kept safe ----------------------------------------------------------------
+// Unsaved work is copied, a moment after each change, to the launcher (a file in the
+// output folder's modify_recovery, per map and map_time; mohaa-modify-backup) or, in a
+// browser, to its local storage. When this map opens again with such a copy, the page
+// offers it back. A save, or Discard changes, clears it. A reload of the page, or leaving
+// it, while work is unsaved asks first (beforeunload).
+let _modBkT=0,_modBkKey=null;
+function modBackupId(){return{map:String(D.name||''),path:String(D.path||''),mt:String((MAP.ents[0]&&MAP.ents[0].kvl.map_time)||'')};}
+function modBackupSoon(){if(_modBkT)clearTimeout(_modBkT);_modBkT=setTimeout(modBackupNow,1200);}
+function modBackupNow(){
+  _modBkT=0;if(!MAP||!MOD)return;
+  const un=modUnsaved(),id=modBackupId();
+  const snap=un?modSnap():null,key=snap?JSON.stringify(snap.ents):'';
+  if(key===_modBkKey)return;_modBkKey=key;
+  const body=snap?Object.assign(id,{t:Date.now(),nw:un.nw,ch:un.ch,ents:snap.ents}):id;
+  const txt=JSON.stringify(body);
+  if(txt.length>8e6)return;
+  try{if(window.chrome&&window.chrome.webview){window.chrome.webview.postMessage('mohaa-modify-backup\n'+txt);return;}}catch(_e){}
+  const k='mohaaMapViewerModify|'+id.map+'|'+id.mt;
+  if(snap)LS.set(k,txt);else{try{localStorage.removeItem(k);}catch(_e){}}
+}
+// a copy found when the map opens: offer it back
+function modRecoverAsk(){
+  const id=modBackupId();
+  try{if(window.chrome&&window.chrome.webview){window.chrome.webview.postMessage('mohaa-modify-recovery\n'+JSON.stringify(id));return;}}catch(_e){}
+  let b=null;try{b=JSON.parse(LS.get('mohaaMapViewerModify|'+id.map+'|'+id.mt)||'null');}catch(_e){}
+  if(b)window.MOHAA_MODIFY_RECOVERY(b);
+}
+window.MOHAA_MODIFY_RECOVERY=function(b){
+  if(!b||!Array.isArray(b.ents)||!b.ents.length||MOD.ents.some(m=>!modIsMap(m)||modEdited(m)))return;
+  const id=modBackupId();if(b.map!==id.map||String(b.mt||'')!==id.mt)return;
+  const ents=b.ents.filter(e=>e&&Array.isArray(e.kv)&&e.kv.every(x=>Array.isArray(x)&&x.length===2)&&
+    (e.ei==null||(e.ei>0&&e.ei<MAP.ents.length&&Array.isArray(e.orig))));
+  if(!ents.length)return;
+  const nw=ents.filter(e=>e.ei==null).length,ch=ents.length-nw,when=b.t?new Date(b.t).toLocaleString():'earlier';
+  const ov=document.createElement('div');ov.className='ov';ov.id='modRecOv';
+  ov.innerHTML='<div class="card" style="max-width:520px"><h3>Unsaved Modify work</h3><div class="co" style="margin-bottom:10px">'+
+    'This map was closed or reloaded with Modify\'s work not saved ('+when+'): '+(nw?nw+' new entit'+(nw===1?'y':'ies'):'')+(nw&&ch?' and ':'')+
+    (ch?ch+' changed map entit'+(ch===1?'y':'ies'):'')+'. Restore it?</div><div class="row">'+
+    '<button id="bRecYes">Restore</button><span style="flex:1"></span><button id="bRecNo">Discard</button></div></div>';
+  $('stage').appendChild(ov);
+  const close=()=>ov.remove();
+  $('bRecYes').onclick=()=>{close();
+    modHist();
+    modRestore({ents:ents.map(e=>({id:MOD.nid++,ei:e.ei==null?undefined:e.ei,kv:e.kv.map(x=>[String(x[0]),String(x[1])]),
+      orig:e.ei!=null?MAP.ents[e.ei].kv.map(x=>[x[0],x[1]]):null,hid:!!e.hid})),sel:null,multi:[]});
+    MOD.ents.forEach(m=>{if(m.ei===undefined)delete m.ei;});
+    modChanged(true);lineDirty=true;flash('Restored Modify\'s unsaved work: '+nw+' new, '+ch+' changed');};
+  $('bRecNo').onclick=()=>{close();_modBkKey=null;modBackupNow();flash('Unsaved Modify work discarded');};
+};
+window.addEventListener('beforeunload',e=>{
+  if(MOD&&!MOD.leaving&&typeof modUnsaved==='function'&&MAP&&modUnsaved()){modBackupNow();e.preventDefault();e.returnValue='';}});
 function modDeselect(){const m=MOD.ents[MOD.sel];
   if(MOD.trim)modTrim(false);
   if(MOD.placing&&MOD.placing.move!=null)modPlaceCancel();
@@ -10061,6 +10118,8 @@ function modUnsaved(){
   return modSaveKey()===MOD.savedKey?null:{nw:nw,ch:ch};
 }
 // the launcher's close question answered with Save as: save, then close once it is written
+function modDiscardClose(){MOD.leaving=true;MOD.savedKey=modSaveKey();_modBkKey=null;modBackupNow();
+  try{window.chrome.webview.postMessage('mohaa-close');}catch(_e){}}
 function modSaveThenClose(kind){MOD.closeAfter=true;modSave(kind==='map'?'map':'bsp');}
 function modSaveCancelled(){MOD.closeAfter=false;MOD.pendKey=null;flash('Not saved');}
 function modSave(kind){
@@ -10082,7 +10141,7 @@ function modSave(kind){
 }
 // the launcher's answer
 function modSaved(ok,msg){flash(msg);$('modStat').textContent=msg;
-  if(ok&&MOD.pendKey!=null)MOD.savedKey=MOD.pendKey;
+  if(ok&&MOD.pendKey!=null){MOD.savedKey=MOD.pendKey;modBackupNow();}
   MOD.pendKey=null;
   const close=MOD.closeAfter;MOD.closeAfter=false;
   if(ok&&close)closeViewer();}
@@ -10531,6 +10590,7 @@ async function main(){
     initGL();
     buildPanel();
     modInit();
+    setTimeout(modRecoverAsk,500);
     simInit();
     cvarCountRender();
     loadTextures();

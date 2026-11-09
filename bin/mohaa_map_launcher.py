@@ -55,7 +55,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 105
+MAP_VIEWER_REV_REQUIRED = 106
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".bak": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".lin": "bin", ".cfg": "scr"}
@@ -121,7 +121,9 @@ _PRIVACY_SWAPS = (
      "        the generated .html viewers and decompiled .map files in your chosen\n"
      "        output folder. Both are removable from File --> Clear built maps /\n"
      "        Clear %temp% files. On Windows, the embedded 3D pane (Microsoft Edge\n"
-     "        WebView2) also keeps its browser files in a \"webview2\" folder beside (a)."),
+     "        WebView2) also keeps its browser files in a \"webview2\" folder beside (a),\n"
+     "        and MODIFY's unsaved work is kept in a \"modify_recovery\" folder there\n"
+     "        until it is saved or discarded."),
     ("(theme, backdrop colour,\n"
      "        renderer, placement angles, game cvars) in the browser's local storage.\n"
      "        The embedded pane runs in private mode and forgets them when the program\n"
@@ -1300,7 +1302,54 @@ class MapApp(ML.App):
             self._page_js("try{modSaveThenClose(%s)}catch(e){}" % json.dumps(choice))
         elif choice == "discard":
             self._log_line("  (MODIFY's unsaved changes discarded)", "dim")
-            self._close_viewer()
+            # the page clears its kept copy and lets itself go, then asks to close
+            self._page_js("try{modDiscardClose()}catch(e){}")
+
+    # MODIFY's unsaved work kept beside the program (output/modify_recovery), one file per map
+    # and map_time, so a crash, a reload or a closed window can't lose it
+    MODIFY_BACKUP_MAX = 8 * 1024 * 1024
+
+    def _modify_backup_path(self, info):
+        import hashlib
+        name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(info.get("map") or "map")).lstrip(".")[:60] or "map"
+        h = hashlib.sha1(("%s|%s" % (info.get("map") or "", info.get("mt") or "")).encode("utf-8", "replace")).hexdigest()[:10]
+        return os.path.join(ML.DATADIR, "modify_recovery", "%s_%s.json" % (name, h))
+
+    def _modify_backup(self, body):
+        """Write (or, with no entities, remove) the kept copy of MODIFY's unsaved work."""
+        if len(body) > self.MODIFY_BACKUP_MAX: return
+        try: info = json.loads(body)
+        except Exception: MC.swallowed(); return
+        if not isinstance(info, dict): return
+        p = self._modify_backup_path(info)
+        try:
+            if isinstance(info.get("ents"), list) and info["ents"]:
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                MC.atomic_write_text(p, json.dumps(info, separators=(",", ":")))
+                if not getattr(self, "_modify_backup_said", False):
+                    self._modify_backup_said = True
+                    self._log_line(f"  (MODIFY's unsaved work is kept in {os.path.dirname(p)} until it is saved or discarded)", "dim")
+            elif os.path.isfile(p):
+                os.remove(p)
+        except OSError:
+            MC.swallowed()
+
+    def _modify_recovery(self, body):
+        """The page opened: hand it the kept copy for its map, if there is one."""
+        try: info = json.loads(body)
+        except Exception: MC.swallowed(); return
+        if not isinstance(info, dict): return
+        p = self._modify_backup_path(info)
+        try:
+            if not os.path.isfile(p) or os.path.getsize(p) > self.MODIFY_BACKUP_MAX: return
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            MC.swallowed(); return
+        if not isinstance(data, dict) or data.get("map") != info.get("map") or (data.get("mt") or "") != (info.get("mt") or ""):
+            return
+        self._log_line(f"  MODIFY: unsaved work found for {info.get('map')} - the viewer offers to restore it", "warn")
+        self._page_js("try{MOHAA_MODIFY_RECOVERY(%s)}catch(e){}" % json.dumps(data, separators=(",", ":")))
 
     def _unsaved_dialog(self, title, head, body, buttons):
         """A modal choice in the launcher's look (dark / light), or the system's own look
@@ -1471,6 +1520,11 @@ class MapApp(ML.App):
         self._embed_drop_hooked = True
         try: wv.web.AllowExternalDrop = False
         except Exception: MC.swallowed()
+        # no browser keys in the pane (F5 / Ctrl+R reload, Alt+Left / Right back and forward,
+        # Ctrl+P, F12...): a reload would throw away MODIFY's unsaved work. Copy, cut, paste
+        # and select-all still work.
+        try: wv.core.Settings.AreBrowserAcceleratorKeysEnabled = False
+        except Exception: MC.swallowed()
         try:
             from System.Windows.Forms import DataFormats, DragDropEffects
 
@@ -1535,6 +1589,14 @@ class MapApp(ML.App):
                         # SIMULATE's model: "mohaa-sim-build\n<path of a .tik in the paks>"
                         vp = m.split("\n", 1)[1][:300]
                         self._page_requests.append(lambda v=vp: self._sim_build(v))
+                    elif m.startswith("mohaa-modify-backup\n"):
+                        # MODIFY's unsaved work, a moment after each change (no entities: saved / gone)
+                        body = m.split("\n", 1)[1]
+                        self._page_requests.append(lambda b=body: self._modify_backup(b))
+                    elif m.startswith("mohaa-modify-recovery\n"):
+                        # the page opened: is there unsaved work kept for this map?
+                        body = m.split("\n", 1)[1]
+                        self._page_requests.append(lambda b=body: self._modify_recovery(b))
                     elif m.startswith("mohaa-modify-save\n"):
                         # MODIFY's Save as .bsp / .map: the new entities, and the map they go in
                         try: req = json.loads(m.split("\n", 1)[1])

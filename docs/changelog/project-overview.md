@@ -108,7 +108,7 @@ Model Viewer and what both share; the Map Viewer has its own notes in
 ## Current state
 
 - Version 1.0.001 (pre-release), with both viewers. `VIEWER_REV` 80; the Map Viewer's
-  `MAP_VIEWER_REV` 105 and `INDEX_VERSION` 10. 1.0.001 is the hardening pass (see
+  `MAP_VIEWER_REV` 106 and `INDEX_VERSION` 10. 1.0.001 is the hardening pass (see
   [hardening-notes.md](hardening-notes.md)); page output is unchanged.
 - Windows is the main platform (embedded pane); macOS and Linux run the launchers through
   their `.sh` files and open pages in the browser.

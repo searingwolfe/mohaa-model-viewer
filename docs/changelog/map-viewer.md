@@ -1107,6 +1107,13 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
   `_unsaved_dialog`, in the launcher's dark / light look or the system's with "Use old
   popup windows"): **Save as .bsp** (greyed out for a map opened from a .map), **Save as
   .map**, **Discard changes**, or **Cancel** (Esc, the window's X; Cancel has the focus).
+  **Kept safe**: the pane has no browser keys (no F5 / Ctrl+R reload or Alt+Left back:
+  `AreBrowserAcceleratorKeysEnabled` off, and the page blocks them too); leaving or
+  reloading the page with unsaved work asks first (`beforeunload`); and a moment after
+  each change the work is copied to `output/modify_recovery/<map>_<hash>.json` (per map
+  and map_time; local storage in a browser), offered back when the map opens again
+  (Restore / Discard) and cleared by a save or Discard changes (`modBackupNow`,
+  `modRecoverAsk`, `MapApp._modify_backup` / `_modify_recovery`).
   A Save as closes the viewer once the file is written (`modSaveThenClose`); cancelling
   its file box keeps the viewer open (`modSaveCancelled`). In a browser the page asks with
   the browser's own box. Outside the launcher, Save as .map downloads the file and

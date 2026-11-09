@@ -1538,6 +1538,22 @@ Changes to `python_installer_updater.bat` unless noted.
   green with its edges (`drawScriptTrigs`); under Script ents the trigger stays a small
   marker of its class's size (`markerBoxOf`), and selecting it outlines the whole volume.
   Tested with m3l1b's 11 respawned `$minefield` triggers.
+- Map Viewer page rev 106 (`MAP_VIEWER_REV` 106, `MAP_VIEWER_REV_REQUIRED` 106): Modify's
+  work can't be lost to a reload. A session's work was lost with no question asked: the
+  log shows the page starting over (its AI paths worked out again) with no build, which is
+  the pane reloading itself, most likely a browser key (F5, Ctrl+R while a text box had
+  the focus, Alt+Left / Right). Now:
+  - the launcher turns the pane's browser keys off (`AreBrowserAcceleratorKeysEnabled`;
+    copy, cut, paste and select-all still work), and the page blocks F5, Ctrl+R and
+    Alt+Left / Right / Home itself, text boxes included;
+  - leaving or reloading the page with unsaved work asks first (`beforeunload`), also
+    when the launcher opens another map or closes the viewer;
+  - a moment after each change the work is copied to the launcher, which keeps it in
+    `output/modify_recovery/<map>_<hash>.json` (per map and map_time; `MapApp._modify_backup`),
+    or, in a browser, to local storage; when the map opens again with such a copy the page
+    offers it back (Restore / Discard; `modRecoverAsk`, `MOHAA_MODIFY_RECOVERY`,
+    `mohaa-modify-recovery`). A save or Discard changes clears it.
+  The privacy notice names the folder.
 - Map Viewer page rev 105 (`MAP_VIEWER_REV` 105, `MAP_VIEWER_REV_REQUIRED` 105): a new AI
   error tag, **no angle: CORNER_RIGHT** (or CORNER_LEFT, CRATE, LOW_WALL_ARC), on a path
   node with one of the spawnflags whose special attack faces the node's way but with no
