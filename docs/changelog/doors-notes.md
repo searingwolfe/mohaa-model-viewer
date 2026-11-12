@@ -99,11 +99,34 @@ the code is the Doors section of the page script (`doorsInit` ... `doorInfo` in
   background catches up in order. A test can stop the frame loop, set `performance.now`
   and call it.
 
+## Actors and doors
+
+A man doesn't use a door the way the player does; the door opens for him when he walks up
+to it (`Door::SpawnTriggerField`, `FieldTouched`, `TryOpen`, `DoorFire`). Simulate's actor
+follows this (`actDoorSim`, `actDoorFire` in the page):
+
+- The master spawns a trigger field round its group (the doors that touch, its chain): the
+  group's bounds grown by 60 units in x and y and 8 in z. There is none for a door with
+  `health` or TARGETED (128), and a NOT_MONSTERS (16) door's field doesn't answer him.
+- His box in the field makes the master try to open: the proximity test against the
+  master's own box, grown by a quarter of his speed in a second (`FieldTouched`), then the
+  same `Door::Open` the use key runs.
+- The doors are solid to him: he runs on the spot against a shut one until it has swung or
+  slid clear. While the master is opening, a man in its field is held to the door's
+  `speed` x 64 units a second (`speed` is 1 / its time: a wood door, 1 second, gives 64)
+  and his path's look-ahead is cut short (`ForceShortLookahead`).
+- The page plans his walk on copies of the live doors (the same `doorOpen` and
+  `doorsAdvance`, with a set of their own and nothing drawn), then plays the door events
+  the plan made on the map's doors at their times, so what was planned is what plays.
+- A door that nothing is moving or about to move, with him against it for 20 seconds, stops
+  him there.
+
 ## Not done
 
 - A fully open door cuts the AI path connections an actor can't sweep past it
   (`Door::SetState` -> `Entity::DisconnectPaths`, a cylinder trace against the door), and
   `ai_showroutes` stops drawing them until the door starts closing. The page doesn't.
-- Locks (script only), a door's `message`, its sounds, and being blocked.
+- Locks (script only), a door's `message`, its sounds, and being blocked (`DoorBlocked`,
+  also for Simulate's actor).
 - A door the level script spawns or moves: script entities are point entities here
   (Level script, map-viewer.md).

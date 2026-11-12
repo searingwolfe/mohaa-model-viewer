@@ -55,7 +55,7 @@ MAP_LOG = os.path.join(ML.DATADIR, "output_console_map.log")
 TEMP_PREFIX = "mohaamap_"
 # Oldest page format a cached map page may have; keep equal to MAP_VIEWER_REV in
 # mohaa_map_view.py. Older pages are rebuilt so new viewer features show up.
-MAP_VIEWER_REV_REQUIRED = 106
+MAP_VIEWER_REV_REQUIRED = 108
 # Files the map tree lists, and what each kind is.
 MAP_KINDS = {".bsp": "bsp", ".map": "map", ".bak": "map", ".scr": "scr", ".txt": "scr", ".pth": "bin",
              ".min": "bin", ".dcl": "bin", ".vis": "bin", ".lin": "bin", ".cfg": "scr"}
@@ -131,10 +131,10 @@ _PRIVACY_SWAPS = (
      "        files.",
      "(theme, backdrop colour,\n"
      "        panel options, the grid's size and colour, game cvars, where the Edit\n"
-     "        parameters box was left, and Simulate's model) in the browser's local\n"
-     "        storage. The embedded pane runs in private mode and forgets them when the\n"
-     "        program closes; in your own browser they stay with that browser's data for\n"
-     "        local files."),
+     "        parameters box was left, and Simulate's model, human and weapon) in the\n"
+     "        browser's local storage. The embedded pane runs in private mode and\n"
+     "        forgets them when the program closes; in your own browser they stay with\n"
+     "        that browser's data for local files."),
     ("(textures are embedded as data: URIs)", "(its textures are embedded in it)"),
     ("workspace, model headers\n"
      "   are bounds-checked, and generated pages escape game-file text), but no\n"
@@ -626,7 +626,7 @@ class MapApp(ML.App):
         if not os.path.isdir(pc): return None
         try: names = os.listdir(pc)
         except OSError: MC.swallowed(); return None
-        ours = ("mohaa_map_view", "mohaa_map_page", "mohaa_bsp", "mohaa_entdefs", "mohaa_map_launcher",
+        ours = ("mohaa_map_view", "mohaa_map_page", "mohaa_map_actor", "mohaa_bsp", "mohaa_entdefs", "mohaa_map_launcher",
                 "mohaa_view", "mohaa_textures", "mohaa_launcher")
         return pc if any(any(nm.startswith(o + ".") for o in ours) for nm in names) else None
 
@@ -1024,8 +1024,8 @@ class MapApp(ML.App):
                     line = line.rstrip("\n")
                     out_lines.append(line)
                     if bgen is not None and bgen != self._build_gen: break
-                    # "!" lines in red, as warnings: the build carries on ("err" would end it)
-                    self._log_q.put(("warn" if line.lstrip().startswith("!") else "dim", "  " + line))
+                    # "!" lines in yellow, as notes: the build carries on and they aren't errors
+                    self._log_q.put(("note" if line.lstrip().startswith("!") else "dim", "  " + line))
                 err = p.stderr.read()
                 p.wait(timeout=900)
             finally:
@@ -1498,6 +1498,178 @@ class MapApp(ML.App):
                 self._log_q.put(("warn", f"  (Simulate: {vp} can't be drawn: {str(e)[:200]})"))
             self._page_requests.append(lambda j=js: self._page_js(j))
 
+    # ---- SIMULATE on a path node: a human with a weapon -------------------------------------
+    # The page asks for three things: the lists of humans and weapons (mohaa-sim-actors), an
+    # actor (mohaa-sim-actor: the human and the weapon built as one packet with the human's
+    # skin weights, plus its idle clip and which roles its weapon group can play) and the
+    # clips a node's role plays (mohaa-sim-actor-anim, built when Simulate is first pressed).
+    # The logic is in mohaa_map_actor.py; this is the Tk-side plumbing. Every request is
+    # checked here, since the page's text is not trusted.
+    SIM_ACTOR_KEEP = 4          # actors whose skeleton is kept for their clips
+
+    def _sim_actor_js(self, fn, *args):
+        """Queue `fn(args...)` to run in the page, on the Tk thread."""
+        js = "try{%s(%s)}catch(e){}" % (fn, ",".join(json.dumps(a, separators=(",", ":")) for a in args))
+        self._page_requests.append(lambda j=js: self._page_js(j))
+
+    def _sim_actors_list(self):
+        """The page's actor pickers: every human (classname Actor) and weapon in the paks."""
+        if self._vfs is None or not self._tex_ready:
+            self._sim_actor_js("MOHAA_SIM_ACTORS", None, None, "The paks are still loading: try again in a moment")
+            return
+        if not hasattr(self, "_sim_lock"): self._sim_lock = threading.Lock()
+        vfs = self._vfs
+        def work():
+            try:
+                import mohaa_map_actor as MA
+                humans, weapons = MA.list_models(vfs)
+                if not humans or not weapons:
+                    raise ValueError("no humans or weapons found in the paks")
+                self._sim_actor_js("MOHAA_SIM_ACTORS", humans, weapons, "")
+            except Exception as e:
+                MC.swallowed()
+                self._log_q.put(("warn", f"  (Simulate: no actor list: {str(e)[:200]})"))
+                self._sim_actor_js("MOHAA_SIM_ACTORS", None, None, "No actor list: %s" % str(e)[:160])
+        threading.Thread(target=work, daemon=True).start()
+
+    def _sim_actor_parse(self, body, need):
+        """The page's JSON request as a dict with the keys in `need`, or None (logged)."""
+        try:
+            req = json.loads(body)
+        except Exception:
+            MC.swallowed()
+            req = None
+        ok = isinstance(req, dict) and all(isinstance(req.get(n), str) for n in need)
+        if ok and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", req.get("k", "")):
+            ok = False
+        if not ok:
+            self._log_q.put(("warn", "  (Simulate: a malformed actor request was ignored)"))
+            return None
+        return req
+
+    def _sim_actor_build(self, body):
+        """Build one human holding one weapon for the page (MOHAA_SIMACTOR)."""
+        req = self._sim_actor_parse(body, ("k", "m", "w"))
+        if req is None:
+            return
+        k = req["k"]
+        try:
+            import mohaa_map_actor as MA
+            mp = MA.check_vpath(req["m"], MA.HUMAN_DIR)
+            wp = MA.check_vpath(req["w"], MA.WEAPON_DIR)
+        except ValueError as e:
+            self._sim_actor_js("MOHAA_SIMACT_FAIL", k, "", str(e)); return
+        vfs, shaders = self._vfs, self._SH
+        if vfs is None or not self._tex_ready:
+            self._sim_actor_js("MOHAA_SIMACT_FAIL", k, "", "the paks are still loading"); return
+        for vp in (mp, wp):
+            if not vfs.exists(vp):
+                self._sim_actor_js("MOHAA_SIMACT_FAIL", k, "", "%s is not in the loaded paks" % vp); return
+        try: texsize = int(self._texsize.get())
+        except (TypeError, ValueError): texsize = 256
+        if not hasattr(self, "_sim_lock"): self._sim_lock = threading.Lock()
+        if not hasattr(self, "_sim_actor_ctx"):
+            import collections
+            self._sim_actor_ctx = collections.OrderedDict()
+        self._log_line(f"(Simulate: building {mp} with {wp} ...)", "dim")
+        threading.Thread(target=self._sim_actor_work, args=(k, mp, wp, vfs, shaders, texsize, self._index_cache),
+                         daemon=True).start()
+
+    def _sim_actor_work(self, k, mp, wp, vfs, shaders, texsize, cache):
+        """Worker thread: the human (with skin weights) and the weapon as one packet, the
+        human's animation catalogue and idle clip, and which roles the weapon plays."""
+        with self._sim_lock:
+            try:
+                import mohaa_map_view as MMV
+                import mohaa_map_actor as MA
+                import mohaa_view as MV
+                blobs = MMV.Blobs()
+                tcache = MMV.TextureCache(os.path.join(cache, "tex")) if cache else None
+                texs = MMV.TextureTable(vfs, shaders, blobs, max(32, min(1024, texsize)), tcache)
+                mb = MMV.ModelBuilder(vfs, texs, blobs, say=lambda *a: None)
+                mb.skin_wanted = True
+                mi = mb.get(mp)
+                mb.skin_wanted = False
+                if mi < 0:
+                    raise ValueError("%s can't be drawn: %s" % (mp, mb.failed.get(mp) or "unknown"))
+                wi = mb.get(wp)
+                if wi < 0:
+                    raise ValueError("%s can't be drawn: %s" % (wp, mb.failed.get(wp) or "unknown"))
+                wg = MA.weapon_group(vfs.read(wp).decode("latin-1", "replace"))
+                if not wg:
+                    raise ValueError("%s has no weapon group" % wp)
+                tik = vfs.read(mp).decode("latin-1", "replace")
+                names = MA.catalog_names(MTX.build_anim_catalog(tik, vfs, mp))
+                bones = mb.skins[mp]["skd"]["bones"]
+                ctx = MV.anim_solver_ctx(bones)
+                meta = {"wg": wg, "tag": MA.ACTOR_TAG, "tagL": MA.ACTOR_TAG_OFF, "mi": mi, "wi": wi,
+                        "roles": MA.roles_available(names, wg), "idle": None, "idleWhy": ""}
+                steps, why = MA.plan_role(names, wg, "idle")
+                if steps:
+                    nm, ent, legs = steps[0]
+                    le = names.get(wg + "_" + legs) if legs else None
+                    try:
+                        meta["idle"] = MA.solve_clip(vfs, bones, nm, ent, le, ctx)
+                    except ValueError as e:
+                        meta["idleWhy"] = str(e)
+                else:
+                    meta["idleWhy"] = why
+                if meta["idleWhy"]:
+                    self._log_q.put(("warn", f"  (Simulate: no idle clip: {meta['idleWhy']})"))
+                b64, _raw, gz = MMV.pack_payload({"tex": texs.entries, "models": mb.models}, blobs)
+                self._sim_actor_ctx[k] = {"vfs": vfs, "bones": bones, "ctx": ctx, "names": names, "wg": wg, "done": {}}
+                self._sim_actor_ctx.move_to_end(k)
+                while len(self._sim_actor_ctx) > self.SIM_ACTOR_KEEP:
+                    self._sim_actor_ctx.popitem(last=False)
+                self._log_q.put(("dim", f"  (Simulate: {os.path.basename(mp)} with {os.path.basename(wp)} built, {gz // 1024} KB)"))
+                self._sim_actor_js("MOHAA_SIMACTOR", k, meta, b64)
+            except Exception as e:
+                MC.swallowed()
+                self._log_q.put(("warn", f"  (Simulate: the actor can't be built: {str(e)[:200]})"))
+                self._sim_actor_js("MOHAA_SIMACT_FAIL", k, "", str(e)[:200])
+
+    def _sim_actor_anim(self, body):
+        """Solve the clips a role plays for an actor built earlier (MOHAA_SIMACT_ANIM)."""
+        req = self._sim_actor_parse(body, ("k", "role"))
+        if req is None:
+            return
+        k, role = req["k"], req["role"]
+        import mohaa_map_actor as MA
+        if role not in MA.ROLES or role == "idle":
+            self._sim_actor_js("MOHAA_SIMACT_FAIL", k, role[:20], "not an animation role"); return
+        ctx = getattr(self, "_sim_actor_ctx", {}).get(k)
+        if ctx is None:
+            self._sim_actor_js("MOHAA_SIMACT_FAIL", k, role, "this actor is no longer built here: Spawn him again"); return
+        if not hasattr(self, "_sim_lock"): self._sim_lock = threading.Lock()
+        threading.Thread(target=self._sim_actor_anim_work, args=(k, role, ctx), daemon=True).start()
+
+    def _sim_actor_anim_work(self, k, role, ctx):
+        """Worker thread: the role's clips solved against the actor's skeleton."""
+        with self._sim_lock:
+            try:
+                import mohaa_map_actor as MA
+                if role in ctx["done"]:
+                    self._sim_actor_js("MOHAA_SIMACT_ANIM", k, role, ctx["done"][role]); return
+                wg, names = ctx["wg"], ctx["names"]
+                steps, why = MA.plan_role(names, wg, role)
+                if not steps:
+                    raise ValueError(why)
+                recs, seq = {}, []
+                for nm, ent, legs in steps:
+                    seq.append(nm)
+                    if nm in recs:
+                        continue
+                    le = names.get(wg + "_" + legs) if legs else None
+                    recs[nm] = MA.solve_clip(ctx["vfs"], ctx["bones"], nm, ent, le, ctx["ctx"])
+                out = {"seq": seq, "recs": recs}
+                ctx["done"][role] = out
+                self._log_q.put(("dim", f"  (Simulate: {role}: {', '.join(seq)})"))
+                self._sim_actor_js("MOHAA_SIMACT_ANIM", k, role, out)
+            except Exception as e:
+                MC.swallowed()
+                self._log_q.put(("warn", f"  (Simulate: {role} can't be built: {str(e)[:200]})"))
+                self._sim_actor_js("MOHAA_SIMACT_FAIL", k, role, str(e)[:200])
+
     def _open_scr(self, vpath, where):
         """The level-script card's Open .scr / Open: the script in the Text Editor. `where`
         is the file it was read from (a path on disk) or "<path> (<pak>)" for one read from a
@@ -1585,6 +1757,17 @@ class MapApp(ML.App):
                     elif m == "mohaa-sim-models":
                         # SIMULATE's model picker: every model in the loaded paks
                         self._page_requests.append(self._sim_models)
+                    elif m == "mohaa-sim-actors":
+                        # SIMULATE on a path node: the humans and weapons in the paks
+                        self._page_requests.append(self._sim_actors_list)
+                    elif m.startswith("mohaa-sim-actor\n"):
+                        # an actor for a path node: '{"k": key, "m": human .tik, "w": weapon .tik}'
+                        body = m.split("\n", 1)[1][:2000]
+                        self._page_requests.append(lambda b=body: self._sim_actor_build(b))
+                    elif m.startswith("mohaa-sim-actor-anim\n"):
+                        # the clips a node's flags play: '{"k": key, "role": "left" ...}'
+                        body = m.split("\n", 1)[1][:2000]
+                        self._page_requests.append(lambda b=body: self._sim_actor_anim(b))
                     elif m.startswith("mohaa-sim-build\n"):
                         # SIMULATE's model: "mohaa-sim-build\n<path of a .tik in the paks>"
                         vp = m.split("\n", 1)[1][:300]

@@ -7,7 +7,7 @@ The Map Viewer shows the same notice under its own name, worded for its own file
 `mohaa_map_viewer_config.json`, `output_console_map.log` and `mohaamap_*` temp folders,
 its decompiled `.map` files among the working files with a `modify_recovery` folder for
 MODIFY's unsaved work, and the grid's size and colour,
-where the Edit parameters box was left and Simulate's model among the display choices (`_PRIVACY_SWAPS` in
+where the Edit parameters box was left and Simulate's model, human and weapon among the display choices (`_PRIVACY_SWAPS` in
 `mohaa_map_launcher.py`).
 
 `python tests/check_privacy_sync.py` checks that this file, `PRIVACY_TEXT` and every
@@ -15,7 +15,7 @@ where the Edit parameters box was left and Simulate's model among the display ch
 
 ```
 PRIVACY NOTICE  --  MOHAA Model Viewer
-Last updated: 4 November 2026
+Last updated: 12 November 2026
 
 1. THE SHORT VERSION
    This program does not collect, transmit, sell, share or profile anything.

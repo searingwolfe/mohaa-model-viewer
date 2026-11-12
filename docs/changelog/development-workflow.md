@@ -9,7 +9,8 @@ beyond Python 3, Node.js and a headless browser.
    Extract each `<script>` block from `_HTML_TEMPLATE` in `mohaa_view.py` and from
    `HTML_TEMPLATE` in `mohaa_map_page.py` and run `node --check` on it. Then the
    hardening checks in `tests/` (they need tkinter): `test_hardening.py`,
-   `check_batch_files.py`, `check_privacy_sync.py`, `check_init_attrs.py` and
+   `check_batch_files.py`, `check_privacy_sync.py`, `check_init_attrs.py`, `test_map_actor.py`
+   (set `MOHAA_GAMEFOLDER` to a folder of the game's files to run its real-data tests) and
    `fuzz_parsers.py bin 1`; each prints OK or what failed, and exits nonzero on failure.
 2. **Runtime check.** Static checks miss temporal-dead-zone errors (a `const` read before
    its line runs) and most behaviour. Build a real page and load it headlessly
@@ -167,6 +168,17 @@ beyond Python 3, Node.js and a headless browser.
      TOGGLE door; it closes itself after `wait`; with `r_showtris 1` the room behind a
      door that joins two areas is drawn only while it is open. A test can drive the doors
      with its own clock: stop the frame loop, set `performance.now`, call `doorsAdvance`.
+   - Simulate's actor (in the launcher, with paks): Spawn on a CORNER_LEFT, CORNER_RIGHT,
+     CRATE, SNIPER and DUCK node, Simulate each (the corner clips lean about 28 units to
+     the side and back), Respawn; Run path along a node's `target` chain, Run to a node
+     across the map and to a spot with no path node near it ("Path not found", he stays);
+     a walk through a shut wood door (it opens as he reaches its field; a TARGETED door
+     stops him); Trace path, Pause / Resume, Fly to and Follow; deselecting the node takes
+     him away. `python tests/test_map_actor.py` with `MOHAA_GAMEFOLDER` set checks the
+     skinning and a solved clip against the Model Viewer's pose.
+   - Modify: Delete on one of the map's path nodes marks it DEL and its links go; Save as
+     .bsp, then open the copy: the node is gone and the entity count is one less; Restore
+     and Undo bring it back. The Spawnflags list sets and clears bits (each an Undo step).
 
 ## Things that must change together
 
@@ -183,6 +195,7 @@ beyond Python 3, Node.js and a headless browser.
 | The Model Viewer's game cvars | `CVAR_DEFAULTS` and `CVAR_ROWS` in the page's script (`_HTML_TEMPLATE`, mohaa_view.py); data a cvar needs from the model goes in `build_payload` (`game`, `lods`, `normals`, a surface's `lc` / `li`, an animation's `rad`), so `VIEWER_REV` goes up. A cvar must do nothing at its default |
 | The Map Viewer's game cvars | `CVAR_DEFAULTS` and `CVAR_ROWS` in the page's script (mohaa_map_page.py); a cvar that draws something gets `LEGEND` rows (a `lines` swatch), and data it needs from the `.bsp` or the paks goes in the build's payload (`vis_payload`, `paths_payload`), so the page rev goes up |
 | Package requirements | `REQUIRED` / `OPTIONAL_EMBED` in `bin/mohaa_envcheck.py` (what the RUN files install), `PILLOW_MIN` in `bin/mohaa_common.py` (the run-time floor) and `docs/requirements.txt` (`Pillow>=10.3.0`, `pywebview==4.4.1`) |
+| A new `bin/` script the Map Viewer needs | Its name in `PROGRAMS["map"]["FILES"]` (tools/make_launchers.py: the RUN files check it is there), the `ours` tuple of `_own_pycache` (mohaa_map_launcher.py), then regenerate the launchers |
 | A RUN launcher (.bat or .sh) | The generator template (see [hardening-notes.md](hardening-notes.md)), so the Model and Map files stay twins; then `python tests/check_batch_files.py` |
 | A file the RUN launchers require | `PROGRAMS` (per program) or `COMMON` (needed before the menu) in `tools/make_launchers.py`, then run it |
 | An attribute set in `App.__init__` | The same in `MapApp.__init__` (it repeats App's start-up); `python tests/check_init_attrs.py` lists any gap |

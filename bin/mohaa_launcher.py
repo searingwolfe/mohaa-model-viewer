@@ -122,7 +122,7 @@ PRIVACY_SUMMARY=("This program collects nothing and sends nothing, and has no\n"
                  "telemetry. It uses the network only when you check for updates.")
 
 PRIVACY_TEXT = """PRIVACY NOTICE  --  MOHAA Model Viewer
-Last updated: 4 November 2026
+Last updated: 12 November 2026
 
 1. THE SHORT VERSION
    This program does not collect, transmit, sell, share or profile anything.
@@ -498,7 +498,7 @@ def init_runtime(app_name="mohaa_launcher"):
 #  docs/ and the RUN .bat. On each release, bump VERSION here and in docs/version.txt,
 #  then tag the release commit v<version>.
 # ============================================================================
-VERSION="1.0.001"
+VERSION="1.0.003"
 VERSION_LABEL="version "+VERSION
 # GitHub coordinates for the update check. If GitHub can't be reached, the check
 # reports it and changes nothing on disk.
@@ -5765,8 +5765,8 @@ class App(tk.Tk):
         """Worker thread: build one attachment's geometry (at<key>.js).
 
         Attachment builds run one at a time: each keeps its parts, idle animation and scale
-        in self._attach_* and extracts into the shared _attach folder, so two overlapping
-        builds used to hand one model's settings to the other's build."""
+        in self._attach_* and extracts into the shared _attach folder, so two builds running
+        at once would hand one model's settings to the other's build."""
         with self._attach_lock:
             self._build_attach_work_locked(vpath, key)
 

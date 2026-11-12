@@ -25,7 +25,7 @@ Model Viewer and what both share; the Map Viewer has its own notes in
 | `bin/mohaa_launcher.py` | Tkinter desktop app: pak loading and tree, build orchestration, embedded WebView2 pane, on-demand animation and attachment builds, settings, updater. |
 | `bin/mohaa_view.py` | Model builder. Parses `.skd` / `.skb` / `.skc` / `.tik` / `.map`, solves the skeleton and IK, writes an `.obj`, and fills the page template (`_HTML_TEMPLATE`, all of the viewer's HTML/CSS/JS) with the model payload. Also holds the keyboard-shortcut window both viewers' pages use (`KEYS_JS` / `KEYS_CSS`), the keyboard it draws (`KX_LAYOUT`, `KX_CATS`) and the Model Viewer's shortcut table (`VIEWER_KEYS`). |
 | `bin/mohaa_textures.py` | Pak virtual filesystem (`Vfs`), `.shader` index and render hints, texture resolution and `data:` URL encoding, `$include` expansion, and the animation catalogue (`build_anim_catalog`). |
-| `bin/mohaa_map_*.py`, `bin/mohaa_bsp.py`, `bin/mohaa_entdefs.py` | The Map Viewer, a separate program built on the same launcher (`MapApp` subclasses `App`); see [map-viewer.md](map-viewer.md). |
+| `bin/mohaa_map_*.py` (`mohaa_map_actor.py`: Simulate's humans, clips and skin weights for path nodes), `bin/mohaa_bsp.py`, `bin/mohaa_entdefs.py` | The Map Viewer, a separate program built on the same launcher (`MapApp` subclasses `App`); see [map-viewer.md](map-viewer.md). |
 | `bin/python_installer_updater.bat` | Windows setup for both viewers: installs a per-user Python suited to the Windows version and CPU, then the packages into `bin\libs`. Run by the RUN .bat on request (`/fromrun` skips its closing pause and only fills in missing packages), or on its own (refreshes them). |
 | `docs/` | Privacy, security and licensing notices, `requirements.txt`, `version.txt` (read by the updater) and these notes. |
 | `screenshots/` | The pictures in the README. |
@@ -107,9 +107,13 @@ Model Viewer and what both share; the Map Viewer has its own notes in
 
 ## Current state
 
-- Version 1.0.001 (pre-release), with both viewers. `VIEWER_REV` 80; the Map Viewer's
-  `MAP_VIEWER_REV` 106 and `INDEX_VERSION` 10. 1.0.001 is the hardening pass (see
-  [hardening-notes.md](hardening-notes.md)); page output is unchanged.
+- Version 1.0.003 (pre-release), with both viewers. `VIEWER_REV` 80; the Map Viewer's
+  `MAP_VIEWER_REV` 108 and `INDEX_VERSION` 10. 1.0.001 was the hardening pass (see
+  [hardening-notes.md](hardening-notes.md)); 1.0.002 makes Modify's list and undo cheap
+  with many entities; 1.0.003 adds Simulate on path nodes (a human with a weapon who
+  plays a node's animation and runs or walks the AI's routes, opening doors), deleting the
+  map's own entities and a spawnflags list in Modify, and Same spawnflags / Same error
+  (see the changelog).
 - Windows is the main platform (embedded pane); macOS and Linux run the launchers through
   their `.sh` files and open pages in the browser.
 

@@ -61,11 +61,12 @@ try:
 except Exception:                         # pragma: no cover
     MC.swallowed()
     MV = None
+import mohaa_map_actor as MA              # SIMULATE's actors: skin weights, clips, model lists
 
 # Page format revision, baked into each page as <!--mohaa-map-viewer-rev:N-->. Raise it
 # (and MAP_VIEWER_REV_REQUIRED in mohaa_map_launcher.py) when the page changes in a way
 # that a cached page must pick up.
-MAP_VIEWER_REV = 106
+MAP_VIEWER_REV = 108
 
 # Bumped when the cached shader / entity index format changes, so old caches are ignored.
 INDEX_VERSION = 10
@@ -680,28 +681,42 @@ LEGEND = [
      "rows": [
          {"sw": "node", "fill": [0, 0.5, 0], "name": "Plain node",
           "desc": "Dark green 16-unit cube. MOHRadiant has no definition for info_pathnode, so it draws "
-                  "its stand-in class."},
+                  "its stand-in class. Put these on the floor along walkable routes, in doorways and at "
+                  "junctions, linked to their neighbours, with enough room for a 30-unit-wide man."},
          {"sw": "node", "fill": [1, 0.5, 1], "name": "Has a targetname",
           "desc": "Pink: MOHRadiant turns a path node's colour inside out when it has a \"targetname\" "
                   "(\"target\" and \"$targetname\" don't count)."},
          {"sw": "node", "fill": [0.408, 0.976, 0.906], "name": "Has a _color key",
           "desc": "Flat in that colour, like the cyan friendlynodes."},
          {"sub": "Border, by spawnflags (the first that applies wins)"},
+         {"sw": "node", "fill": [0, 0.5, 0], "name": "DONT_LINK (1)",
+          "desc": "Keeps the node out of the path network: the game never connects it to other nodes (the blue "
+                  "circle of ai_showroutes). It has no border of its own, so it looks like a plain node. Use it on "
+                  "nodes you want only for their other flags, or to spare the game work where a node would reach "
+                  "the limit of 48 paths."},
+         {"sw": "node", "fill": [0, 0.5, 0], "line": [0, 1, 1], "name": "DUCK (2)",
+          "desc": "A good place to crouch during weapon fire. He still fires while crouched, so put it where cover is only about waist high (a low wall, a crate he can shoot over): taller cover blocks his shots, and no cover leaves him exposed. For a place to stand up and fire over cover, use CRATE instead."},
          {"sw": "node", "fill": [0, 0.5, 0], "line": [0, 1, 0], "name": "COVER (4)",
           "desc": "A good place to hide during weapon fire. Also the border of COVER together with DUCK, "
-                  "a CORNER or CRATE."},
-         {"sw": "node", "fill": [0, 0.5, 0], "line": [1, 1, 0], "name": "CORNER_LEFT (16)",
-          "desc": "A place to fire around a corner to the left."},
-         {"sw": "node", "fill": [0, 0.5, 0], "line": [0.7, 1, 0], "name": "CORNER_RIGHT (32)",
-          "desc": "A place to fire around a corner to the right."},
-         {"sw": "node", "fill": [0, 0.5, 0], "line": [1, 0, 0], "name": "SNIPER (64)",
-          "desc": "A sniper spot: the AI goes there to target the enemy when running at it is awkward."},
-         {"sw": "node", "fill": [0, 0.5, 0], "line": [0.5, 0, 0], "name": "CRATE (128)",
-          "desc": "A place to stand up and fire over."},
+                  "a CORNER or CRATE. Put it right behind solid cover (a wall, pillar or machinery) that blocks "
+                  "sight from where the enemy is expected, with room to stand."},
          {"sw": "node", "fill": [0, 0.5, 0], "line": [0, 0, 1], "name": "CONCEALMENT (8)",
-          "desc": "Cover that isn't sight-checked: foliage and combat spots."},
-         {"sw": "node", "fill": [0, 0.5, 0], "line": [0, 1, 1], "name": "DUCK (2)",
-          "desc": "A good place to crouch during weapon fire."},
+          "desc": "Cover that isn't sight-checked: foliage and combat spots. Use it where he is hidden but there is no solid wall in front, like bushes or rubble. It has no animation of its own, so he just stands there. It can't be combined with COVER, DUCK, a CORNER or SNIPER."},
+         {"sw": "node", "fill": [0, 0.5, 0], "line": [1, 1, 0], "name": "CORNER_LEFT (16)",
+          "desc": "A place to fire around a corner to the left. Put it against the wall, with the corner edge on his left and the node's yaw pointing the way he fires. He steps about 28 units to his left to lean out and back again, so keep that strip clear of walls and props (Simulate shows it). Edges of green node box are usually 8 units off the wall, and 8 units away from corner to look around."},
+         {"sw": "node", "fill": [0, 0.5, 0], "line": [0.7, 1, 0], "name": "CORNER_RIGHT (32)",
+          "desc": "A place to fire around a corner to the right. Put it against the wall, with the corner edge on his right and the node's yaw pointing the way he fires. He steps about 28 units to his right to lean out and back again, so keep that strip clear of walls and props (Simulate shows it). Edges of green node box are usually 8 units off the wall, and 8 units away from corner to look around."},
+         {"sw": "node", "fill": [0, 0.5, 0], "line": [1, 0, 0], "name": "SNIPER (64)",
+          "desc": "A sniper spot: the AI goes there to target the enemy when running at it is awkward. Once he's there, he aims and fires in bursts of a few shots only while he can see the enemy, reloads, and half the time drops to a crouch (if there is headroom) and does the same. Put it where he has a long clear line of sight."},
+         {"sw": "node", "fill": [0, 0.5, 0], "line": [0.5, 0, 0], "name": "CRATE (128)",
+          "desc": "A place to stand up and fire over. He always crouches here on his own (crouch, wait, then either blind-fire over the cover while staying low or stand up, fire one or two bursts and crouch again), so use CRATE alone: adding DUCK (130) is invalid. Put it behind cover about waist high or a little more, such as a crate or low wall: he is only visible over it while standing to shoot (Simulate shows it)."},
+         {"sw": "node", "fill": [0, 0.5, 0], "name": "LOW_WALL_ARC (256)",
+          "desc": "Spearhead and Breakthrough only: the original game ignores it. A place to shoot from behind a "
+                  "wall within an arc. He stands (anim/highwall.scr), or crouches with DUCK added "
+                  "(anim/lowwall.scr), aims, and shoots while he can see the enemy. He fires only within the "
+                  "\"low_wall_arc\" key's number of degrees either side of the node's yaw (above 0, below 180); "
+                  "that key sets this flag by itself, and a plain 256 has an arc of 0. CORNER_LEFT, CORNER_RIGHT "
+                  "and CRATE win over it. It has no border of its own."},
          {"sw": "node", "fill": [0, 0.5, 0], "line": [0, 0, 0], "name": "Black",
           "desc": "Flags that don't go together, such as 130 (CRATE + DUCK) or 10 (DUCK + CONCEALMENT). "
                   "The game's ai_editmode marks the same nodes."},
@@ -1673,6 +1688,11 @@ class ModelBuilder:
         self.total_verts = 0
         self.failed = {}
         self.lod_models = 0         # models with a long-range stand-in sprite (see _build)
+        # SIMULATE's actors: set before get() to keep the skin weights of the model being
+        # built (the "sk" record the page poses it with) and, in self.skins[path], the merged
+        # skeleton and idle pose its animations are solved against. Off for map models.
+        self.skin_wanted = False
+        self.skins = {}
 
     def get(self, path):
         """The model's number in the page, building it the first time; -1 if it can't be
@@ -1835,6 +1855,7 @@ class ModelBuilder:
         # model, tr_staticmodels.cpp), unscaled
         from array import array
         nrm = array("b")
+        skin = MA.SkinRecorder() if self.skin_wanted else None
         # Where each surface starts in the engine's own vertex numbering (every surface of
         # every mesh in order, hidden ones included): a static model's baked vertex light
         # is stored in that order (tr_staticmodels.cpp R_AddStaticModelSurfaces).
@@ -1856,9 +1877,12 @@ class ModelBuilder:
             ns = s.get("normals") or []
             for vi, (weights, (u, v)) in enumerate(zip(s["verts"], s["uvs"])):
                 X = Y = Z = 0.0
+                used = []
                 for bi, wv, off in weights:
                     if not (0 <= bi < len(wR)):
                         continue
+                    if skin is not None:
+                        used.append((bi, wv, off))
                     R = wR[bi]
                     T = wT[bi]
                     X += wv * (R[0][0] * off[0] + R[0][1] * off[1] + R[0][2] * off[2] + T[0])
@@ -1867,6 +1891,8 @@ class ModelBuilder:
                 pos += (X * scale, Y * scale, Z * scale)
                 uvs += (u, v)
                 nverts += 1
+                if skin is not None:
+                    skin.vertex(used)
                 b0 = weights[0][0] if weights else -1
                 if vi < len(ns) and 0 <= b0 < len(wR):
                     R, n = wR[b0], ns[vi]
@@ -1905,6 +1931,9 @@ class ModelBuilder:
                "tb": tb, "n": self.blobs.add(nrm.tobytes())}
         if classname:
             out["cn"] = classname          # the .tik's server "classname" (what it spawns as)
+        if skin is not None:
+            out["sk"] = skin.pack(self.blobs, skd["bones"], channels)
+            self.skins[path] = {"skd": skd, "channels": channels}
         return out
 
 
@@ -2735,18 +2764,20 @@ def paths_payload(vfs, vpath, src, blobs, say=log, map_time=None):
     if not stem.lower().startswith("maps/"):
         stem = "maps/" + os.path.basename(stem)
     data = where = None
-    if vfs is not None:
+    # a .pth beside the map on disk comes first: the game reads loose files of its game folder
+    # before any .pk3, so the .pth the game wrote to maps/ when it built this map's paths
+    # beats the stock one in the paks (which is for another version of the map)
+    side = os.path.splitext(src)[0] + ".pth"
+    if os.path.isfile(side):
+        with open(side, "rb") as f:
+            data = f.read()
+        where = side
+    if data is None and vfs is not None:
         k = (stem + ".pth").lower()
         if k in vfs.index:
             data = vfs.read(k)
             zi, real = vfs.index[k]
             where = "%s (%s)" % (real, os.path.basename(vfs.zips[zi].filename))
-    if data is None:
-        side = os.path.splitext(src)[0] + ".pth"
-        if os.path.isfile(side):
-            with open(side, "rb") as f:
-                data = f.read()
-            where = side
     if data is None:
         return None
     try:
@@ -3010,8 +3041,9 @@ class LevelScript:
     MAX_LOOP = 4096               # turns of one loop
     MAX_STEPS = 400000            # statements run in all
 
-    def __init__(self, find, ents):
+    def __init__(self, find, ents, tik_class=None):
         self.find = find
+        self.tik_class = tik_class   # .tik path (without models/) -> its class name, or None
         self.files = []           # [path, where it was found]
         self.ents = []            # {"kv": [[k, v]], "f", "l", "s": the spawn line, "x": [[file, line, text]]}
         self.mods = []            # [map entity, key, value, file, line, text]: map entities the script changes
@@ -3771,10 +3803,15 @@ class LevelScript:
         kv = []
         low = cls.replace("\\", "/").lower()
         if "/" in low or low.endswith(".tik"):
-            # a model: the game spawns the .tik's class with that model (G_SpawnEntity)
+            # a model: the game spawns it with that model, as the class the .tik's own init
+            # "classname" names (SpawnArgs::getClassDef: Actor for a human, else Object)
             m = low[7:] if low.startswith("models/") else low
             m = m if m.endswith(".tik") else m + ".tik"
-            kv += [["classname", m[:-4]], ["model", m]]
+            # here it is shown and counted as the editor class of its .tik (the QUAKED header:
+            # a German soldier is ai_german_wehrmact_soldier), as a map entity with that model
+            # is, never as the model's path; a .tik with no editor class is a script_model
+            tc = self.tik_class(m) if self.tik_class else None
+            kv += [["classname", tc or "script_model"], ["model", m]]
         else:
             kv.append(["classname", cls])
         E = {"kv": kv, "f": self.fi, "l": self.line, "s": text, "x": []}
@@ -4105,7 +4142,7 @@ class LevelScript:
                 "presolid": [[k, v] for k, v in sorted(self.presolid.items())]}
 
 
-def script_payload(vfs, vpath, src, paks, ents, say=log):
+def script_payload(vfs, vpath, src, paks, ents, say=log, tik_class=None):
     """The level script's spawned entities and settings (LevelScript), or None when the
     map has no .scr. A script is looked for as the game looks for it, a loose file in the
     folder the paks are in (main/maps/x.scr) before the paks, and for the map's own
@@ -4136,7 +4173,7 @@ def script_payload(vfs, vpath, src, paks, ents, say=log):
     stem = os.path.splitext(vpath.replace("\\", "/"))[0]
     if not stem.lower().startswith("maps/"):
         stem = "maps/" + os.path.basename(stem)
-    ls = LevelScript(find, ents)
+    ls = LevelScript(find, ents, tik_class)
     # (the file beside the one opened comes first: NormandyBridge_V1.bak's script is
     # NormandyBridge_V1.scr beside it)
     if not ls.read(stem + ".scr"):
@@ -4331,7 +4368,7 @@ def build(src, args):
         log("! %d real entities: more than the game's 1024 entity slots" % kinds["real"])
     # ---- the level script's spawned entities (drawn after the map's own) -----------------
     try:
-        scr = script_payload(vfs, vpath, src, paks, ents)
+        scr = script_payload(vfs, vpath, src, paks, ents, tik_class=entdefs.static_classname)
     except Exception as e:
         MC.swallowed()
         log("! level script left out: %s" % e)

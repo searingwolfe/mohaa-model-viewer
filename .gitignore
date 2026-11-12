@@ -61,9 +61,10 @@ bin/libs-mac/
 *.part
 *.corrupt-*
 
-# Editors / OS
+# Editors / OS (.claude/ is a local AI-assistant settings folder with machine paths)
 .vscode/
 .idea/
+.claude/
 .DS_Store
 Thumbs.db
 desktop.ini

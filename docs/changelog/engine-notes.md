@@ -39,6 +39,12 @@ and line numbers next to the code that depends on them.
 - Validate every count and offset in `.skc` / `.skd` headers against the file size before
   looping. The older ProtoAnimations v11 `.skc` format inserts a 64-byte name after the
   version field, shifting every offset.
+- Each `.skc` frame header (48 bytes) holds its bounds (6 floats), its radius (at 0x18) and
+  then its movement delta (`skelAnimFileFrame_t.delta`, 3 floats at 0x1C, in the actor's own
+  space: x ahead, y left): how far the engine moves the entity as the clip reaches that
+  frame. `parse_skc` returns them as `fdelta`. The run and walk clips carry their pace in
+  them, and the corner clips (`_wall_alert_left` ...) a sideways step of about 28 units, so
+  an actor leans out round the wall and back.
 - Humanoid `.skd` files have no usable rest pose (identity lays the rig along +X), and
   shared idle `.skc` frames are posed actions. A neutral A-pose template (allied_pilot)
   gives a clean default.
@@ -140,6 +146,35 @@ and line numbers next to the code that depends on them.
   `$model` outlasts it wherever it is written. An actor's plain keys are due later
   (`EV_SPAWNACTOR`, -2; its `model` at `EV_PRIORITY_SPAWNACTOR`, -3) than its `$` and `#`
   ones, so on an actor the plain key wins.
+- An entity spawned with only a model (`spawn models/human/german_wehrmact_soldier.tik`
+  in a script, or a map entity whose classname the game has no class for) is created as the
+  class the `.tik`'s server init commands name with `classname` (`SpawnArgs::getClassDef`,
+  g_spawn.cpp: `Actor` for a human), else as a plain `Object`. The `/*QUAKED*/` header's
+  name (`ai_german_wehrmact_soldier`) is the editor's class for that model, which is what
+  the Map Viewer shows and counts it as.
+
+## How an actor walks a path
+
+What the Map Viewer's Simulate follows when it runs or walks a man (fgame/actor.cpp,
+actorpath.cpp, navigate.cpp, g_mmove.cpp):
+
+- **Choosing the route** (`Actor::MoveToPatrolCurrentNode`): a goal that is an
+  `info_waypoint` is walked to in a straight line (`SetDest`, `FaceMotion`; no path search,
+  and only the physics stop him at a wall). Any other goal goes through `SetPath`, which is
+  `PathSearch::FindPath`: the nearest path node he can see (`NearestStartNode`, else just
+  the nearest), the nearest node the goal can see (`NearestEndNode`, which has no
+  fallback), and an A* over the nodes' links, leaving out links that drop further than
+  `ai_fallheight`. If that finds nothing ("Path not found", printed with `g_patherror`),
+  the path is cleared and he stays where he is.
+- **Following it** (`ActorPath::UpdatePos`): he doesn't walk to each corner. He aims at a
+  point a look-ahead further along the path (`PathLookAhead`: an area swept between him and
+  the path that grows by 1024 a frame up to 256², while a 30 x 30 x 60 box trace to that
+  point is clear, and shrinks when it isn't), so he cuts and rounds corners. The path ends
+  when he is within 16 units of its end in x and y.
+- **Facing** (`FaceMotion`, `UpdateAngles`): his yaw turns to his velocity or, when that
+  agrees, to the way he has moved over the last 375-500 ms (the four 125 ms slots of
+  `m_vOriginHistory`), at `m_fAngleYawSpeed`, 360 degrees a second.
+- **Doors** (fgame/doors.cpp): see [doors-notes.md](doors-notes.md), *Actors and doors*.
 
 ## The sun and its flare
 

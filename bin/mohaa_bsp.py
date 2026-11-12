@@ -1973,15 +1973,24 @@ def write_bsp_entities(data, added, out_path, src_path=None, replace=None):
     if after > MAX_PATHNODES:
         raise BspError("%d path nodes (%d + %d): the game holds %d at most" % (after, before, after - before, MAX_PATHNODES))
     old_time = next((v for k, v in old[0] if k.lower() == "map_time"), None)
+    ndel = 0
     if replace:
         # changed entities: the whole lump is written again from its entities
         ents = [list(e) for e in old]
+        gone = set()
         for s in replace:
             i = _find_entity(ents, s)
+            if s.get("del"):
+                if i == 0:
+                    raise BspError("the worldspawn can't be deleted")
+                gone.add(i)
+                continue
             kv = [(_clean(k), _clean(v)) for k, v in (s.get("kv") or ())]
             if not any(k.lower() == "classname" and v for k, v in kv):
                 raise BspError("a changed entity has no classname")
             ents[i] = kv
+        ndel = len(gone)
+        ents = [e for j, e in enumerate(ents) if j not in gone]
         after = count(ents) + count(new)
         if after > MAX_PATHNODES:
             raise BspError("%d path nodes: the game holds %d at most" % (after, MAX_PATHNODES))
@@ -2026,7 +2035,7 @@ def write_bsp_entities(data, added, out_path, src_path=None, replace=None):
             if a != b or data[a[0]:a[0] + a[1]] != d2[b[0]:b[0] + b[1]]:
                 raise BspError("checking the new file: lump %d differs" % i)
         back = parse_entity_string(bsp_entity_text(d2))
-        if len(back) != len(old) + len(new):
+        if len(back) != len(old) + len(new) - ndel:
             raise BspError("checking the new file: its entities didn't read back")
         if os.path.exists(out_path):
             MC.make_backup(out_path)

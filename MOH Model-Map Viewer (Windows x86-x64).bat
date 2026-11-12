@@ -2,7 +2,7 @@
 REM ============================================================================
 REM  MOH Model-Map Viewer (Windows x86-x64).bat
 REM  Starts the MOHAA Map Viewer or Model Viewer, picked from a menu: 1 / 2, or
-REM  Up / Down and Enter (1, the Map Viewer, is selected at first); Q or Esc quits.
+REM  Up / Down and Enter or Space (1, the Map Viewer, is selected at first); Q or Esc quits.
 REM  Drop a .bsp / .map / .bak file onto this to open it in the Map Viewer, or a
 REM  .skd / .tik in the Model Viewer: the menu is skipped then. Expects the scripts
 REM  in the bin\ folder next to this file.
@@ -156,7 +156,7 @@ goto mode_done
 set "R_NAME=Map Viewer"
 set "R_LOG=map"
 set "R_LAUNCHER=mohaa_map_launcher.py"
-set "R_FILES=mohaa_map_launcher.py mohaa_map_view.py mohaa_map_page.py mohaa_bsp.py mohaa_entdefs.py mohaa_launcher.py mohaa_view.py mohaa_textures.py"
+set "R_FILES=mohaa_map_launcher.py mohaa_map_view.py mohaa_map_page.py mohaa_bsp.py mohaa_entdefs.py mohaa_map_actor.py mohaa_launcher.py mohaa_view.py mohaa_textures.py"
 :mode_done
 title MOHAA !R_NAME!
 echo [OK] Python !R_VER!: !R_PY!

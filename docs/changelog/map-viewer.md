@@ -15,12 +15,13 @@ run at once.
 
 | Path | Role |
 |---|---|
-| `MOH Model-Map Viewer (Windows x86-x64).bat` (`.sh`) | The entry point both programs share: press 1 (or Enter) in its menu for the Map Viewer. Same checks as for the Model Viewer (Python 3.8+ with tkinter, Pillow, the embedded-pane packages, WebView2) and the same installer, plus the map viewer's own scripts. A `.bsp` / `.map` / `.bak` dropped on it skips the menu and opens directly. |
+| `MOH Model-Map Viewer (Windows x86-x64).bat` (`.sh`) | The entry point both programs share: press 1 (or Enter or Space, since it is selected at first) in its menu for the Map Viewer. Same checks as for the Model Viewer (Python 3.8+ with tkinter, Pillow, the embedded-pane packages, WebView2) and the same installer, plus the map viewer's own scripts. A `.bsp` / `.map` / `.bak` dropped on it skips the menu and opens directly. |
 | `bin/mohaa_map_launcher.py` | The launcher. `MapApp` subclasses `mohaa_launcher.App` and changes only what differs for maps: the `maps/` tree, opening and building, the map details panel (one scrolling column, shared with the Model Viewer as `make_info_pane`, with Rebuild / Browser / .map buttons: `info_button`), the map options in the menus, the privacy notice's wording (`_PRIVACY_SWAPS`), and its config / log / output names. What both programs share (the updater, the WebView2 folder, `PRIVACY_TEXT`, `VERSION`) stays in `mohaa_launcher.py`. |
 | `bin/mohaa_map_view.py` | Map builder. Decompiles a `.bsp`, scans the `.map`, resolves textures through the shaders, builds the placed models, collects the entity definitions and writes `<stem>_bsp_view.html` / `<stem>_map_view.html` (`<stem>_bak_view.html` for a `.bak`). |
 | `bin/mohaa_map_page.py` | The viewer page template (`HTML_TEMPLATE`): HTML, CSS and the WebGL2 viewer. |
 | `bin/mohaa_bsp.py` | `.bsp` reader and decompiler; also reads the BSP tree and vis data, tessellates curved patches as the renderer does, and reads the game's `.pth` AI path files (for the game cvars). It also runs on its own, `python mohaa_bsp.py <map.bsp> [out.map]`, but without the paks it can't read texture sizes and assumes 256 x 256, so textures of other sizes get the wrong scale; the launcher's decompile uses the real sizes. |
 | `bin/mohaa_entdefs.py` | Entity definitions: editor colour, box, spawnflag names and description per class, read from the `/*QUAKED*/` headers in the paks, with a built-in table generated from OpenMoHAA's game code as the fallback. |
+| `bin/mohaa_map_actor.py` | Simulate's actors, apart from Tk so they can be tested on their own: which `.tik` files are humans and weapons, which clips a node's spawnflags (or running and walking) play for a weapon group, the clip solver call (the Model Viewer's `solve_anim`) and the skin-weight recorder. |
 
 ## How a map gets built
 
@@ -55,7 +56,8 @@ run at once.
      as what its first bytes say it holds. What it writes has `_bak` in its name:
      `<stem>_bak_view.html`, and for a `.bsp` backup `<stem>_bak.map`, so it never
      takes the place of the real map's page or decompile. Its side files (`.dcl`,
-     `.lin`, `.pth`) are the map's own: `maps/<stem>.*` in the paks, else beside it.
+     `.lin`, `.pth`) are the map's own: `maps/<stem>.*` in the paks, else beside it
+     (a `.pth` beside it comes first, as for any map: `ai_showroutes`, below).
 5. **Show.** Same as the Model Viewer: the embedded pane with `#embed&theme=...`, or the
    default browser. The page sends `mohaa-close` when Esc closes the map.
 
@@ -270,8 +272,10 @@ run at once.
   `Ctrl+Z` (or the Undo button beside Show all) unwinds one step at a time: a Hide shows
   those things again, a Show all hides again what it showed. Backspace hides an entity
   added in Modify too (selected in the view or its list), as its square does, and
-  Ctrl+Z shows it again; **Delete** removes one, as Modify's Delete button does (map
-  entities stay: Delete never takes anything out of the map).
+  Ctrl+Z shows it again; **Delete** does what Modify's Delete button does to Modify's
+  selected rows: removes a new entity, or flags one of the map's own point entities DEL
+  (left out of the saved copy; Modify, below). Nothing is ever taken out of the map file
+  itself.
 - **The search box** (Find, `Ctrl+F`) matches entities and textures (`runFind`,
   `findTerms`). Its terms all have to match, and a term with `-` in front leaves out what
   it matches instead.
@@ -328,7 +332,8 @@ run at once.
   an unknown class (most come from `.tik` files) counts as real. Static props are the
   `static_*` classes of a `.map`, or the entities from a `.bsp`'s static model lump
   (`firstStatic`; some take a `.tik` class name without the prefix). The launcher's map
-  details and the build log show the same counts, the log in red past 1024.
+  details and the build log show the same counts, the log with a `!` line past 1024 (a
+  note, in yellow in the launcher's Output: the build carries on).
 - **Open** beside Copy on an info card's `.map source`: in the launcher's pane, the
   launcher opens the `.map` in the Text Editor at that entity's or brush's line (for
   Notepad++, VS Code, Sublime Text, Notepad2/3, EmEditor, gedit, Kate and gVim; other
@@ -343,7 +348,11 @@ run at once.
   to the selection). The Links section of an entity's info card has the same as a link,
   and the Selection panel's **Same kind** and **Same path** buttons do what Alt+click and
   Ctrl+Alt+click do (Same path shows when the selected entity has a path: its target leads
-  somewhere or something targets it). **Same targetname** (`$`, Shift+4) selects every
+  somewhere or something targets it). **Same spawnflags** selects every shown entity of the
+  selected one's class with exactly its spawnflags (every CRATE node, say; greyed out when
+  it has none), and **Same error** every path node with any of the errors the selected
+  nodes have (no paths, one-way, duplicate, no angle, in the wall, 48 paths full, and
+  Modify's own; greyed out when they have none; `selNodeErrors`, `pnErrKinds`). **Same targetname** (`$`, Shift+4) selects every
   entity with the selected one's targetname, the group a script reaches as `$name`; it
   shows when another entity shares the name. **Eye view** (after Same kind) shows for an
   entity with angles, a target to look at, or a player start: the camera flies to where it
@@ -444,7 +453,10 @@ run at once.
 - **The legend** (`L`, the "L legend" chip, or the Legend button in a node's card; Help >
   Legend / `F2` in the launcher) explains the node colours and borders, the entity
   markers (setsize boxes included) and every editor surface the retail maps use, rain
-  and caulksky included, plus the flat grey of a texture missing from the paks. The page
+  and caulksky included, plus the flat grey of a texture missing from the paks. Each path
+  node row also says where that kind of node belongs (the room a CORNER node needs for
+  the clip's 28-unit lean, the cover height for DUCK and CRATE, DONT_LINK's uses, and
+  LOW_WALL_ARC, which only Spearhead and Breakthrough read). The page
   and the launcher both read `LEGEND` in mohaa_map_view.py; the build puts the editor
   pictures of its textures in the page (48 px PNGs, cached with the textures), and the
   launcher reads them from the loaded paks. Each of its sections (AI path nodes,
@@ -532,13 +544,20 @@ run at once.
     the earlier one is linked, so routes still end there; m1l1 has two `$friendlynode`s
     at one origin, entities 111 and 705). A node's tag sits under its class label (a new
     node's under its NEW label); within `ai_showroutes_distance`, past 350 units only in sight.
-    Modify's own problems (48 paths, cut off, cell full) join the same tag. **AI errors**
+    Modify's own problems (48 paths, cut off, cell full) join the same tag, and so does
+    the 48-path limit on the map's own nodes (`paOver`: each node with 48 paths in use has
+    its candidates gone through in the game's order, the nodes of the 3 x 3 cells round
+    it; one with more still to try gets "48 paths: full" and a card line with the game's
+    `^~^~^ 48 paths per node at (...) exceeded`, one with exactly 48 an information line).
+    **AI errors**
     (SHOW, after AI routes; `AIERR`) shows or hides the tags that report a problem: no
     paths, one-way, own group of N, in the wall, and no angle (a CORNER_LEFT,
     CORNER_RIGHT, CRATE or LOW_WALL_ARC node with no "angle" / "angles": its special
     attack faces the node's yaw, `PathNode::GetSpecialAttack`, so it faces east; `nodeNoAngle`). It turns on and off with AI routes and
     can be turned off while AI routes stays on; DONT_LINK, duplicate, 48 paths and cell
-    full always show. The `.pth` is `maps/<map>.pth` in the paks (else beside the file),
+    full always show. The `.pth` is the one beside the map on disk, else `maps/<map>.pth`
+    in the paks (the game reads loose files before any `.pk3`, so the `.pth` it wrote
+    when it built the map's paths wins over a stock one),
     unpacked (`CSVG` + LZ77, `lz77.cpp`) and read as `PathSearch::ArchiveLoadNodes` reads
     it (and, as the game, used only when the map_time in it is the .bsp's; else the paths
     are worked out here, `pathsStale`; turning AI routes on says in Output which), typed (the game's own files) or untyped (OpenMoHAA's); node i is the map's i-th
@@ -855,8 +874,11 @@ game, and the page adds what it spawns.
   too, up to 40 files.
 - **Spawned entities.** `spawn <class or model> [key value ...]` (ScriptThread's
   `SpawnEntity`), with or without `local.x =` / `level.x =` in front. A model path
-  (`models/human/...`, `.tik`) gives the entity that model and the `.tik`'s path as its
-  class. The lines that follow give the same entity its `origin`, `angles`, `angle`,
+  (`models/human/...`, `.tik`) gives the entity that model, and it is shown as the editor
+  class of that `.tik` (its QUAKED header; a German soldier is `ai_german_wehrmact_soldier`),
+  as a map entity with that model is, else as a `script_model`. (The game spawns it as the
+  class the `.tik`'s init `classname` names, `SpawnArgs::getClassDef`: `Actor` for a human.)
+  The lines that follow give the same entity its `origin`, `angles`, `angle`,
   `targetname`, `target`, `model`, `scale`, `setsize` or `spawnflags`, as
   `<var>.origin = ( x y z )`, as the command form `<var> origin ( x y z )`, or through
   its `$targetname` or `$( expression )` (`$("fhe" + local.q).target = ...`).
@@ -950,6 +972,15 @@ game, and the page adds what it spawns.
 The **Modify** section, above Find, adds entities to the map and saves a copy of it. Its
 main use is adding AI path nodes and seeing the AI's routes change as they are placed.
 
+How it stays fast with hundreds or thousands of entities (1.0.002): `MOD.ents` is the one
+place the entities live. The list under the buttons draws only the rows in view (22 px
+rows in a scrolling box, newest first; `modListDraw`), and a row's tooltip, the entity's
+whole text, is built when the mouse is over it. The path checks, limits and status line
+(`modStatNow`) run at most once a frame. Undo and Redo keep every step as a compact JSON
+string, with no limit and nothing dropped (`modHist`, `modRestore` accepts a string).
+Unsaved work is still copied to the launcher's `modify_recovery` JSON file a moment after
+each change.
+
 - **Adding.** Pick a class from the class list (`info_pathnode` first, then every point
   class the entity definitions know and every class in the map, each with how many the
   map has; it opens beside its button with a search box, as the Model Viewer's attach-to-
@@ -990,7 +1021,23 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
   changed `info_pathnode` (node k of the `.pth`, the map's k-th) has its links worked out
   again, both ways, as a new node's are, and the `.pth`'s links to and from it are left
   out; a node whose classname is changed away from `info_pathnode` loses its links (and
-  gets them again if changed back), once Edit parameters is closed.
+  gets them again if changed back), once Edit parameters is closed. Selecting an entity
+  the level script spawns says that it can only be changed in the script (with its file
+  and line): it isn't in the `.bsp` or the `.map`.
+- **Deleting the map's own entities.** Delete (the button, or the Delete key) on one of the
+  map's rows flags it DEL: the row reads "#251 DEL" in red, its label DEL, and it is drawn
+  nowhere. A deleted path node has no links, and the routes round it are worked out again
+  as for a changed one. Save as .bsp leaves it out of the entity lump (`write_bsp_entities`
+  takes `del` entries; the worldspawn can't be deleted), Save as .map drops its block and
+  Copy leaves it out. On a DEL or changed row the button reads **Restore**, which puts back
+  the map's keys and clears the flag; Undo does the same.
+- **Spawnflags** (the button after Fly to): a list beside it, in the game cvars list's look,
+  of every spawnflag bit the selected entity's class has: its value and its name, the
+  class's own from the QUAKED headers (`D.defs[class].f`) and then the editor's (`!Easy`,
+  `!Medium` ...) that every class has; for a path node DONT_LINK, DUCK, COVER, CONCEALMENT,
+  CORNER_LEFT, CORNER_RIGHT, SNIPER, CRATE and LOW_WALL_ARC (Spearhead and Breakthrough
+  only). A click sets or clears a bit and Clear takes them all off; each is one Undo step
+  (`sfList`, `sfSet`).
 - **Putting one down** (Add, Copy, Move) selects it: a new one lets go of the map's
   selection, and an open More info card (N) turns to it (`modPlacedSel`).
 - **Edit parameters** (Alt+E) opens a box, which moves by its title bar
@@ -1039,7 +1086,8 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
 - **Facing.** A new entity of a class that faces a way (most of the map's own of that
   class carry an angle; with none in the map, player starts, actors, turrets, vehicles)
   is placed with an `"angle"`: the camera's yaw to the nearest 45 degrees. Its facing
-  arrow is drawn as the map's (Arrows, 5).
+  arrow is drawn as the map's (Arrows, 5). An entity with a model gets thin white axes at
+  its origin instead, turned with its angles, so its new origin can be placed exactly.
 - **Grid** (+; Display's buttons, after Decals): on, a see-through grid of MOHRadiant's
   grid sizes is drawn round Modify's moving or selected entity, else round the first
   surface the camera looks at (a trace straight ahead, a little this side of it). Under
@@ -1069,7 +1117,10 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
   units, or arriving more than 94 units above or below the other node. The fall on the
   way is the link's fall height (`ai_fallheight` hides it). The map's own links come from
   its `.pth`, and each new node gets its links to its neighbours and theirs to it, the new
-  nodes numbered after the map's, as they will be in game.
+  nodes numbered after the map's, as they will be in game. A map node that already has 48
+  paths may have been cut short (more nodes were left to try), so one within 640 units of a
+  new, moved or deleted node is linked again too, in the game's order (the nodes of the
+  3 x 3 cells round it, x then y).
   - **Collision**, as the game's traces: brushes whose own contents (from the `.bsp`'s
     brush, `D.bsp.bcont` where it differs from the first face's) are in `MASK_PATHSOLID`
     (solid, monsterclip, fence, not playerclip); movement traces see the box as a
@@ -1088,6 +1139,12 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
     of 3114 (16 extra), m6l2a 7532 of 7544 (48 extra), m5l2a 11668 of 11836, m1l1 6396
     of 6517, m3l2 23759 of 24053 (14 extra); fall heights agree on 94 % (m5l2a) to 99 % of the links found.
     The whole map takes 0.3 to 11 s in the page; a new node, a few dozen pairs.
+  - **Terrain grid lines.** A move from a node on a terrain grid line (x or y a multiple of
+    64 from the terrain's corner) starts "stuck" in the capsule trace, though the game
+    walks it: the box the node was dropped with touches the slope exactly. Such a move is
+    tried again 1 unit up (`pgCheckMove`). On m3l1b this finds 65 of the 93 links of the
+    game's `.pth` that were otherwise missed, and adds none; the figures above were
+    measured before it.
 - **Saving** writes the changed map entities too. Save as .bsp asks the launcher where to write a copy of the `.bsp` (never
   over the file the map came from, nor over a file Save as didn't write): every lump but
   the entities is copied byte for byte, the entity lump with the new entities after the
@@ -1121,13 +1178,16 @@ main use is adding AI path nodes and seeing the AI's routes change as they are p
 
 ## Simulate
 
-Phase 1 flies a model along an `info_splinepath` path the way a script's `followpath`
-moves a `script_model` (`ScriptSlave::FollowPath`, `CreatePath` and `FollowingPath` in
-fgame/scriptslave.cpp; `BSpline` and `SplinePath` in fgame/bspline.cpp). Later phases are
-to run actors along `info_pathnode` / waypoint / `script_origin` chains and play an actor's
-cover and corner animations at a node.
+For an `info_splinepath`, Simulate flies a model along its path the way a script's
+`followpath` moves a `script_model` (`ScriptSlave::FollowPath`, `CreatePath` and
+`FollowingPath` in fgame/scriptslave.cpp; `BSpline` and `SplinePath` in fgame/bspline.cpp).
+For an `info_pathnode` or `info_waypoint` (since 1.0.003) it stands a human with a weapon
+there, plays the animation the game plays at a node with those spawnflags, and runs or
+walks him along the node's `target` chain or to a spot, routed over the AI's path nodes
+(**Simulate on path nodes**, below). Still to come: `script_origin` chains and the AI's
+other behaviour at nodes.
 
-- **Where.** Selecting an `info_splinepath` (the map's, or one Modify added) shows the
+- **Where.** Selecting an `info_splinepath` on its own (the map's, or one Modify added) shows the
   SIMULATE section between SELECTION and CAMERA (`simSect`), with **Simulate** and
   **Reset** at its top, then the path's first and last node, how many, what
   ends it, how long it takes in game time, the model and the playback speed. The section
@@ -1182,6 +1242,106 @@ cover and corner animations at a node.
   is the same and adds the rest after the map's textures (kept out of the Textures list
   and Find), and makes its mesh as the map's models' (`modelR`). The choice is remembered
   in the browser (`mohaaMapViewerSimModel`); "Placeholder box" goes back to the box.
+
+### Simulate on path nodes
+
+Selecting an `info_pathnode` or an `info_waypoint` (the map's, or one Modify added) shows
+the same SIMULATE section with the actor's controls in place of the spline's (`simPanel`
+picks by `actFocus` / `simFocus`; the two share nothing but the section and the texture and
+model plumbing). The state is `ACT`, every function `act...`; the launcher side is in
+`bin/mohaa_map_actor.py` and `MapApp._sim_actor_*`.
+
+- **Which node.** One selected node; or several, when they are all nodes and form one
+  unbroken stretch of a `target` chain (each targets another selected one), and then the
+  first of them along the chain. Anything else selected with them shows no Simulate.
+  Deselecting the node takes him away.
+- **Controls.** **Human** and **Weapon** drop-downs, then **Spawn** (**Respawn** once he is
+  there), **Pause** / **Resume**, **Fly to**, **Follow**, **Simulate**, **Move** (Run path,
+  Run to, Walk path, Walk to) and **Trace path**; the lines under them say what he is doing
+  and why a button is greyed out. Humans are the top-level `models/human/*.tik` that declare
+  `classname Actor`; weapons the top-level `models/weapons/*.tik` that declare `classname
+  Weapon` and a `weapongroup` (`mohaa-sim-actors` → `MOHAA_SIM_ACTORS`; the group, not the
+  weapon, prefixes the animation names: shotgun, springfield and KAR98sniper are `rifle`).
+  The choices are remembered in the browser, and changing one with him there builds the new
+  one. In a plain browser there is no launcher to build them, and the panel says so.
+- **Placement.** The node's origin dropped to the floor (`pgDrop`), facing the node's yaw
+  (`angle` / `angles`); a node with neither faces its target, else the way the camera faced
+  when he spawned. Moved or edited in Modify, he follows (until he has walked off).
+- **Roles** (`actRole`, and `flags_role` in Python, kept equal by a test over all flag
+  values): CORNER_LEFT `left`, CORNER_RIGHT `right`, CRATE `crate`, LOW_WALL_ARC
+  `highwall` (or `lowwall` with DUCK; Spearhead and Breakthrough only, and the panel gives
+  the node's `low_wall_arc`), SNIPER `sniper`, DUCK `duck`; none for no flags, COVER,
+  CONCEALMENT, an `info_waypoint` or a combination `nodeFlagsBad` rejects. Clips per role
+  are `ROLE_STEPS` in mohaa_map_actor.py, from anim/cornerleft.scr, cornerright.scr,
+  overattack.scr, highwall.scr, lowwall.scr and stand.scr. A step the group lacks is
+  skipped; a role whose key clip (`_wall_*_shoot`, `_crate_shoot`, `_aim`, `_crouch_alert`)
+  is missing is greyed out with its name. Simulate plays the role's clips one after another
+  and holds the last frame; Respawn starts him again.
+- **The clip moves him.** Each frame's movement delta in the `.skc`
+  (`skelAnimFileFrame_t.delta`, read as `fdelta` by `parse_skc`) is summed into the clip's
+  `dl` (x ahead, y left), and the page moves him by it, turned to his yaw: the corner clips
+  step him about 28 units to the side to lean out and back, so a wall in the way shows.
+- **Build.** `mohaa-sim-actor` builds the human with `ModelBuilder.skin_wanted` (weights as
+  blobs `wc` / `wb` / `ww` / `wo`, bone names and parents, base pose) and the weapon as an
+  ordinary static model in one packet, with his idle clip and which roles his weapon group
+  can play. `mohaa-sim-actor-anim` solves a role's clips (`MA.solve_clip`, the Model
+  Viewer's `solve_anim` against the merged skeleton the mesh came from) the first time
+  they are needed; the page keeps them per actor, and the launcher keeps the last four
+  actors' skeletons.
+- **Pose** (`actPose`). Each frame: the clip's bone overrides (4 numbers: rotation only, 7:
+  position and rotation) over the base pose, world matrices, skin, `bufferSubData` into the
+  model's vertex buffer, and two instances (human on the node, weapon on
+  `tag_weapon_right`, or `tag_weapon_left` while a clip's `attachtohand offhand` has it
+  there (`actHandAt`), with the human's scale on the tag's position). Idle poses at 20 Hz.
+- **Moving** (`actGo`). **Run path** / **Walk path** go along the node's `"target"` chain (its
+  target, that one's target, and so on, stopping where a name finds nothing or comes back;
+  Modify's entities first, then the map's: `actChain`, `actNamed`); greyed out when it has
+  no target, and once he has moved, until Respawn. **Run to** / **Walk to** go to whatever
+  is clicked next: a node, any entity, or a spot on the map (Esc cancels; `actPickClick`).
+  Each goal is reached as `Actor::MoveToPatrolCurrentNode` sends a man: an `info_waypoint`
+  is walked to in a straight line (`SetDest`, no path search); anything else is routed by
+  `PathSearch::FindPath` (`actFindPath`): the nearest path node in his cell whose height he
+  is within reach of and that a box trace from him reaches (`NearestStartNode`, else just
+  the nearest), the same for the goal without the fallback (`NearestEndNode`), and an A*
+  over the paths in use, leaving out links that drop further than `ai_fallheight`. When it
+  finds nothing, the panel says "Path not found" and why, and he stays where he is, as in
+  game. The clip is `<weapongroup>_run_forward` or `_walk_forward` (the `run` and `walk`
+  roles, looping), and his pace is the clip's own movement over its length (250 or 100
+  units a second for a clip that carries none).
+- **Steering** (`actSimRoute`). His whole walk is worked out before he starts, in the
+  server's 50 ms frames, from actor.cpp, actorpath.cpp and g_mmove.cpp: `ActorPath::UpdatePos`
+  aims him at a point a look-ahead further along the path (`PathLookAhead`: a swept area
+  that grows by 1024 a frame up to 256², while a 30 x 30 x 60 box trace to it is clear, and
+  shrinks when it isn't), so he rounds each corner; `FaceMotion` turns him to his velocity
+  or, when that agrees, to the way he has moved over the last 375-500 ms, and
+  `UpdateAngles` turns him there at 360 degrees a second; a path ends when he is within 16
+  units of its end (x and y).
+- **Doors** (`actDoorSim`, `actDoorFire`; doors.cpp `SpawnTriggerField`, `FieldTouched`,
+  `TryOpen`, `DoorFire`). Each door group (the master's chain) has a trigger field, the
+  group's bounds grown by 60 units in x and y and 8 in z; a door with `health`, TARGETED
+  (128) or NOT_MONSTERS (16) has none that answers him. His box in a field makes the
+  master open, as the use key would. The doors are solid to him: he runs on the spot
+  against a shut one until it is clear. While the master opens, a man in its field is held
+  to its `speed` x 64 units a second and his look-ahead is cut short
+  (`ForceShortLookahead`). The walk is planned on copies of the doors (`doorsAdvance` with a
+  set of its own, drawing nothing), and the door events it makes are played on the map's
+  doors at their time, so what is planned is what plays. 20 seconds against a door that
+  nothing is moving stops him there, with a message naming it.
+- **Camera.** **Fly to** puts the camera 120 units from his chest, wherever he is.
+  **Follow** is the game's third-person view (`CG_OffsetThirdPersonView`): the eye at his
+  head (82 up), 18 up (`cg_cameraheight`), back 120 (`cg_cameradist`) along the view
+  angles, 2 down (`cg_cameraverticaldisplacement`), the camera a 10-unit box traced from
+  his head so a wall keeps it out; when that leaves it under 40 units from his head, the
+  pitch is raised 2 degrees at a time until it is 40 away, so it ends up over him. Moving
+  the camera by hand turns Follow off. **Pause** stops his clocks; Resume moves every start
+  time on by the pause.
+- **Trace path** (`actShowPath`) draws his path as `PathSearch::ShowNodes` does for
+  `ai_showpath` (navigate.cpp): start to end in blue, the part still to go in red (each
+  point 32 units up, over the green routes), and in yellow the line from him to his next
+  point (`ai_showpath 3`). It turns on and off with AI routes and can be turned off on
+  its own (`TRACEPATH`).
+- **Limits.** See Known limits below, and the 1.0.003 entries in
+  [CHANGELOG.md](CHANGELOG.md).
 
 ## Cameras
 
@@ -1305,8 +1465,14 @@ cover and corner animations at a node.
 - Modify: a changed map entity drawn with a model shows as a box while changed. New
   entities are boxes (a model isn't drawn), get no light, and don't take
   part in what the page simulates (doors, exploders, cvars that list entities). Only
-  point entities can be added. The routes on the `.pth`'s own nodes are the file's;
-  only links to and from new nodes are worked out, so a new node that fills a cell or a
-  node's 48 links isn't followed by the game's re-ordering of the rest.
+  point entities can be added or deleted. The routes on the `.pth`'s own nodes are the
+  file's; links to and from new, changed and deleted nodes are worked out, and so are
+  those of a full node (48 paths) within 640 units of one, but a full cell isn't followed
+  by the game's re-ordering of the rest.
+- Simulate's actor: the walk is tested against doors only, not walls, steps or drops
+  (`MmoveSingle`), so nothing stops him in a wall or keeps him from walking off a ledge; a
+  door closing on him (`DoorBlocked`) isn't simulated; clips play one after another without
+  the game's blending, and the gear a `case weapon` branch of his `.tik` adds isn't
+  applied.
 - **Planned:** following more of what a level script does as it runs. More of the game's
   debugging cvars, once checked in game.

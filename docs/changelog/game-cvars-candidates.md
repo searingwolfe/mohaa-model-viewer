@@ -130,7 +130,7 @@ AI (`fgame/navigate.cpp`):
 |---|---|---|---|
 | `ai_shownodenums 1` | Node numbers (yellow) 14 units over each node, within ai_showroutes_distance | **Done (rev 22)** | Tiny |
 | `ai_shownode N` (with `ai_showallnode 1`) | The N nearest nodes in your map cell that a trace reaches (with ai_showallnode, the N nearest at your height, `DebugNearestNodeList2`) as 31 x 31 x 36 player boxes with a 16-unit facing line, in the game's type colours (`GetPathnodeColor`) | **Done (rev 22)** | Small |
-| `ai_showpath 1`, `2`, `3` | Start and end at your feet, then the route an actor takes (red, 32 up) | Port the A* path search over the .pth | Large |
+| `ai_showpath 1`, `2`, `3` | Start and end at your feet, then the route an actor takes (red, 32 up) | **Done for Simulate's actor** (1.0.003): his route from `PathSearch::FindPath`, drawn by **Trace path** as `ShowNodes` draws it (the whole way blue, the rest to go red, a yellow line to his next point). Not yet as a cvar from the camera's spot | Medium |
 | `g_nodecheck 1` | Rebuilds the nodes to report errors (more than the max paths per node...) and stops with "Node check failed" | **Done (rev 22)**: the `.pth`'s flag and the nodes with 48+ connections | Tiny |
 
 ## Model Viewer

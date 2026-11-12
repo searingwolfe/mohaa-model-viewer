@@ -22,7 +22,8 @@ COMMON = ["mohaa_common.py", "mohaa_envcheck.py"]          # needed before the m
 PROGRAMS = {
     "map": dict(NAME="Map Viewer", EXTS=[".bsp", ".map", ".bak"], LAUNCHER="mohaa_map_launcher.py",
                 FILES=["mohaa_map_launcher.py", "mohaa_map_view.py", "mohaa_map_page.py", "mohaa_bsp.py",
-                       "mohaa_entdefs.py", "mohaa_launcher.py", "mohaa_view.py", "mohaa_textures.py"]),
+                       "mohaa_entdefs.py", "mohaa_map_actor.py", "mohaa_launcher.py", "mohaa_view.py",
+                       "mohaa_textures.py"]),
     "model": dict(NAME="Model Viewer", EXTS=[".skd", ".tik"], LAUNCHER="mohaa_launcher.py",
                   FILES=["mohaa_launcher.py", "mohaa_view.py", "mohaa_textures.py"]),
 }
@@ -31,7 +32,7 @@ BAT = r'''@echo off
 REM ============================================================================
 REM  MOH Model-Map Viewer (Windows x86-x64).bat
 REM  Starts the MOHAA Map Viewer or Model Viewer, picked from a menu: 1 / 2, or
-REM  Up / Down and Enter (1, the Map Viewer, is selected at first); Q or Esc quits.
+REM  Up / Down and Enter or Space (1, the Map Viewer, is selected at first); Q or Esc quits.
 REM  Drop a .bsp / .map / .bak file onto this to open it in the Map Viewer, or a
 REM  .skd / .tik in the Model Viewer: the menu is skipped then. Expects the scripts
 REM  in the bin\ folder next to this file.
@@ -266,7 +267,7 @@ SH = r'''#!/usr/bin/env bash
 # ==============================================================================
 #  MOH Model-Map Viewer (Linux - Mac OS).sh   (Linux and macOS)
 #  Starts the MOHAA Map Viewer or Model Viewer, picked from a menu: 1 / 2, or
-#  Up / Down and Enter (1, the Map Viewer, is selected at first); Q or Esc quits.
+#  Up / Down and Enter or Space (1, the Map Viewer, is selected at first); Q or Esc quits.
 #  Pass a .bsp / .map / .bak file to open it in the Map Viewer, or a .skd / .tik
 #  in the Model Viewer: the menu is skipped then.
 #

@@ -256,7 +256,7 @@ BUILTIN = {
  'info_null': ((0, 0.5, 0), ((-4, -4, -4), (4, 4, 4)), (),
   'Used as a positional target for spotlights, etc.'),
  'info_pathnode': ((1, 0, 1), ((-16, -16, 0), (16, 16, 32)), ('DONT_LINK', 'DUCK', 'COVER', 'CONCEALMENT', 'CORNER_LEFT', 'CORNER_RIGHT', 'SNIPER', 'CRATE', ),
-  'AI navigation node. Actors path between linked nodes.\nDONT_LINK  keep this node out of the path network\nDUCK  crouch here while firing\nCOVER  hide here during weapon fire\nCONCEALMENT  cover that is not sight-checked (foliage)\nCORNER_LEFT / CORNER_RIGHT  lean and fire around a corner\nSNIPER  sniping position\nCRATE  stand up and fire over cover (use with DUCK)'),
+  'AI navigation node. Actors path between linked nodes.\nDONT_LINK  keep this node out of the path network\nDUCK  crouch here while firing\nCOVER  hide here during weapon fire\nCONCEALMENT  cover that is not sight-checked (foliage)\nCORNER_LEFT / CORNER_RIGHT  lean and fire around a corner\nSNIPER  sniping position\nCRATE  crouch behind cover, then stand up and fire over it (he crouches on his own: do not add DUCK, the AI refuses the combination)'),
  'info_player_allied': ((0.75, 0.75, 1), ((-16, -16, 0), (16, 16, 96)), (),
   'potential spawning position for an allied player in a team games... ignored for FFA.\n\n"angle" - the direction the player should face\n"thread" - the thread that should be called when spawned at this position\n"arena" - the arena that this start point is located in'),
  'info_player_axis': ((0.75, 0.75, 1), ((-16, -16, 0), (16, 16, 96)), (),

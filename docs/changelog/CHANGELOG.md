@@ -1890,3 +1890,256 @@ Windows scripts (.bat) and new Linux / macOS scripts (.sh):
   system-wide installs (Ubuntu / Kubuntu 23.04+, PEP 668).
 - All four RUN files are generated from one template, so the Model and Map twins can't
   drift apart.
+
+## 1.0.002 Modify performance (November 2026)
+
+Adding or changing many entities in the Map Viewer's Modify section made the page lag. The
+entities were never kept in HTML (`MOD.ents` is a JS array; the list is only a view of it);
+the cost was in redrawing everything on every change. Only `bin/mohaa_map_page.py` changed.
+`MAP_VIEWER_REV` / `MAP_VIEWER_REV_REQUIRED` go to 107, so cached map pages rebuild.
+
+- **List drawn by window.** `modRender` used to rebuild every row with `innerHTML` on every
+  change, each row carrying the entity's whole text in its tooltip. The list is now a
+  scrolling box (22 px rows, newest first) that draws only the rows in view; its tooltip is
+  built on mouse-over. A newly selected row is scrolled into view.
+- **Heavy checks deferred.** `modLimits`, `paIssues` and the status line moved out of
+  `modRender` into `modStatNow`, run at most once per animation frame.
+- **`modEdited` without strings.** It compared two `JSON.stringify` results on every call
+  (it is called for each entity from the list, the links and the hide sync); it now compares
+  the key/value pairs directly, with the same answer.
+- **Undo / Redo as JSON, uncapped.** Each step is kept as a compact JSON string instead of a
+  deep copy of every entity, and the old 1000-step limit (`MOD_UNDO_MAX`) is gone: no step is
+  ever dropped. `modRestore` takes a string or an object.
+- **Backup stringifies once.** `modBackupNow` built the entities' JSON twice per backup; the
+  string made for the change check is reused in the file's text. The file is unchanged.
+
+Known limits: the undo steps are held in the page's memory as strings (smaller than before,
+not on disk), so a very long session still grows them; the launcher's recovery file holds
+the current state only, not the undo history. Checked with a JS engine on 3000 entities
+(rows drawn, tooltip on hover, scroll window, selection scroll, 3000 undo steps round-trip,
+`modEdited` cases) and the repo's tests; not yet timed in a real browser or WebView2.
+
+## 1.0.003 Simulate on path nodes (November 2026)
+
+The Map Viewer's SIMULATE section now also shows for an `info_pathnode` (a map's own or one
+Modify placed). It stands a human with a weapon on the node and plays the animation the game
+plays there, so a wall, a crate that is too high or a node too near a wall shows in the
+animation itself. `MAP_VIEWER_REV` / `MAP_VIEWER_REV_REQUIRED` go to 108; the version to
+1.0.003. The spline Simulate is unchanged.
+
+- **The panel.** A **Human** drop-down (every `models/human/*.tik` whose own text says
+  `classname Actor`) and a **Weapon** drop-down (`models/weapons/*.tik` with `classname
+  Weapon` and a `weapongroup`, which leaves the grenades and `static_kar98` out; the group
+  is shown in brackets), then **Spawn**, **Simulate**, **Reset** and **Remove**. The
+  choices are remembered in the browser. **Spawn** (**Respawn** once he is there) stands
+  him on the node, dropped to the floor (`pgDrop`, droptofloor) and facing the node's
+  yaw, idling (`<weapongroup>_stand_alert01` over `<weapongroup>_stand_alert_legs`, as
+  stand.scr). Changing a drop-down with him there builds the new one. Selecting anything
+  else removes him; moving the node in Modify moves him.
+- **What Simulate plays**, by the node's spawnflags, in the order the game's scripts play
+  them (`PathNode::GetSpecialAttack` tests CORNER_LEFT, CORNER_RIGHT, then CRATE):
+  CORNER_LEFT `_wall_alert_left`, `_wall_left_shoot_intro`, `_wall_left_shoot`,
+  `_wall_left_shoot_outro` (cornerleft.scr); CORNER_RIGHT the same with `right`; CRATE
+  `_crate_standtocrouch`, `_crate_alert`, `_crate_crouchtostand`, `_crate_shoot`,
+  `_crate_standtocrouch` (overattack.scr); SNIPER `_aim` then `_shoot` over the alert
+  legs; DUCK `_crouch_alert`. A name the group lacks falls back to `name01`, then the
+  lowest `nameNN` (mp40 and bar have `crate_shoot01`). No flags, DONT_LINK, COVER or
+  CONCEALMENT: he only stands there and Simulate is greyed out with the reason. A flag
+  combination the AI refuses (`IsValidPathnode`, the page's `nodeFlagsBad`) has no
+  animation either. A group with no clips for a role (bazooka has none for the walls or
+  the crate) greys it out with the missing clip's name. A corner or crate node with no
+  `angle` says it faces east. Each clip plays at its own frame rate, a short one held to
+  0.35 s, and the last frame stays until **Reset**. Nothing stops him going through a
+  wall: that is what it shows.
+- **Built on demand.** The human and weapon are built by the launcher only when chosen
+  (`mohaa-sim-actor`: `ModelBuilder` with `skin_wanted`, which records each drawn vertex's
+  bone weights in the order the mesh is written, plus the skeleton's names, parents and
+  base pose, as `build_payload` makes them). The animation of the node's role is built when
+  **Simulate** is first pressed (`mohaa-sim-actor-anim`), solved in-process against the
+  skeleton the mesh came from with the Model Viewer's `solve_anim`, and kept: **Reset** then
+  **Simulate** replays it without a rebuild. Clip records go to the page as JSON
+  (`MOHAA_SIMACT_ANIM`), the actor as a packet (`MOHAA_SIMACTOR`); the launcher keeps the
+  last four actors' skeletons.
+- **Posing.** The page does what the Model Viewer's does (`worldFromPose`, `skin`, ported
+  as `actWorld`, `actSkin` with the conjugating quaternion kept), without the entity-angle
+  root and the Y-up swap, and uploads the skinned vertices with `bufferSubData` each
+  frame. The weapon is a rigid instance on `tag_weapon_right` (`Weapon::attachToTag_main`),
+  placed as the Model Viewer's attachmodel is (its `ATT_BASE_ANG` is the identity). Some
+  clips move it to `tag_weapon_left` (`Weapon::attachToTag_offhand`) with their server
+  commands, `weaponcommand mainhand attachtohand offhand`: the right-corner clips hold it
+  there from their first frame, and a few switch mid-clip. The launcher reads these from the
+  catalogue entry (`hand_events`) into each clip's `hand`; the page carries the hand from one
+  clip to the next, and starts every role with the weapon in the main hand.
+- **New file `bin/mohaa_map_actor.py`**: the model lists, the flag to role rules, the clip
+  resolver, the solver call and the skin recorder, apart from Tk so they can be tested. It
+  is in the RUN files' file lists (`tools/make_launchers.py`, both launchers regenerated).
+- **Hardening.** The page's requests are checked in the launcher: keys match `[A-Za-z0-9_-]`
+  (64 at most), the model paths must be a `.tik` directly in `models/human/` or
+  `models/weapons/` without `..`, roles come from a fixed set (never a clip name), a clip
+  over 600 frames is refused, and every failure goes to the Output pane and back to the
+  page (`MOHAA_SIMACT_FAIL`), which shows it in the panel.
+- **Tests.** `tests/test_map_actor.py` (20: flag rules checked against the page's
+  `nodeFlagsBad` for all 256 flag values, clip-name fallbacks, request checks, list
+  filters; with `MOHAA_GAMEFOLDER` set, the real catalogue of a human against every weapon
+  group and a solved clip). Checked by hand with a JS engine: the page's skin of the base
+  pose equals `ModelBuilder`'s own mesh (0.000 difference), and an animated frame equals
+  `compute_world`'s pose of the same `.skc` frame (0.002 at most), for three humans and
+  roles; the panel's whole flow (spawn, build reply, simulate, clip reply, finish, reset,
+  remove) was driven with stubbed GL and DOM, and the launcher's workers against the real
+  paks' data.
+
+Checked numerically for the weapon's placement: for the rifle, MP40, Thompson, BAR and MP44 in
+every clip of the left, right and crate roles, the barrel (`tag_barrel`) points along the
+line to the supporting hand (cosine 0.91 to 0.99) when the hand events are applied. Without
+them the right-corner clips had the rifle pointing back through him, which is how the hand
+events were found. The exception is `_wall_alert_right`, which has no hand command and keeps
+the weapon in the main hand as the scripts do (cornerright.scr sets nothing before it); the
+barrel then lies away from the other hand in that clip, as it does in the game's data.
+
+Known limits: not looked at in a real browser or WebView2 (no display here), so the
+weapon's look in the hand should be confirmed by eye. The gear a human gets for a `case weapon "..."` in his `.tik`
+(helmet, belts) is not applied: the case values don't match the weapon names, so he is
+built with the `.tik`'s first branch, as map-placed actors are. Clips are played one after
+another without the game's blend between them. He doesn't take part in the pick pass or
+the collision of Simulate's spline model: clicks go through him.
+
+## 1.0.003, continued: actors that move, Modify deletes, path node errors (November 2026)
+
+Work done after the Simulate entry above and before 1.0.003 was released, so the version
+stays 1.0.003 and `MAP_VIEWER_REV` / `MAP_VIEWER_REV_REQUIRED` stay at 108 (a public 1.0.001
+install has page rev 106, so its cached pages are rebuilt anyway; a page built during
+development is rebuilt because its scripts are newer).
+
+**Simulate's actor**
+
+- **New controls.** Reset and Remove are gone. The section now has the Human and Weapon
+  drop-downs, then **Spawn** (**Respawn** once he is there: back on the node, idling),
+  **Pause** / **Resume** (freezes him mid-animation; every clock moves on by the pause),
+  **Fly to** (the camera 120 units from his chest, keeping its heading), **Follow**, then
+  **Simulate**, **Move** and **Trace path**. Deselecting the node takes him away.
+- **Follow** is the game's third-person camera (`CG_OffsetThirdPersonView`): the eye at his
+  head (82 up) plus `cg_cameraheight` 18, back `cg_cameradist` 120 along the view, 2 down
+  (`cg_cameraverticaldisplacement`), a 10-unit box traced from his head so a wall keeps it
+  out, and the pitch raised 2 degrees at a time while that leaves it under 40 units from
+  his head. Moving the camera by hand turns it off.
+- **Move** (a menu): **Run path** / **Walk path** follow the node's `"target"` chain (its
+  target, that one's target, and so on; Modify's entities first, then the map's), **Run
+  to** / **Walk to** go to whatever is clicked next: a node, any entity, or a spot (Esc
+  cancels). Each leg is reached as the game sends a man to a goal
+  (`Actor::MoveToPatrolCurrentNode`): an `info_waypoint` is walked to in a straight line
+  (`SetDest`); anything else is routed by `PathSearch::FindPath` (the nearest path node he
+  can see, else the nearest; the nearest the goal can see; an A* over the paths in use,
+  leaving out drops past `ai_fallheight`). When that finds nothing the panel says "Path not
+  found" and he stays put, as in game. The clips are `<weapongroup>_run_forward` and
+  `_walk_forward` (new `run` and `walk` roles), and his pace is the clip's own movement
+  (250 / 100 units a second for a clip that carries none). Once he has moved, Run path /
+  Walk path wait for Respawn: from where he stands they would send him back through walls.
+- **Steering as the server does it** (`actSimRoute`, from actor.cpp, actorpath.cpp,
+  g_mmove.cpp), planned in 50 ms frames before he starts: `ActorPath::UpdatePos` aims him at
+  a look-ahead point along the path (`PathLookAhead`: a swept area that grows 1024 a frame
+  to 256², while a 30 x 30 x 60 box trace to it is clear), so he rounds corners;
+  `FaceMotion` / `UpdateAngles` turn him toward his velocity (or his last 375-500 ms of
+  movement) at 360 degrees a second; a path ends within 16 units of its end. Walls and steps
+  (`MmoveSingle`) aren't tested, so nothing stops him in a wall.
+- **Doors open for him** as for an AI in game (`Door::SpawnTriggerField`, `FieldTouched`,
+  `TryOpen`, `DoorFire`, doors.cpp): each door group's bounds grown by 60 units in x and y
+  and 8 in z are a trigger field (none for a door with `health`, TARGETED, or one that
+  answers only players, NOT_MONSTERS); walking into it opens the door. Doors are solid to
+  him, he is held to the door's `speed` * 64 units a second while it opens, and his
+  look-ahead is cut short (`ForceShortLookahead`). The walk is planned on copies of the doors
+  (`actDoorSim`; `doorsAdvance` takes a set of its own and draws nothing for a copy) and the
+  door events are then played on the map's doors at their time (`actDoorFire`). A door that
+  never opens for him stops him there, with a message naming it.
+- **Trace path** draws his path as `PathSearch::ShowNodes` does for `ai_showpath`: start to
+  end in blue, the part still to go in red (32 units up), and a yellow line to his next
+  point. It turns on and off with AI routes and can be turned off on its own.
+- **The clip moves him.** `parse_skc` (mohaa_view.py) now returns each frame's movement
+  delta (`skelAnimFileFrame_t.delta`, `fdelta`), and `solve_clip` sends the running sum
+  (`dl`). The corner clips step him about 28 units to the side to lean out and back again,
+  so the clearance a CORNER node needs shows in the animation.
+- **More nodes and roles.** He can stand on an `info_waypoint` (no animation; he can run or
+  walk from it). LOW_WALL_ARC (256, Spearhead and Breakthrough only) plays the new
+  `highwall` role (aim, then shoot, standing; anim/highwall.scr) or `lowwall` with DUCK
+  (crouching; anim/lowwall.scr), and the panel gives the node's `low_wall_arc`. A CORNER,
+  CRATE or LOW_WALL_ARC node with no angle faces its target, else the way the camera faced
+  when he spawned. With several nodes selected that form one unbroken `target` chain, the
+  first of them along the chain is the one he uses; any other multiple selection shows no
+  Simulate (the spline Simulate needs a single selection too).
+
+**Modify**
+
+- **Deleting the map's own entities.** Delete on one of the map's point entities flags it
+  DEL (its row reads `#N DEL` in red, its label DEL) instead of doing nothing: it is drawn
+  nowhere, a path node among them loses its links, Save as .bsp leaves it out of the entity
+  lump (`write_bsp_entities` takes `del` entries; the worldspawn can't be deleted) and Save as
+  .map drops its block. Copy leaves it out. The button then reads **Restore**, which (like
+  Undo) puts it back. The Delete key does the same for Modify's selected rows; what has no
+  row (a brush entity, a static prop) can't be deleted.
+- **Spawnflags** (a new button): a list of the selected entity's spawnflag bits, each with
+  its value and name (the class's own from the QUAKED headers, then the editor's `!Easy`,
+  `!Medium` ... that every class has; for a path node DONT_LINK to CRATE and LOW_WALL_ARC).
+  A click sets or clears a bit, Clear takes them all off; each change is one Undo step.
+- **48-path relinking.** A map node that already has its 48 paths may have been cut short;
+  when a node within 640 units of it is added, moved or deleted, it is linked again in the
+  game's order, as the game would on the next build.
+- An entity with a model gets thin white axes at its origin, turned with its angles, in
+  place of the facing arrow, so its new origin can be placed exactly.
+- Selecting an entity the level script spawns says that it can only be changed in the
+  script (with its file and line).
+
+**Selection and AI paths**
+
+- **Same spawnflags** selects every shown entity of the same class with the same
+  spawnflags (every CRATE node, say). **Same error** selects every path node with any of the
+  selected nodes' errors: no paths, one-way, duplicate, no angle, in the wall, 48 paths
+  full, and Modify's own. Hide and Clear moved up beside Fly to.
+- **The 48-path limit on the map's own nodes** (`paOver`): worked out from the paths in use
+  by going through each full node's candidates in the game's order. A node that had more to
+  link gets a "48 paths: full" tag (always shown, like Modify's own) and a card line with
+  the game's `^~^~^ 48 paths per node at (...) exceeded`; one with exactly 48 gets an
+  information line. Paths worked out for a map with no `.pth` report how many nodes hit it.
+- **Links on terrain.** A move from a node on a terrain grid line (x or y a multiple of 64
+  from the terrain's corner) started stuck in the capsule trace, though the game walks it.
+  It is now tried again 1 unit up (`pgCheckMove`): on m3l1b this finds 65 of the 93 links
+  the game's `.pth` has that were missed, and adds none.
+
+**Build and launcher**
+
+- A `.pth` beside the map on disk now comes before the one in the paks, since the game reads
+  loose files before any `.pk3`: the `.pth` the game wrote when it built a map's paths beats
+  a stock one made for another version of the map.
+- A model the level script spawns is shown and counted as the editor class of its `.tik`
+  (its QUAKED header; a German soldier is `ai_german_wehrmact_soldier`), as a map entity with
+  that model is, else `script_model`, instead of a class named after the model's path
+  (`LevelScript` takes `tik_class`). In game it is spawned as the class the `.tik`'s init
+  `classname` names (`SpawnArgs::getClassDef`: `Actor` for a human).
+- Legend: the path node rows say where each kind of node belongs (with the 28-unit lean of
+  the CORNER clips, and DUCK or CRATE heights), and DONT_LINK, DUCK and LOW_WALL_ARC have
+  rows of their own. The CRATE description in mohaa_entdefs.py says not to add DUCK (the AI
+  refuses the combination).
+- Build lines starting with `!` show in the launcher's Output in yellow, as notes: the build
+  carries on and they aren't errors.
+- The RUN files' menu takes Space as Enter.
+- `tests/test_map_actor.py`: 23 tests (2 need `MOHAA_GAMEFOLDER`).
+
+Known limits: the walk doesn't test walls, steps or falls (only doors stop him), a door
+closing on him (`DoorBlocked`) isn't simulated, and the run and walk clips play without the
+game's blending between them. Checked with the repository's tests and `node --check`; the
+look of the walk and the doors should be confirmed by eye in the launcher.
+
+## Documentation (November 2026)
+
+- Code comments reviewed again for the Map Viewer's newest parts: notes that described
+  how the code used to be ("the old note stands", "actSimRoute replaced it") now say what
+  it does. Unused code removed from mohaa_map_page.py: `actAlong`, `actTurn`, `ACT_TURN`,
+  `actReset` and `actRemove` (left over from the Reset and Remove buttons). The unused
+  spawnflag constants in mohaa_map_actor.py had the wrong values for DUCK, COVER,
+  CONCEALMENT and SNIPER; they now match the game (1 to 128, and LOW_WALL_ARC 256).
+- Python files use LF line endings throughout, as the repository stores them (some had
+  been saved with CRLF). The `.bat` files stay CRLF.
+- `.gitignore` leaves out `.claude/`, a local editor-assistant settings folder.
+- Privacy notice dated 12 November 2026 (`PRIVACY_TEXT`, `docs/PRIVACY.md`): the Map
+  Viewer's display choices now include Simulate's human and weapon (`_PRIVACY_SWAPS`).
+- SECURITY lists the requests a map page sends its launcher, and how each is checked.
+- README, map-viewer.md, doors-notes.md, engine-notes.md, game-cvars-candidates.md,
+  project-overview.md and development-workflow.md describe the changes above.

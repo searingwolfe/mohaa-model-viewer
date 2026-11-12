@@ -602,7 +602,7 @@ def parse_skc(path):
     # (skeletor_loadanimation.cpp ConvertSkelFileToGame), and the idle animation's are the
     # model's own (TIKI_InitTiki), which sv_showbboxes 7 draws; the radius is the one the
     # renderer's level of detail uses (skeletor_c::GetRadius, R_AddSkelSurfaces).
-    fbounds=[]; frad=[]
+    fbounds=[]; frad=[]; fdelta=[]
     for f in range(numFrames):
         meta=0x30+f*48; ofsVals=_i32(b,meta+0x2C); vals={}
         if ofsVals<0 or ofsVals+numChan*16>n:        # each frame's channel block must be in range
@@ -613,8 +613,12 @@ def parse_skc(path):
             vals[names[ci]]=[_f32(b,o),_f32(b,o+4),_f32(b,o+8),_f32(b,o+12)]
         frames.append(vals)
         fbounds.append(struct.unpack_from("<6f",b,meta)); frad.append(_f32(b,meta+0x18))
+        # the frame's movement delta (skelAnimFileFrame_t.delta, in the actor's own space: x ahead,
+        # y left): what the engine moves the entity by as the clip reaches this frame (the corner
+        # clips step him sideways to look round the wall)
+        fdelta.append(struct.unpack_from("<3f",b,meta+0x1C))
     return {"frameTime":frameTime,"numChan":numChan,"numFrames":numFrames,
-            "names":names,"frames":frames,"fbounds":fbounds,"frad":frad}
+            "names":names,"frames":frames,"fbounds":fbounds,"frad":frad,"fdelta":fdelta}
 
 def morph_track(skc, morph_names):
     """Per-frame blend-shape weights for a facial (MORPH) .skc, or None if it isn't one.

@@ -9,11 +9,11 @@ architecture, and the engine details that took the longest to get right.
 | [project-overview.md](project-overview.md) | Goals, repository layout, how a model is built, caching and versions, known issues and open work |
 | [hardening-notes.md](hardening-notes.md) | How the code is hardened (logs, atomic writes, settings recovery, vendored packages, the updater, the RUN files), the decisions behind it, deviations from the standard, and what is still open |
 | [development-workflow.md](development-workflow.md) | Checks to run before shipping (both viewers), values that must change together, how engine references are cited, batch-file pitfalls |
-| [engine-notes.md](engine-notes.md) | Format, skeleton, level of detail and hit location, TikiScript, shader and WebView2 findings |
+| [engine-notes.md](engine-notes.md) | Format, skeleton, level of detail and hit location, TikiScript, shader and WebView2 findings, map entities, how an AI walks a path, the sun and baked light |
 | [emitter-commands.md](emitter-commands.md) | Every `.tik` emitter keyword the Model Viewer understands and what it does |
 | [sprite-roll-rules.md](sprite-roll-rules.md) | When sprites roll in the engine, how `randomroll` behaves, and how that was verified |
-| [map-viewer.md](map-viewer.md) | The Map Viewer: files, how a map is built, the `.bsp` decompiler, the page, the game's lighting, decals and the leak trail, the level script, cameras, versions and known limits |
-| [doors-notes.md](doors-notes.md) | How the Map Viewer's Open door follows the game's doors: keys, rotating and sliding doors, linking, areas |
+| [map-viewer.md](map-viewer.md) | The Map Viewer: files, how a map is built, the `.bsp` decompiler, the page, the game's lighting, decals and the leak trail, weather, the level script, Modify, Simulate (splines and actors), cameras, versions and known limits |
+| [doors-notes.md](doors-notes.md) | How the Map Viewer's Open door follows the game's doors: keys, rotating and sliding doors, linking, areas, and how doors open for Simulate's actor |
 | [game-cvars-candidates.md](game-cvars-candidates.md) | The game's debugging cvars: which both viewers show, what each does in game, and the ones still open |
 
 The source files carry the exact OpenMOHAA file and line references beside the code that

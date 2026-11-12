@@ -155,6 +155,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
  #modTxt{margin:8px 12px 4px;min-height:190px;resize:vertical;font:12px/1.4 Consolas,Menlo,monospace;background:var(--bg);color:var(--txt);
    border:1px solid var(--line);border-radius:6px;padding:6px 8px}
  #modErr{padding:0 12px 6px;color:var(--err);min-height:14px}
+ #modList .li{height:22px;box-sizing:border-box;padding-top:0;padding-bottom:0}
  #modList .sw{width:10px;height:10px;border-radius:2px;flex:none;box-sizing:border-box}
  #modList .mtag{font-size:10px;padding:0 4px;border-radius:3px;border:1px solid var(--line);color:var(--dim);flex:none}
  #modList .mtag.nw{color:var(--accent);border-color:var(--accent)}
@@ -320,13 +321,15 @@ __KEYS_CSS__
      <div class="row" id="selBtns" style="display:none">
        <button class="sm" id="bInfo" title="Everything about the selection: keys, origin, setsize, targets, textures (N, or Ctrl+click)">&#9432; More info</button>
        <button class="sm" id="bFocus" title="Fly the camera to the selection (F, or double-click)">Fly to</button>
-       <button class="sm" id="bSame" title="Select everything of the same kind: same class for entities, same texture for brushes (Alt+click)">Same kind</button>
+       <button class="sm" id="bHide" title="Hide the selection (Backspace). Shift+H shows everything again.">Hide</button>
+       <button class="sm" id="bClear" title="Clear the selection (Esc)">Clear</button>
        <button class="sm" id="bEye" style="display:none" title="Eye view: put the camera where the entity sees from, facing its angles or its target">Eye view</button>
+       <button class="sm" id="bSameSf" disabled title="Select every entity of the same class with the same spawnflags (the selected entity has none)">Same spawnflags</button>
+       <button class="sm" id="bSameErr" disabled title="Select every path node with the same error as the selected path node(s): none of the selected path nodes has an error">Same error</button>
+       <button class="sm" id="bSame" title="Select everything of the same kind: same class for entities, same texture for brushes (Alt+click)">Same kind</button>
        <button class="sm" id="bPath" style="display:none" title="Select the whole path through this entity: everything its &quot;target&quot; leads to and everything that leads to it (Ctrl+Alt+click)">Same path</button>
        <button class="sm" id="bTname" style="display:none" title="Select every entity with this targetname ($, that is Shift+4)">Same targetname</button>
        <button class="sm" id="bDoor" style="display:none" title="Open or close the selected door as in game (O)">Open door</button>
-       <button class="sm" id="bHide" title="Hide the selection (Backspace). Shift+H shows everything again.">Hide</button>
-       <button class="sm" id="bClear" title="Clear the selection (Esc)">Clear</button>
        <button class="sm" id="bExpRun" style="display:none">Run exploder</button>
        <button class="sm" id="bExpReset" style="display:none">Reset exploder</button>
        <button class="sm" id="bLightOff" style="display:none" title="Turn the selected lights off, as if they had never been there: the light they gave the map (its lightmaps, vertex light, props and models) goes, the rest stays. Display's Lights off turns every light off">Turn off</button>
@@ -336,11 +339,12 @@ __KEYS_CSS__
    </div>
    <div class="sect" id="simSect" style="display:none">
      <h2>Simulate</h2>
+     <div id="simSpl">
      <div class="row">
        <button class="sm" id="bSim" title="Fly a model along this info_splinepath's path from its first node, as a script's followpath does">&#9654; Simulate</button>
        <button class="sm" id="bSimReset" disabled title="Stop the simulation and take the model away">Reset</button>
      </div>
-     <div id="simSum" class="co"></div>
+     <div id="simSum" class="co" style="white-space:pre-line"></div>
      <div class="row" style="align-items:center">
        <span class="co">Model</span><span id="simModel" class="simMod"></span>
        <button class="sm" id="bSimPick" title="Choose the model that flies the path: any model in the paks (from the launcher), or a model this map places">Choose&hellip;</button>
@@ -354,6 +358,37 @@ __KEYS_CSS__
      </div>
      <div class="row co" id="simTime"></div>
      <div class="row co" title="How far behind the model the camera follows (the mouse wheel changes it while the camera follows)">camera zoom <input type="range" id="simZoom" min="0" max="100" step="1" value="40"><span id="simZoomV" style="min-width:34px;text-align:right"></span></div>
+     </div>
+     <div id="simNd" style="display:none">
+       <div class="row" style="align-items:center">
+         <span class="co">Human</span>
+         <select id="actHum" style="flex:1;min-width:0" disabled title="The human who stands on the node: any actor model in the paks (models/human). The launcher builds the one you choose, and only that one"></select>
+       </div>
+       <div class="row" style="align-items:center">
+         <span class="co">Weapon</span>
+         <select id="actWpn" style="flex:1;min-width:0" disabled title="The weapon in his hand: any weapon model in the paks (no grenades). Its weapon group (in brackets) names the animations he plays"></select>
+       </div>
+       <div class="row">
+         <button class="sm" id="bActSpawn" disabled title="Stand the chosen human on this path node, dropped to the floor and facing the node's angle, idling">Spawn</button>
+         <button class="sm" id="bActPause" disabled title="Freeze him exactly where he is, mid-animation; press again to carry on">Pause</button>
+         <button class="sm" id="bActFly" disabled title="Fly the camera to him, wherever he is now">Fly to</button>
+         <button class="sm" id="bActFollow" disabled title="The game's third-person camera behind his head (cg_cameradist 120, cg_cameraheight 18): it moves in to keep out of walls, and tips up over him when it is against one. Moving the camera by hand turns it off">Follow</button>
+       </div>
+       <div class="row" style="gap:4px;flex-wrap:wrap">
+         <button class="sm" id="bActSim" disabled title="Play the animation the game plays at a node with these spawnflags (CORNER_LEFT, CORNER_RIGHT, CRATE, SNIPER, DUCK), to check that it isn't blocked by a wall or crate">&#9654; Simulate</button>
+         <span id="actMoveWrap" style="position:relative;display:inline-block">
+           <button class="sm" id="bActMove" disabled title="Run or walk along the target chain, or to a spot you pick">&#10140; Move &#9662;</button>
+           <div id="actMoveMenu" style="display:none;position:absolute;left:0;top:100%;margin-top:2px;z-index:20;flex-direction:column;gap:2px;padding:3px;background:#1b1f27;border:1px solid #3a4150;border-radius:4px;min-width:100%">
+             <button class="sm" id="bActRunPath" disabled style="white-space:nowrap;text-align:left" title="Run along this node's &quot;target&quot; chain: to its target, then that one's target, and so on (greyed out when it has no target)">&#9654; Run path</button>
+             <button class="sm" id="bActRunTo" disabled style="white-space:nowrap;text-align:left" title="Run to a node, an entity or a spot you click next (Esc cancels). A path node or any other spot is reached over the AI's path nodes; an info_waypoint is walked to in a straight line">&#9654; Run to</button>
+             <button class="sm" id="bActWalkPath" disabled style="white-space:nowrap;text-align:left" title="Walk along this node's &quot;target&quot; chain instead of running (greyed out when it has no target)">&#9654; Walk path</button>
+             <button class="sm" id="bActWalkTo" disabled style="white-space:nowrap;text-align:left" title="Walk to a node, an entity or a spot you click next (Esc cancels)">&#9654; Walk to</button>
+           </div>
+         </span>
+         <button class="sm" id="bActTrace" title="Draw the path he is following: the whole way in blue, the part still to go in red. Off by default; turns on with AI routes, and can be turned off after">Trace path</button>
+       </div>
+       <div id="actSum" class="co" style="white-space:pre-line"></div>
+     </div>
    </div>
    <div class="sect">
      <h2>Camera</h2>
@@ -434,11 +469,13 @@ __KEYS_CSS__
        <button class="sm" id="bModLink" title="Make path: click another entity to set this one's &quot;target&quot; to its targetname (only entities that have one can be picked), drawn as a target link. The clicked one is selected after, so pressing Make path again goes on along the path (info_waypoint, info_splinepath, script_origin...). Esc cancels">Make path</button>
        <button class="sm" id="bModEye" title="Eye view: put the camera where the entity sees from, as Eye view does for the map's entities: a path node, a player start or an AI 82 units above the floor under it, anything else at its origin, facing its angles, else its target, else yaw 0">Eye view</button>
        <button class="sm" id="bModFly" title="Fly the camera to the entity&#10;&#10;Hotkey: click its row in the list again once it is selected (green), or double-click the row">Fly to</button>
-       <button class="sm" id="bModDel" title="Remove the entity&#10;&#10;Hotkey: Delete">Delete</button>
+       <button class="sm" id="bModSf" title="Spawnflags: tick the selected entity's spawnflags from the list of its class (a path node: DONT_LINK, DUCK, COVER, CONCEALMENT, CORNER_LEFT, CORNER_RIGHT, SNIPER, CRATE, and LOW_WALL_ARC for Spearhead / Breakthrough only)">Spawnflags</button>
        <button class="sm" id="bModDup" title="Copy: the selected entities again (Shift+click adds more to the selection, the map's own entities selected in the view too), without targetname or target. They follow the mouse together, spaced as they are, until a click puts them down; Esc takes them away&#10;&#10;Hotkey: Alt+C">Copy</button>
        <button class="sm" id="bModHUndo" title="Undo the last change to Modify's entities, back to none added&#10;&#10;Hotkey: Alt+Z">Undo</button>
        <button class="sm" id="bModHRedo" title="Redo the last change undone&#10;&#10;Hotkey: Alt+Y or Alt+Shift+Z">Redo</button>
+       <button class="sm" id="bModDel" title="Remove the entity&#10;&#10;Hotkey: Delete">Delete</button>
      </div>
+     <div class="co" id="modScr" style="display:none;margin-top:6px;color:var(--warn)"></div>
      <div class="row co" style="margin-top:6px">trim step <input type="range" id="modStep" min="0" max="13" step="1" value="4" title="How far one key press of Trim origin moves it, 1 to 50 units"><span id="modStepV" style="min-width:22px;text-align:right">5</span></div>
      <div class="row" style="gap:4px;flex-wrap:wrap">
        <button class="sm" id="bModSaveBsp" title="Save a copy of the .bsp with the new entities in its entity lump (everything else byte for byte) and a new &quot;map_time&quot;, so the game rebuilds the AI's .pth. Never over the original">Save as .bsp</button>
@@ -1243,6 +1280,7 @@ function nodeName(A,j){
 // AI errors (the button by AI routes): its "no paths", "one-way", "own group" and "in the
 // wall" tags. It follows AI routes (setCvar), and can be turned off while AI routes is on.
 let AIERR=false;
+let TRACEPATH=false;     // Trace path (Simulate's actor): his path in blue and red. Turns on and off with AI routes, and can be turned off by itself
 const AIERR_KINDS={none:1,island:1,wall:1};
 function drawPathIssues2D(){
   const R=PA_ISS,useR=!!(R&&(R.n||R.info)&&MOD.ents.length&&R.A===PA_C);
@@ -1264,6 +1302,11 @@ function drawPathIssues2D(){
       if(t.dl){if(nodeSpawnflags(A,i)&1)add(i,'\u2298 DONT_LINK',0);
         else{if(t.dup===undefined)t.dup=nodeDupOf(A,i);
           add(i,'duplicate of '+(t.dup>=0?nodeName(A,t.dup):'another node')+': not linked',2);}}}
+    // the 48-path limit: always, like Modify's own (kind "links")
+    for(const[i]of paOver().over){if(i>=A.n||pnGone(A,i))continue;
+      const p=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40],d=Math.hypot(p[0]-cam.pos[0],p[1]-cam.pos[1],p[2]-cam.pos[2]);
+      if(d>far||(d>350&&!lblSeen('r'+i,p)))continue;
+      add(i,'48 paths: full',2);}
     if(AIERR)for(let i=0;i<A.n;i++){const p=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40];
       const d=Math.hypot(p[0]-cam.pos[0],p[1]-cam.pos[1],p[2]-cam.pos[2]);
       if(d>far||(d>350&&!lblSeen('r'+i,p)))continue;
@@ -1277,8 +1320,9 @@ function drawPathIssues2D(){
   ctx.font='bold 11px ui-monospace,Menlo,Consolas,monospace';ctx.textBaseline='middle';
   for(const[i,o]of out){
     let s;const ei=mapEi&&i<nMap?mapEi[i]:-1,X=ei>=0?ENTS[ei]:null;
-    const mm=!X&&A.mod&&i>=nMap?A.mod[i-nMap]:null;
-    if(X&&X.anchor){s=project([X.anchor[0],X.anchor[1],X.anchor[2]+(X.box?X.box.maxs[2]+6:0)]);if(s)s=[s[0],s[1]+7];}
+    const em=A.edits&&i<nMap?A.edits.get(i):null;          // a map node moved in Modify: its tag goes with it
+    const mm=em||(!X&&A.mod&&i>=nMap?A.mod[i-nMap]:null);
+    if(X&&X.anchor&&!em){s=project([X.anchor[0],X.anchor[1],X.anchor[2]+(X.box?X.box.maxs[2]+6:0)]);if(s)s=[s[0],s[1]+7];}
     else if(mm){const o=modOrigin(mm),b=modBox(mm);s=project([o[0],o[1],o[2]+b.maxs[2]+6]);if(s)s=[s[0],s[1]+7];}
     else s=project([A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40]);
     if(!s||s[0]<0||s[0]>W||s[1]<0||s[1]>H)continue;
@@ -2135,6 +2179,7 @@ function modelR(M,A){
 function modelsDrawn(mode){
   let L=(mode===0&&SIM.R&&SIM.R.n)?MODELS.concat([SIM.R]):MODELS;
   if(mode===0&&MOD.ents.length){const mr=modModelsInst();if(mr.length)L=L.concat(mr);}
+  if(mode===0&&ACT.cur){const ar=actDrawn();if(ar)L=L.concat(ar);}
   return L;}
 // Which of a model's surfaces are drawn: never its camera-facing sprites (drawSprites
 // draws those); a tree that has a sprite version shows the sprite alone with Simple models
@@ -4461,7 +4506,7 @@ function rebuildLines(){
       const h1=[tip[0]-f[0]*t-u[0]*t,tip[1]-f[1]*t-u[1]*t,tip[2]-f[2]*t-u[2]*t], h2=[h1[0]+u[0]*2*t,h1[1]+u[1]*2*t,h1[2]+u[2]*2*t];
       ARROWS.push([c,tip,h1,h2,selE.has(X.ei)]);
     }
-    MOD.ents.forEach((m,i)=>{if(!modDrawn(i))return;const kvl=modKvl(m);if(kvl.angle==null&&kvl.angles==null)return;
+    MOD.ents.forEach((m,i)=>{if(!modDrawn(i)||modHasModel(m))return;const kvl=modKvl(m);if(kvl.angle==null&&kvl.angles==null)return;   // a modelled entity gets axes at its origin instead (drawModify)
       const ax=anglesAxis(entAngles(kvl)),f=ax[0],u=ax[2],o=modOrigin(m),b=modBox(m);
       const c=[o[0]+(b.mins[0]+b.maxs[0])/2,o[1]+(b.mins[1]+b.maxs[1])/2,o[2]+(b.mins[2]+b.maxs[2])/2];
       const hw=Math.max(4,(b.maxs[0]-b.mins[0])/2),len=hw*2.5,t=hw*0.5,tip=[c[0]+f[0]*len,c[1]+f[1]*len,c[2]+f[2]*len];
@@ -4572,7 +4617,7 @@ function draw2D(){
       const d=Math.hypot(o[0]-cam.pos[0],o[1]-cam.pos[1],o[2]-cam.pos[2]);
       if(!sel&&d>(tn?2048:700))return;
       cand.push([sel?-1:d,{mod:m,anchor:o,top:[o[0],o[1],o[2]+b.maxs[2]+6],e:{cls:modCls(m),kvl:k},
-        badge:modIsMap(m)?(modEdited(m)?'EDIT':''):'NEW'}]);});
+        badge:modIsMap(m)?(m.del?'DEL':modEdited(m)?'EDIT':''):'NEW'}]);});
     cand.sort((a,b)=>a[0]-b[0]);
     ctx.font='11px ui-monospace,Menlo,Consolas,monospace';ctx.textBaseline='middle';
     const taken=[];let shown=0;
@@ -5178,7 +5223,8 @@ function buildRoutes(){
     }
     if(k0===k1){
       const p=[O[i*3],O[i*3+1],O[i*3+2]+2];
-      if(F[i]&1){                                     // PATH_DONT_LINK: a blue circle
+      if(pnGone(A,i)){}                               // deleted in Modify: nothing to draw
+      else if(F[i]&1){                                // PATH_DONT_LINK: a blue circle
         tag(i).dl=true;
         for(let s=0;s<24;s++){const a0=s*Math.PI/12,a1=(s+1)*Math.PI/12;
           line([p[0]+Math.sin(a0)*12,p[1]+Math.cos(a0)*12,p[2]],[p[0]+Math.sin(a1)*12,p[1]+Math.cos(a1)*12,p[2]],BLUE,i);}
@@ -5253,7 +5299,7 @@ function doorNew(ei){
   const d={ei:ei,kind:kind,sf:sf,master:ei,next:-1,chain:[ei],state:(sf&1)?'open':'closed',prev:'',
     a:0,mv:null,closeAt:null,dirOpened:0,o:b.origin.slice(),mins:b.mins.slice(),maxs:b.maxs.slice(),
     how:'doortype wood, the default',wait:(sf&32)?0:3,waitKey:false,angle:90,away:true,lip:8,base:0,
-    yawKey:0,dir:[0,1,0],move:[1,0,0],gm:null};
+    yawKey:0,dir:[0,1,0],move:[1,0,0],gm:null,reg:DOORS,busy:null,sim:false};   // reg/busy/sim: a copy the actors' walk plans on has its own (actDoorSim)
   d.prev=d.state;
   let rate=1;                                // Door::speed: 1 / traveltime
   for(const[k0,v]of e.kv){const k=k0.toLowerCase();
@@ -5304,6 +5350,7 @@ function doorsLink(list){
 // The area portals the doors hold open, for r_showtris: each door's two areas (from where
 // the .map has it), counted as the game counts them.
 function doorPortal(d,open){
+  if(d.sim)return;
   const a=GV&&GV.doorArea.get(d.ei);if(!a||a[0]<0||a[1]<0)return;
   const k=Math.min(a[0],a[1])+','+Math.max(a[0],a[1]);
   PORTAL_REF.set(k,(PORTAL_REF.get(k)||0)+(open?1:-1));
@@ -5314,7 +5361,7 @@ function doorPortal(d,open){
 function doorShut(d){return d.state==='closed'||d.state==='closing';}
 function doorOpen(d,t,from){                     // Door::Open; from: where the opener is
   if(d.state==='opening')return;
-  if(d.state==='open'){if(d.wait>0){d.closeAt=t+d.wait*1000;DOORS_BUSY.add(d);}return;}   // waits its full time again
+  if(d.state==='open'){if(d.wait>0){d.closeAt=t+d.wait*1000;(d.busy||DOORS_BUSY).add(d);}return;}   // waits its full time again
   d.prev=d.state;d.state='opening';
   if(d.kind==='rot'){                            // RotatingDoor::DoOpen (only a shut door picks its side)
     if(d.prev==='closed'){
@@ -5327,7 +5374,7 @@ function doorOpen(d,t,from){                     // Door::Open; from: where the 
     doorMove(d,t,to,1);
   }else doorMove(d,t,d.total,1);                 // SlidingDoor::DoOpen
   if(d.master===d.ei){
-    for(const s of d.chain)if(s!==d.ei)doorOpen(DOORS.get(s),t,from);
+    for(const s of d.chain)if(s!==d.ei)doorOpen(d.reg.get(s),t,from);
     if(d.prev==='closed')doorPortal(d,true);
   }
 }
@@ -5336,18 +5383,18 @@ function doorMove(d,t,to,end){                   // Mover::MoveTo: an even speed
   let dur=d.vel>0?Math.abs(delta)/d.vel*1000:0, snap=false;
   if(dur<DOOR_FRAME){dur=DOOR_FRAME;snap=true;}  // nothing to do, or quicker than a frame: there at the frame's end
   d.mv={a0:d.a,a1:d.a+delta,to:to,t0:t,t1:t+dur,end:end,snap:snap};
-  DOORS_BUSY.add(d);
+  (d.busy||DOORS_BUSY).add(d);
 }
 function doorOpenEnd(d,t){                       // Door::OpenEnd
   d.prev=d.state;d.state='open';
   if(d.sf&32)return;                             // TOGGLE: it waits to be used again
-  if(d.wait>0&&d.master===d.ei){d.closeAt=t+d.wait*1000;DOORS_BUSY.add(d);}
+  if(d.wait>0&&d.master===d.ei){d.closeAt=t+d.wait*1000;(d.busy||DOORS_BUSY).add(d);}
 }
 function doorClose(d,t){                         // Door::Close
   d.closeAt=null;
   d.prev=d.state;d.state='closing';
   doorMove(d,t,0,2);                             // back to its start angle or position
-  if(d.master===d.ei)for(const s of d.chain)if(s!==d.ei)doorClose(DOORS.get(s),t);
+  if(d.master===d.ei)for(const s of d.chain)if(s!==d.ei)doorClose(d.reg.get(s),t);
 }
 function doorCloseEnd(d,t){                      // Door::CloseEnd
   if(d.master===d.ei)doorPortal(d,false);
@@ -5356,25 +5403,25 @@ function doorCloseEnd(d,t){                      // Door::CloseEnd
 // Run the doors up to now (ms): the moves that end and the closes that fall due, each at
 // its own time (so a page left in the background catches up in order), then where each
 // moving door is. True when anything changed.
-function doorsAdvance(now){
-  let changed=false,states=false;
+function doorsAdvance(now,busy){                 // busy: a copy's own set (the actors' walk plan): nothing is drawn
+  let changed=false,states=false;const BS=busy||DOORS_BUSY,sim=!!busy;
   for(;;){
     let d=null,at=Infinity,close=false;
-    for(const x of DOORS_BUSY){
+    for(const x of BS){
       if(x.mv&&x.mv.t1<=now&&x.mv.t1<at){d=x;at=x.mv.t1;close=false;}
       if(x.closeAt!=null&&x.closeAt<=now&&x.closeAt<at){d=x;at=x.closeAt;close=true;}
     }
     if(!d)break;
     changed=states=true;
     if(close){d.closeAt=null;doorClose(d,at);}
-    else{const m=d.mv;d.mv=null;d.a=m.to;doorPose(d);(m.end===1?doorOpenEnd:doorCloseEnd)(d,at);}
+    else{const m=d.mv;d.mv=null;d.a=m.to;if(!sim)doorPose(d);(m.end===1?doorOpenEnd:doorCloseEnd)(d,at);}
   }
-  for(const d of [...DOORS_BUSY]){
+  for(const d of [...BS]){
     if(d.mv&&!d.mv.snap){const m=d.mv,a=m.a0+(m.a1-m.a0)*Math.min(1,Math.max(0,(now-m.t0)/(m.t1-m.t0)));
-      if(a!==d.a){d.a=a;doorPose(d);changed=true;}}
-    if(!d.mv&&d.closeAt==null)DOORS_BUSY.delete(d);
+      if(a!==d.a){d.a=a;if(!sim)doorPose(d);changed=true;}}
+    if(!d.mv&&d.closeAt==null)BS.delete(d);
   }
-  if(states)doorBtnRender();
+  if(states&&!sim)doorBtnRender();
   return changed;
 }
 // ---- where a door is now ----------------------------------------------------------------
@@ -5383,8 +5430,11 @@ function doorsAdvance(now){
 function doorXf(ei){
   if(EXP.mov.size){const c=EXP.mov.get(ei);if(c)return c.xf;}
   const d=DOORS&&DOORS.get(ei);if(!d||!d.a)return null;
-  if(d.kind==='rot'){const r=d.a*Math.PI/180,c=Math.cos(r),s=Math.sin(r);return{R:[c,-s,0,s,c,0,0,0,1],o:d.o,t:[0,0,0],yaw:d.a};}
-  return{R:[1,0,0,0,1,0,0,0,1],o:d.o,t:[d.move[0]*d.a,d.move[1]*d.a,d.move[2]*d.a],yaw:0};
+  return doorXfAt(d,d.a);
+}
+function doorXfAt(d,a){
+  if(d.kind==='rot'){const r=a*Math.PI/180,c=Math.cos(r),s=Math.sin(r);return{R:[c,-s,0,s,c,0,0,0,1],o:d.o,t:[0,0,0],yaw:a};}
+  return{R:[1,0,0,0,1,0,0,0,1],o:d.o,t:[d.move[0]*a,d.move[1]*a,d.move[2]*a],yaw:0};
 }
 function xfP(X,p){const o=X.o,R=X.R,x=p[0]-o[0],y=p[1]-o[1],z=p[2]-o[2];
   return[o[0]+X.t[0]+R[0]*x+R[1]*y+R[2]*z,o[1]+X.t[1]+R[3]*x+R[4]*y+R[5]*z,o[2]+X.t[2]+R[6]*x+R[7]*y+R[8]*z];}
@@ -6687,7 +6737,18 @@ function pgMmove(mm){
   }
 }
 // CheckMove: whether the box gets from a to b, and the fall on the way (null: it doesn't)
+// A move the game makes from a node on a terrain grid line (x or y a multiple of 64 from the
+// terrain's corner) starts "stuck" in the capsule trace here, though the game walks it: the box
+// the node was dropped with touches the slope exactly. If the move fails with the actor stuck
+// at the start, it is tried again 1 unit up. Compared with m3l1b's .pth (built by the game),
+// this finds 65 of the 93 links that are otherwise missed here (and links the two nodes that
+// would otherwise show "no paths"), without adding any link the game doesn't make.
 function pgCheckMove(a,b,size){
+  const r=pgCheckMove1(a,b,size);if(r!=null)return r;
+  const t=pgTrace(a,[a[0],a[1],a[2]-0.25],[-size,-size,0],[size,size,PG_MAXSZ],true);
+  return t.allsolid?pgCheckMove1([a[0],a[1],a[2]+1],b,size):r;
+}
+function pgCheckMove1(a,b,size){
   const dd=[b[0]-a[0],b[1]-a[1],0];{const l=Math.hypot(dd[0],dd[1]);if(l){dd[0]/=l;dd[1]/=l;}}
   const mm={o:a.slice(),vel:[0,0,0],speed:150,ft:0.1,dd:dd,ground:false,walking:false,gn:[0,0,1],
     mins:[-size,-size,0],maxs:[size,size,PG_MAXSZ],hit:false,hitO:[0,0,0],obn:[0,0,0]};
@@ -6730,17 +6791,17 @@ function pgCreate(org,flags,only){
   const NC=c=>{let v=c+8192-128;if(v<0)v=c+8192+128-1;return Math.trunc(v)>>8;};
   const cells=new Map(),add=(x,y,i)=>{if(x<0||x>=64||y<0||y>=64)return;const k=x*64+y;let l=cells.get(k);if(!l){l=[];cells.set(k,l);}if(l.length<128)l.push(i);};
   for(let i=0;i<n;i++){if(F[i]&1)continue;const x=NC(O[i][0]),y=NC(O[i][1]);add(x,y,i);add(x+1,y,i);add(x,y+1,i);add(x+1,y+1,i);}
-  const C=[];
+  const C=[],over=[];     // over: [full node, the node the game was linking it to when it stopped]
   for(let i=0;i<n;i++){
     if(F[i]&1||(only&&!only(i)))continue;
     const gx=gridCoord(O[i][0]),gy=gridCoord(O[i][1]),seen=new Set([i]);let kids=0,full=false;
     for(let x=gx-1;x<=gx+1&&!full;x++)for(let y=gy-1;y<=gy+1&&!full;y++){
       if(x<0||x>=64||y<0||y>=64)continue;const l=cells.get(x*64+y);if(!l)continue;
       for(const j of l){if(seen.has(j))continue;seen.add(j);
-        if(kids>=48){full=true;break;}
+        if(kids>=48){full=true;over.push([i,j]);break;}
         const L=pgLink(O[i],O[j]);if(L){C.push(i,j,L.fall,L.p1[0],L.p1[1],L.p1[2],L.p2[0],L.p2[1],L.p2[2]);kids++;}}}
   }
-  return{o:O,f:F,c:C};
+  return{o:O,f:F,c:C,over:over};
 }
 
 // ---- splines: sv_showcameras and g_showflypath -------------------------------------------
@@ -7239,7 +7300,7 @@ function setCvar(name,val){
   const n=CVAR_NAMES[String(name).toLowerCase()];if(!n)return false;
   const v=cvarClamp(n,val);if(v==null)return false;
   if(n==='cg_weather'){if(!wxPreset(v))return false;}
-  if(n==='ai_showroutes'&&!!v!==!!CVARS[n])AIERR=!!v;     // AI errors follows AI routes
+  if(n==='ai_showroutes'&&!!v!==!!CVARS[n]){AIERR=!!v;TRACEPATH=!!v;}     // AI errors and Trace path follow AI routes
   CVARS[n]=v;
   if(n==='cg_rain_wholemap')WX.world=null;
   if(n.startsWith('cg_rain')||n==='cg_weather'||n==='ai_showroutes')syncButtons();
@@ -7437,6 +7498,87 @@ function cvarWhereRender(){
 }
 function toggleCvarMenu(){if(cvEl)cvarMenuClose();else cvarMenuOpen();}
 
+// ---- Modify's Spawnflags list: the game cvars list's look, without the filter box ----------
+// Each row is one bit of the selected entity's spawnflags: its value, and its name in grey.
+// A click ticks or unticks it. The names are the class's own (the entity definitions' QUAKED
+// headers: D.defs[class].f, bit by bit), then the editor's (!Easy, !Medium...) that every class
+// has; a path node has the Legend's (1 DONT_LINK, 2 DUCK ... 128 CRATE, 256 LOW_WALL_ARC).
+let sfEl=null,sfBack=null;
+window.addEventListener('resize',()=>{if(sfEl)sfMenuClose();});
+function sfList(cls){
+  if(cls==='info_pathnode')return [[1,'DONT_LINK']].concat(ACT_FLAGS,[[256,'LOW_WALL_ARC (Spearhead / Breakthrough only)',
+    'LOW_WALL_ARC: Spearhead and Breakthrough only. The original game ignores it. The AI shoots from behind a wall within the "low_wall_arc" key\'s half-angle either side of the node\'s yaw (standing; crouching with DUCK). The "low_wall_arc" key sets this flag by itself']]);
+  const d=(D.defs||{})[cls],names=d&&d.f?d.f:[],ed=D.editorFlags||{},out=[];
+  for(let b=0;b<31;b++){
+    const nm=b<names.length&&names[b]&&names[b].toLowerCase()!=='x'?names[b]:(ed[b]||'');
+    if(nm)out.push([(1<<b)>>>0,nm]);}
+  return out;
+}
+function sfMenuClose(){
+  if(sfEl){sfEl.remove();sfEl=null;}
+  if(sfBack){sfBack.remove();sfBack=null;}
+  document.removeEventListener('keydown',sfMenuKey,true);}
+function sfMenuKey(ev){
+  if(ev.key==='Escape'){sfMenuClose();ev.preventDefault();}
+  ev.stopPropagation();}
+function sfMenuPlace(){
+  if(!sfEl)return;
+  const r=$('bModSf').getBoundingClientRect(),vw=window.innerWidth,vh=window.innerHeight;
+  let left=r.left-CV_GAP-CV_W;
+  if(left<4)left=Math.min(r.right+CV_GAP,Math.max(4,vw-4-CV_W));
+  if(left+CV_W>vw-4)left=Math.max(4,vw-4-CV_W);
+  sfEl.style.left=left+'px';
+  const avail=vh-8;sfEl.style.maxHeight=avail+'px';sfEl.style.top='4px';
+  const h=Math.min(sfEl.getBoundingClientRect().height,avail);
+  sfEl.style.top=Math.max(4,Math.min(r.top,vh-4-h))+'px';
+}
+function sfMenuOpen(){
+  sfMenuClose();
+  if(!MOD.ents[MOD.sel])return;
+  sfBack=document.createElement('div');
+  sfBack.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;z-index:70';
+  sfBack.onclick=ev=>{if(!sfEl||!sfEl.contains(ev.target))sfMenuClose();};
+  document.body.appendChild(sfBack);
+  sfEl=document.createElement('div');sfEl.className='amPanel';sfEl.id='sfPanel';
+  sfEl.innerHTML='<div class="amHead"><span class="amPathTxt" id="sfTitle">spawnflags</span><span class="amCnt" id="sfCnt"></span><button class="amReset" id="sfClear" title="Take every spawnflag off">Clear</button></div>'+
+    '<div class="amBody" id="sfBody"></div>';
+  sfEl.querySelector('#sfClear').onclick=ev=>{ev.stopPropagation();sfSet(0);};
+  sfEl.addEventListener('mousedown',ev=>ev.preventDefault());
+  sfBack.appendChild(sfEl);
+  document.addEventListener('keydown',sfMenuKey,true);
+  sfRender();sfMenuPlace();
+}
+function toggleSfMenu(){if(sfEl)sfMenuClose();else sfMenuOpen();}
+// the entity's spawnflags set to v (a change Undo takes back; 0 leaves the key out)
+function sfSet(v){
+  const m=MOD.ents[MOD.sel];if(!m)return;
+  const cur=parseInt(modKv(m,'spawnflags')||'0',10)>>>0;v=v>>>0;if(v===cur)return;
+  if(MOD.edit>=0)modEditClose(true);
+  modHist();
+  if(v)modSetKv(m,'spawnflags',String(v));
+  else{const i=m.kv.findIndex(x=>x[0].toLowerCase()==='spawnflags');if(i>=0)m.kv.splice(i,1);}
+  modChanged(modIsNode(m));
+  flash(modName(m)+': spawnflags '+(v||'none'));
+}
+function sfRender(){
+  if(!sfEl)return;
+  const m=MOD.ents[MOD.sel];if(!m){sfMenuClose();return;}
+  const cls=modCls(m),list=sfList(cls),cur=parseInt(modKv(m,'spawnflags')||'0',10)>>>0;
+  sfEl.querySelector('#sfTitle').textContent='spawnflags: '+(cls||'entity');
+  sfEl.querySelector('#sfCnt').textContent=cur?'= '+cur:'none set';
+  sfEl.querySelector('#sfClear').disabled=!cur;
+  const bd=sfEl.querySelector('#sfBody'),sv=bd.scrollTop;bd.innerHTML='';
+  for(const[val,nm,tip]of list){
+    const on=(cur&val)!==0,d=document.createElement('div');d.className='amItem'+(on?' on':'');
+    d.innerHTML='<span class="arw">'+(on?'✓':'')+'</span><span class="lbl">spawnflags '+val+'</span><span class="cnt">'+esc(nm)+'</span>';
+    d.title=(on?'On: click to take ':'Off: click to set ')+nm+' ('+val+')'+(tip?'\n\n'+tip:'');
+    d.onclick=ev=>{ev.stopPropagation();sfSet(cur^val);};
+    bd.appendChild(d);}
+  if(!list.length){const d=document.createElement('div');d.className='amNote';
+    d.textContent=(cls||'This entity')+' has no spawnflags defined.';bd.appendChild(d);}
+  bd.scrollTop=sv;sfMenuPlace();
+}
+
 // ============================================================================
 //  Picking: draw ids into a one-pixel target through a projection zoomed onto the pixel
 // ============================================================================
@@ -7564,6 +7706,78 @@ function selectSameKind(h,add){
     flash(n+' x '+cls+' selected');
   }else if(h.face>=0){selectByTexture(SC.faceTex[h.face],true);}
   selectionChanged();
+}
+// Same spawnflags: every shown entity of the same class whose spawnflags are the same (for
+// example every CRATE path node). Needs a selected entity with non-zero spawnflags.
+function sfOf(ei){return ei>0&&!isWorldlike(ei)?(parseInt(MAP.ents[ei].kvl.spawnflags||'0',10)|0):0;}
+function selectSameSpawnflags(ei){
+  const sf=sfOf(ei);
+  if(!sf){flash('Select an entity that has spawnflags');return;}
+  const cls=MAP.ents[ei].cls;let n=0;SEL.clear();
+  for(let i=1;i<MAP.ents.length;i++)if(MAP.ents[i].cls===cls&&sfOf(i)===sf&&entShown(i)){SEL.add('e'+i);n++;}
+  selectionChanged();
+  flash(n+' x '+cls+' with spawnflags '+sf+' selected');
+}
+// Same error: the errors the viewer shows on path nodes (the ones with a warning tag when AI
+// errors are on, and Modify's problems): no paths, one-way, a duplicate node, no angle, in the
+// wall, 48 paths full, and Modify's own (own group, cell full). Worked out for a map's path
+// nodes from the paths in use (PA), whether or not ai_showroutes is on. An "own group" note is
+// information only and doesn't count.
+let PNERR_C=null,PNIDX=null;
+function pnErrCtx(A){
+  const fh=CVARS.ai_fallheight;
+  if(PNERR_C&&PNERR_C.A===A&&PNERR_C.fh===fh)return PNERR_C;
+  const n=A.n,C=A.c,nc=C.length/9,first=new Int32Array(n+1),ow=new Int32Array(n);
+  for(let k=0;k<nc;k++){const i=C[k*9]|0;if(i>=0&&i<n)first[i+1]++;}
+  for(let i=0;i<n;i++)first[i+1]+=first[i];
+  for(let i=0;i<n;i++)for(let k=first[i];k<first[i+1];k++){
+    const to=C[k*9+1]|0,fall=C[k*9+2];if(fall>fh||to<0||to>=n)continue;
+    let rev=false;for(let j=first[to+1]-1;j>=first[to];j--)if(C[j*9+2]<fh&&(C[j*9+1]|0)===i){rev=true;break;}
+    if(!rev)ow[i]++;}
+  return PNERR_C={A:A,fh:fh,first:first,ow:ow};
+}
+// node i's errors: id -> what to call it
+function pnErrKinds(A,i){
+  const X=pnErrCtx(A),kinds=new Map(),F=A.f[i];
+  if(pnGone(A,i))return kinds;
+  if(X.first[i]===X.first[i+1]){
+    if(F&1){if(!(nodeSpawnflags(A,i)&1))kinds.set('dup','a duplicate of an earlier node: not linked');}
+    else kinds.set('none','no paths');}
+  if(X.ow[i]>0)kinds.set('ow','one-way paths');
+  if(nodeNoAngle(A,i))kinds.set('noangle','no angle');
+  if(!(F&1)&&nodeWall([A.o[i*3],A.o[i*3+1],A.o[i*3+2]]))kinds.set('wall','in the wall');
+  if(paOver().over.has(i))kinds.set('links','48 paths: full');
+  const R=paIssues();
+  if(R)for(const x of R.node.get(i)||[])if(x.lv!==0&&!kinds.has(x.k))kinds.set(x.k,x.lbl||({links:'48 paths: full',none:'no paths',cell:'cell full',wall:'in the wall',island:'own group'})[x.k]||x.k);
+  return kinds;
+}
+// the map's path node entity -> its node number in the paths (the .pth keeps the map's order)
+function pnIndexMap(A){
+  const pn=pnEnts(),n0=A.n0==null?A.n:A.n0;
+  if(pn.length!==n0)return null;
+  if(!PNIDX||PNIDX.pn!==pn){PNIDX={pn:pn,m:new Map()};pn.forEach((ei,k)=>PNIDX.m.set(ei,k));}
+  return PNIDX.m;
+}
+// the errors of the selected path nodes together, or null when none is selected
+function selNodeErrors(){
+  const sel=[...selectedEnts()].filter(ei=>MAP.ents[ei]&&MAP.ents[ei].cls==='info_pathnode');
+  if(!sel.length||!routesOk())return null;
+  const A=PA();if(!A)return null;
+  const im=pnIndexMap(A);if(!im)return null;
+  const kinds=new Map();
+  for(const ei of sel){const k=im.get(ei);if(k==null||k>=A.n)continue;for(const[id,t]of pnErrKinds(A,k))kinds.set(id,t);}
+  return{A:A,im:im,kinds:kinds};
+}
+function selectSameError(){
+  const e=selNodeErrors();
+  if(!e||!e.kinds.size){flash('Select a path node that has an error first');return;}
+  const want=[...e.kinds.keys()];let n=0;
+  const hit=new Set();
+  for(const[ei,k]of e.im){if(!entShown(ei)||k>=e.A.n)continue;
+    const ks=pnErrKinds(e.A,k);if(want.some(id=>ks.has(id)))hit.add(ei);}
+  SEL.clear();for(const ei of hit){SEL.add('e'+ei);n++;}
+  selectionChanged();
+  flash(n+' path node'+(n===1?'':'s')+' with: '+[...e.kinds.values()].join(', '));
 }
 // Ctrl+Shift+click (or middle-click): the texture card of the clicked face (in Radiant,
 // Ctrl+Shift+click selects a single face). Models and markers have no face of their own.
@@ -7736,7 +7950,8 @@ function loop(t){
   if(wxActive()){wxAdvance(performance.now());wx=true;}else WX.wall=0;
   // Simulate's model in flight (a camera moved by hand stops following it)
   if(moved&&SIM.run&&$('simCam').checked){$('simCam').checked=false;flash('The camera no longer follows the model');}
-  const sims=SIM.run?simTick(performance.now()):false;
+  if(moved&&ACT.follow){ACT.follow=false;simPanel();flash('Follow off: the camera was moved by hand');}
+  const sims=(SIM.run?simTick(performance.now()):false)||actTick(performance.now());
   if(moved)camChanged();
   if(moved||doors||exps||wx||sway||sims||_drawReq){_drawReq=false;draw();}
 }
@@ -7881,6 +8096,7 @@ window.addEventListener('mouseup',e=>{
   if(d.moved)return;
   const r=glcv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
   if(x<0||y<0||x>=W||y>=H)return;
+  if(d.b===0&&ACT.pick){actPickClick(x,y);return;}
   if(d.b===0&&MOD.linking){modLinkClick(x,y);return;}
   if(d.b===0&&!d.m.shift&&!d.m.ctrl&&!d.m.alt&&!MOD.placing&&leakClick(x,y))return;
   if(d.b===0&&MOD.placing){modPlaceClick(x,y);return;}
@@ -8014,8 +8230,8 @@ window.addEventListener('keydown',e=>{
     case 'x':stopCamera();flash('Camera stopped');break;
     case 'l':toggleLegend();break;
     case 't':themeBtn.click();break;
-    // U levels the view (no pitch, no tilt). It was End, whose own job in a browser is to
-    // scroll what has the focus to its end: the side panel jumped to its bottom.
+    // U levels the view (no pitch, no tilt). Not End: in a browser End scrolls whatever has
+    // the focus to its end, so the side panel would jump to its bottom.
     case 'u':cam.pitch=0;cam.roll=0;camChanged();requestDraw();break;
     case 'pageup':changeFloor(true);e.preventDefault();break;
     case 'pagedown':changeFloor(false);e.preventDefault();break;
@@ -8026,10 +8242,10 @@ window.addEventListener('keydown',e=>{
     case 'backspace':{const m=MOD.ents[MOD.sel];
       if(m&&!modIsMap(m)&&!m.hid){const i=MOD.sel;modToggleHide(i);if(MOD.ents[i]&&MOD.ents[i].hid)modDeselect();}
       if(SEL.size)hideSelection();e.preventDefault();break;}
-    case 'delete':{const Ln=modSelEnts(false).filter(x=>!modIsMap(x));
+    case 'delete':{const Ln=modSelEnts(false).filter(x=>!x.del);
       if(Ln.length){const nm=Ln.length===1?modName(Ln[0]):Ln.length+' entities';modRemoveSel();MOD.sel=-1;MOD.multi.clear();modRender();requestDraw();
-        flash('Deleted: '+nm+' (only added in Modify, not saved; Undo, Alt+Z, puts it back)');}
-      else if(SEL.size)flash('Delete removes an entity added in Modify; map entities stay (Backspace hides them)');
+        flash('Deleted: '+nm+' (not saved yet; Undo, Alt+Z, puts it back)');}
+      else if(SEL.size)flash('Select the map entity in Modify first (it needs a MODIFY row): Delete flags it DEL');
       e.preventDefault();break;}
     case '/':$('findIn').focus();e.preventDefault();break;
     case '\\':case '|':$('sideTab').click();e.preventDefault();break;
@@ -8063,6 +8279,7 @@ function gridStep(kl){const a=camAxes(),g=64;const flat=vnorm([a.f[0],a.f[1],0])
 // Esc peels one layer at a time: help or legend, info card, selection, then the map itself.
 function escape(){
   if($('simOv').style.display!=='none'){simClose();return;}
+  if(ACT.pick){actPickCancel();return;}
   if(MOD.placing){modPlaceCancel();return;}
   if(MOD.linking){modLinkCancel();return;}
   if(MOD.edit>=0){modEditClose(true);return;}
@@ -8149,7 +8366,7 @@ function buildPanel(){
   $('bSunFlare').onclick=toggleSunFlare;
   $('bRoutes').onclick=()=>{setCvar('ai_showroutes',CVARS.ai_showroutes?0:1);syncButtons();
     flash(CVARS.ai_showroutes?'AI routes on (ai_showroutes 1): '+routesFrom():'AI routes off (ai_showroutes 0)');};
-  AIERR=!!CVARS.ai_showroutes;
+  AIERR=TRACEPATH=!!CVARS.ai_showroutes;
   $('bAiErr').onclick=()=>{AIERR=!AIERR;syncButtons();requestDraw();
     flash(AIERR?'AI errors shown: no paths, one-way, own group, in the wall, no angle':'AI errors hidden');};
   if(!routesOk()){$('bRoutes').disabled=true;$('bRoutes').title='This map has no AI paths (no .pth file in the paks, or one the viewer couldn\'t read): ai_showroutes has nothing to draw';}
@@ -8171,6 +8388,8 @@ function buildPanel(){
   $('bInfo').onclick=()=>showInfo('sel');$('bFocus').onclick=focusSelection;$('bHide').onclick=hideSelection;
   $('bClear').onclick=()=>{SEL.clear();selectionChanged();};$('bUnhide').onclick=unhideAll;$('bUndoHide').onclick=undoHide;
   $('bSame').onclick=()=>{if(lastHit)selectSameKind(lastHit,false);};
+  $('bSameSf').onclick=()=>selectSameSpawnflags(selFocusEnt());
+  $('bSameErr').onclick=selectSameError;
   $('bEye').onclick=()=>{const ei=+$('bEye').dataset.ei,v=ei>0?eyeView(ei):null;if(!v)return;
     flyTo(v.pos,v.ang[1],v.ang[0],-v.ang[2]);requestDraw();flash(v.flash);};
   $('bPath').onclick=()=>{const ei=+$('bPath').dataset.ei;if(ei>0)selectPath({ent:ei,face:-1,prim:-1,point:null},false);};
@@ -8264,7 +8483,7 @@ function loadOpts(){try{const o=JSON.parse(LS.get('mohaaMapViewerOpts')||'null')
   if(typeof o.hidden==='number')hiddenMask=o.hidden;if(o.mode==='rad'||o.mode==='free')camMode=o.mode;
   // options saved before Rain had a button of its own: it starts hidden, as on a first visit
   if(!(o.ov>=2))hiddenMask|=C_RAIN;
-  // static models have no Show button of their own any more (Models and Entities hide them)
+  // static models have no Show button of their own (Models and Entities hide them)
   if((hiddenMask&C_ENTITIES)!==C_ENTITIES)hiddenMask&=~C_STATIC;
   if(o.speed>0)moveSpeed=o.speed;if(o.fov>0)fovX=Math.max(60,Math.min(150,o.fov));clipOn=!!o.clip;if(o.clipD>0)clipDist=o.clipD;
   for(const k in (o.cv||{}))if(k in CVAR_DEFAULTS){const v=cvarClamp(k,o.cv[k]);if(v!=null)CVARS[k]=v;}}catch(_e){}}
@@ -8287,6 +8506,12 @@ function updateSelPanel(){
   const ev=(pe>0&&!isWorldlike(pe))?eyeView(pe):null;
   $('bEye').style.display=ev?'':'none';$('bEye').dataset.ei=pe;
   if(ev)$('bEye').title=ev.why;
+  // Same spawnflags: greyed out unless the one selected entity has spawnflags
+  {const sf=sfOf(pe);$('bSameSf').disabled=!sf;
+    $('bSameSf').title=sf?'Select every '+MAP.ents[pe].cls+' with spawnflags '+sf:'Select every entity of the same class with the same spawnflags (the selected entity has none)';}
+  // Same error: greyed out unless at least one selected path node has an error
+  {const b=$('bSameErr'),e=selNodeErrors();b.disabled=!(e&&e.kinds.size);
+    b.title=(e&&e.kinds.size)?'Select every path node with '+(e.kinds.size>1?'any of these errors':'this error')+': '+[...e.kinds.values()].join(', '):'Select every path node with the same error as the selected path node(s): none of the selected path nodes has an error';}
   // Same targetname: when other entities share its targetname
   const tn=(pe>0&&!isWorldlike(pe))?MAP.ents[pe].kvl.targetname:'', tl=tn?(ENTS.tn.get(tn)||[]):[];
   $('bTname').style.display=tl.length>1?'':'none';
@@ -9121,14 +9346,24 @@ function modSf(m){return parseInt(modKv(m,'spawnflags')||'0',10)|0;}
 function modIsNode(m){return modCls(m)==='info_pathnode';}
 // an entry for one of the map's own entities (m.ei), and whether it differs from the map
 function modIsMap(m){return m.ei!=null;}
-function modEdited(m){return m.ei==null||JSON.stringify(m.kv)!==JSON.stringify(m.orig);}
+function modKvEdited(m){
+  if(m.ei==null)return true;
+  const a=m.kv,b=m.orig;if(!b||a.length!==b.length)return true;
+  for(let i=0;i<a.length;i++){if(a[i][0]!==b[i][0]||a[i][1]!==b[i][1])return true;}
+  return false;}
+function modEdited(m){
+  // same answer as comparing JSON.stringify(kv) with JSON.stringify(orig), without building two strings per call
+  if(m.ei==null||m.del)return true;
+  const a=m.kv,b=m.orig;if(!b||a.length!==b.length)return true;
+  for(let i=0;i<a.length;i++){if(a[i][0]!==b[i][0]||a[i][1]!==b[i][1])return true;}
+  return false;}
 // drawn by Modify (and the map's own marker hidden): new ones, changed ones, and any being edited
-function modDrawn(i){const m=MOD.ents[i];return !!m&&!m.hid&&(!modIsMap(m)||modEdited(m)||modBusy(i));}
+function modDrawn(i){const m=MOD.ents[i];return !!m&&!m.hid&&!m.del&&(!modIsMap(m)||modEdited(m)||modBusy(i));}
 // the map's entities Modify draws instead (entShown leaves their markers out)
 let MOD_HID=new Set();
 function modHideSync(){
   // (a hidden row hides the map's own marker too)
-  const s=new Set();MOD.ents.forEach((m,i)=>{if(modIsMap(m)&&(modDrawn(i)||m.hid))s.add(m.ei);});
+  const s=new Set();MOD.ents.forEach((m,i)=>{if(modIsMap(m)&&(modDrawn(i)||m.hid||m.del))s.add(m.ei);});
   const same=s.size===MOD_HID.size&&[...s].every(x=>MOD_HID.has(x));
   if(same)return;MOD_HID=s;
   if(gl){rebuildMarkers();rebuildModels();lineDirty=true;}
@@ -9196,7 +9431,7 @@ function modTakes(ei){
 function modSyncSel(){
   if(!MOD||!$('modList'))return;
   const ei=selFocusEnt(),cur=MOD.ents[MOD.sel],keep=new Set();
-  MOD.ents.forEach((m,i)=>{if(!modIsMap(m)||modEdited(m)||modBusy(i)||m.hid||m.ei===ei)keep.add(m);});
+  MOD.ents.forEach((m,i)=>{if(!modIsMap(m)||modEdited(m)||modBusy(i)||m.hid||m.del||m.ei===ei)keep.add(m);});
   const edit=MOD.ents[MOD.edit],mv=MOD.placing&&MOD.placing.move!=null?MOD.ents[MOD.placing.move]:null;
   MOD.ents=MOD.ents.filter(m=>keep.has(m));
   let sel=cur&&keep.has(cur)?cur:null;
@@ -9245,13 +9480,14 @@ function modToggleSel(i){const m=MOD.ents[i];if(!m)return;
 // Each change keeps the state before it (modHist): placing, moving, Trim origin (all its key
 // presses one step), Edit parameters (once closed), Make path, Copy, Delete and Restore. Hiding
 // isn't a change (Ctrl+Z undoes that). Undo and Redo first finish whatever is under way.
-const MOD_UNDO_MAX=1000;
-function modSnap(){return{ents:MOD.ents.map(m=>({id:m.id,ei:m.ei,kv:m.kv.map(x=>x.slice()),orig:m.orig?m.orig.map(x=>x.slice()):null,hid:!!m.hid})),
+// (history is kept as compact JSON strings, one per step; nothing is dropped)
+function modSnap(){return{ents:MOD.ents.map(m=>({id:m.id,ei:m.ei,kv:m.kv.map(x=>x.slice()),orig:m.orig?m.orig.map(x=>x.slice()):null,hid:!!m.hid,del:!!m.del})),
   sel:MOD.ents[MOD.sel]?MOD.ents[MOD.sel].id:null,multi:[...MOD.multi].map(m=>m.id)};}
-function modHist(s){MOD.undo.push(s||modSnap());if(MOD.undo.length>MOD_UNDO_MAX)MOD.undo.shift();MOD.redo.length=0;}
+function modHist(s){MOD.undo.push(JSON.stringify(s||modSnap()));MOD.redo.length=0;}
 function modRestore(s){
+  if(typeof s==='string')s=JSON.parse(s);
   MOD.ents=s.ents.map(e=>{const m={id:e.id,kv:e.kv.map(x=>x.slice())};
-    if(e.ei!=null){m.ei=e.ei;m.orig=e.orig.map(x=>x.slice());}if(e.hid)m.hid=true;return m;});
+    if(e.ei!=null){m.ei=e.ei;m.orig=e.orig.map(x=>x.slice());}if(e.hid)m.hid=true;if(e.del)m.del=true;return m;});
   const by=new Map(MOD.ents.map(m=>[m.id,m])),cur=by.get(s.sel);
   MOD.sel=cur?MOD.ents.indexOf(cur):-1;MOD.multi=new Set(s.multi.map(id=>by.get(id)).filter(Boolean));MOD.edit=-1;
 }
@@ -9263,7 +9499,7 @@ function modUndoGo(d){
   if(MOD.linking)modLinkCancel();
   const from=d<0?MOD.undo:MOD.redo,to=d<0?MOD.redo:MOD.undo;
   if(!from.length){flash(d<0?'Nothing to undo in Modify':'Nothing to redo in Modify');return;}
-  to.push(modSnap());modRestore(from.pop());
+  to.push(JSON.stringify(modSnap()));modRestore(from.pop());
   modChanged(true);lineDirty=true;
   flash((d<0?'Undone':'Redone')+': '+MOD.undo.length+' more to undo, '+MOD.redo.length+' to redo');
 }
@@ -9368,9 +9604,9 @@ function paGenerate(){
   const org=pn.map(ei=>ENTS[ei].origin?ENTS[ei].origin.slice():[0,0,0]),fl=pn.map(ei=>parseInt(MAP.ents[ei].kvl.spawnflags||'0',10)|0);
   const t0=performance.now(),G=pgCreate(org,fl);
   const O=new Float32Array(G.o.length*3);G.o.forEach((p,i)=>O.set(p,i*3));
-  PA_GEN={n:G.o.length,o:O,f:Int32Array.from(G.f),c:Float32Array.from(G.c),gen:true,ms:Math.round(performance.now()-t0)};
+  PA_GEN={n:G.o.length,o:O,f:Int32Array.from(G.f),c:Float32Array.from(G.c),gen:true,over:G.over||[],ms:Math.round(performance.now()-t0)};
   flash((pathsStale()?(D.paths.src||'The .pth')+' is for another version of this map (map_time differs)':'No .pth for this map')+
-    ': its AI paths were worked out here ('+PA_GEN.n+' nodes, '+PA_GEN.ms+' ms)');
+    ': its AI paths were worked out here ('+PA_GEN.n+' nodes, '+PA_GEN.ms+' ms)'+(PA_GEN.over.length?' · '+PA_GEN.over.length+' node'+(PA_GEN.over.length===1?'':'s')+' hit the 48-path limit (see their cards)':''));
 }
 function paOk(){return !!PA();}
 function paDirty(){PA_C=null;ROUTES=null;PATHCELLS=null;NODELIST=null;requestDraw();}
@@ -9393,7 +9629,7 @@ function PA(){
   const P=i=>[O[i*3],O[i*3+1],O[i*3+2]];
   const ek=new Set(edits.map(x=>x[0]));
   for(const[k,m]of edits){O.set(pgDrop(modOrigin(m)),k*3);
-    F[k]=modIsNode(m)?modSf(m):1;                          // no longer a path node: no paths
+    F[k]=modIsNode(m)&&!m.del?modSf(m):1;                          // no longer a path node: no paths
     if(!(F[k]&1))for(let j=k-1;j>=0;j--)if(O[j*3]===O[k*3]&&O[j*3+1]===O[k*3+1]&&O[j*3+2]===O[k*3+2]){F[k]|=1;break;}}
   nodes.forEach((m,k)=>{const i=n0+k,o=pgDrop(modOrigin(m));O.set(o,i*3);F[i]=modSf(m);
     if(!(F[i]&1))for(let j=i-1;j>=0;j--)if(O[j*3]===O[i*3]&&O[j*3+1]===O[i*3+1]&&O[j*3+2]===O[i*3+2]){F[i]|=1;break;}});  // duplicate: not linked
@@ -9406,19 +9642,32 @@ function PA(){
   const near=i=>{const gx=gridCoord(O[i*3]),gy=gridCoord(O[i*3+1]),s=new Set();
     for(let x=gx-1;x<=gx+1;x++)for(let y=gy-1;y<=gy+1;y++){const l=cells.get(x*64+y);if(l)for(const j of l)if(j!==i)s.add(j);}return s;};
   // the .pth's links, less those to and from the changed nodes (they are worked out again)
+  // A node that already had its 48 paths may have been cut short (more nodes were left to try):
+  // with a node near it deleted, moved or added, the game would link it again, so those nodes
+  // are linked afresh below. Within 640 units: its cells reach 384 and a changed node's too.
+  const base=new Int32Array(n0);for(let k=0;k<B0.c.length;k+=9){const a=B0.c[k]|0;if(a<n0)base[a]++;}
+  const chg=[];for(const k of ek)chg.push(B0.o[k*3],B0.o[k*3+1]);for(const[k]of edits)chg.push(O[k*3],O[k*3+1]);
+  for(let i=n0;i<n;i++)chg.push(O[i*3],O[i*3+1]);
+  const rc=new Set();
+  if(chg.length)for(let j=0;j<n0;j++){if(base[j]<48||ek.has(j)||(F[j]&1))continue;
+    for(let q=0;q<chg.length;q+=2){const dx=chg[q]-O[j*3],dy=chg[q+1]-O[j*3+1];if(dx*dx+dy*dy<640*640){rc.add(j);break;}}}
   const C=[],kids=new Int32Array(n);
-  for(let k=0;k<B0.c.length;k+=9){const a=B0.c[k]|0,b=B0.c[k+1]|0;if(ek.has(a)||ek.has(b))continue;
+  for(let k=0;k<B0.c.length;k+=9){const a=B0.c[k]|0,b=B0.c[k+1]|0;if(ek.has(a)||ek.has(b)||rc.has(a))continue;
     for(let q=0;q<9;q++)C.push(B0.c[k+q]);kids[a]++;}
   // (PathNode::CheckPathTo: 48 paths a node; one more to check prints "paths per node
   // exceeded" and that node is linked no further)
   const linkOver=new Set();
   const link=(a,b)=>{if(kids[a]>=48){linkOver.add(a);return;}const L=pgLink(P(a),P(b));
     if(L){C.push(a,b,L.fall,L.p1[0],L.p1[1],L.p1[2],L.p2[0],L.p2[1],L.p2[2]);kids[a]++;}};
+  // those nodes again, in the game's order: the nodes of the 3x3 cells round each, x then y
+  for(const j of rc){const gx=gridCoord(O[j*3]),gy=gridCoord(O[j*3+1]),seen=new Set([j]);
+    for(let x=gx-1;x<=gx+1;x++)for(let y=gy-1;y<=gy+1;y++){const l=cells.get(x*64+y);if(!l)continue;
+      for(const c of l){if(seen.has(c))continue;seen.add(c);link(j,c);}}}
   const redo=[...ek];for(let i=n0;i<n;i++)redo.push(i);const rs=new Set(redo);
   for(const i of redo){if(F[i]&1)continue;
     for(const j of near(i))link(i,j);                       // the new or changed node to its neighbours
     // and each of the other nodes whose neighbourhood it is in, to it
-    for(let j=0;j<n0;j++){if(rs.has(j)||F[j]&1)continue;const dx=O[j*3]-O[i*3],dy=O[j*3+1]-O[i*3+1];
+    for(let j=0;j<n0;j++){if(rs.has(j)||rc.has(j)||F[j]&1)continue;const dx=O[j*3]-O[i*3],dy=O[j*3+1]-O[i*3+1];
       if(dx*dx+dy*dy>=384*384)continue;if(near(j).has(i))link(j,i);}}
   // the links in order of the node they leave (buildRoutes reads them so)
   const idx=[];for(let k=0;k<C.length;k+=9)idx.push(k);
@@ -9467,7 +9716,47 @@ function paIssues(){
   return PA_ISS=R;
 }
 // a node's issues as one line each, for the cards and the status
-function paIssueList(i){const R=paIssues();return R&&R.node.get(i)||[];}
+function paIssueList(i){const R=paIssues();return(R&&R.node.get(i)||[]).concat(paOverNotes(i));}
+// The 48-path limit (PathNode::CheckPathTo): a node keeps at most 48 paths, and when one more
+// node is still to be tried the game prints "^~^~^ 48 paths per node at (origin) exceeded" and
+// links the node no further. Worked out from the paths in use (the .pth's, or the ones worked
+// out here) by going through each full node's candidates in the game's order: the nodes of the
+// 3x3 cells round it, x then y, each cell's nodes in order. {over: node -> the first candidate
+// left untried, full: nodes with exactly 48}.
+let PA_OVER=null;
+// a map node Modify deleted (or changed to something that isn't a path node): it is gone, so
+// it has no errors of its own
+function pnGone(A,i){const m=A&&A.edits?A.edits.get(i):null;return !!m&&(m.del||!modIsNode(m));}
+function paOver(){
+  const B=PA();if(!B)return{over:new Map(),full:new Set()};
+  if(PA_OVER&&PA_OVER.src===B)return PA_OVER;
+  const n=B.n,O=B.o,F=B.f,C=B.c,kids=new Int32Array(n),ch=Array.from({length:n},()=>null);
+  for(let k=0;k<C.length;k+=9){const a=C[k]|0;if(a<0||a>=n)continue;kids[a]++;(ch[a]||(ch[a]=new Set())).add(C[k+1]|0);}
+  const NC=c=>{let v=c+8192-128;if(v<0)v=c+8192+128-1;return Math.trunc(v)>>8;};
+  const cells=new Map(),add=(x,y,i)=>{if(x<0||x>=64||y<0||y>=64)return;const k=x*64+y;let l=cells.get(k);if(!l){l=[];cells.set(k,l);}if(l.length<128)l.push(i);};
+  for(let i=0;i<n;i++){if(F[i]&1)continue;const x=NC(O[i*3]),y=NC(O[i*3+1]);add(x,y,i);add(x+1,y,i);add(x,y+1,i);add(x+1,y+1,i);}
+  const over=new Map(),full=new Set();
+  for(let i=0;i<n;i++){
+    if(kids[i]<48||(F[i]&1))continue;full.add(i);
+    const gx=gridCoord(O[i*3]),gy=gridCoord(O[i*3+1]),seen=new Set([i]);let cnt=0,done=false;
+    for(let x=gx-1;x<=gx+1&&!done;x++)for(let y=gy-1;y<=gy+1&&!done;y++){
+      if(x<0||x>=64||y<0||y>=64)continue;const l=cells.get(x*64+y);if(!l)continue;
+      for(const j of l){if(seen.has(j))continue;seen.add(j);
+        if(cnt>=48){over.set(i,j);done=true;break;}
+        if(ch[i]&&ch[i].has(j))cnt++;}}
+  }
+  return PA_OVER={src:B,over:over,full:full};
+}
+function paOverNotes(i){
+  const B=PA();if(!B||i>=B.n||pnGone(B,i))return [];
+  const R=PA_ISS&&PA_ISS.A===B?PA_ISS:null;
+  if(R&&(R.node.get(i)||[]).some(x=>x.k==='links'))return [];       // Modify's own 48-path note (paIssues) already says it
+  const O=paOver();
+  const p=fvec([B.o[i*3],B.o[i*3+1],B.o[i*3+2]].map(v=>Math.round(v*100)/100));
+  if(O.over.has(i))return [{k:'links',lv:2,t:'48 paths: this node has the 48 the game allows and more nodes were still to be linked, so the game prints "^~^~^ 48 paths per node at '+p+' exceeded" and links it no further. Use DONT_LINK on some nodes round it.'}];
+  if(O.full.has(i))return [{k:'links',lv:0,t:'48 paths: exactly the limit, with no node left to try, so the game prints nothing for it. One more node near it would.'}];
+  return [];
+}
 // ---- room for an actor at a path node (not a game check: the game never tests it) -------
 // An actor's box is 30 units across and 94 tall (MINS -15 -15 0, MAXS 15 15 94; the path
 // links test 31, CheckMove's 15.5). A node nearer a wall than that puts part of a man
@@ -9597,9 +9886,13 @@ function modRemove(i){
   if(MOD.placing&&MOD.placing.move!=null)modPlaceCancel();
   if(!MOD.ents[i])return;
   modHist();
-  // a map entity isn't removed: Restore puts back the map's keys
+  // a map entity is flagged DEL (left out of the saved map); on a DEL or changed one the
+  // button is Restore, which puts back the map's keys and un-flags it
   const m=MOD.ents[i];MOD.multi.delete(m);
-  if(modIsMap(m)){m.kv=m.orig.map(x=>x.slice());modChanged(true);flash(entName(m.ei)+' is as the map has it again');return;}
+  if(modIsMap(m)){
+    if(m.del||modKvEdited(m)){m.del=false;m.kv=m.orig.map(x=>x.slice());modChanged(true);flash(entName(m.ei)+' is as the map has it again');return;}
+    m.del=true;MOD.sel=-1;if(SEL.has('e'+m.ei)){SEL.delete('e'+m.ei);selectionChanged();}
+    modChanged(true);flash('DEL: '+entName(m.ei)+' is left out of the saved map (Restore or Undo, Alt+Z, puts it back; not saved yet)');return;}
   MOD.ents.splice(i,1);
   if(MOD.edit>i)MOD.edit--;
   MOD.sel=Math.min(MOD.sel,MOD.ents.length-1);
@@ -9613,9 +9906,9 @@ function modRemoveSel(){
   if(MOD.trim)modTrim(false);
   if(MOD.placing)modPlaceCancel();
   modHist();let nd=0,nr=0;
-  for(const m of L){if(modIsMap(m)){if(modEdited(m)){m.kv=m.orig.map(x=>x.slice());nr++;}}
+  for(const m of L){if(modIsMap(m)){if(m.del||modKvEdited(m)){m.del=false;m.kv=m.orig.map(x=>x.slice());nr++;}else{m.del=true;nd++;SEL.delete('e'+m.ei);}}
     else{const k=MOD.ents.indexOf(m);if(k>=0){MOD.ents.splice(k,1);nd++;}}}
-  MOD.sel=-1;MOD.multi.clear();modChanged(true);
+  MOD.sel=-1;MOD.multi.clear();selectionChanged();modChanged(true);
   flash((nd?'Deleted '+nd:'')+(nd&&nr?', ':'')+(nr?'restored '+nr+' of the map\'s own':'')+' (Undo, Alt+Z, puts them back)');
 }
 // Copy: the selected entities again (no targetname or target, so nothing is named twice),
@@ -9654,8 +9947,8 @@ function modBackupNow(){
   const un=modUnsaved(),id=modBackupId();
   const snap=un?modSnap():null,key=snap?JSON.stringify(snap.ents):'';
   if(key===_modBkKey)return;_modBkKey=key;
-  const body=snap?Object.assign(id,{t:Date.now(),nw:un.nw,ch:un.ch,ents:snap.ents}):id;
-  const txt=JSON.stringify(body);
+  // (the entities are stringified once, for the change check above, and reused in the file's text)
+  const txt=snap?JSON.stringify(Object.assign(id,{t:Date.now(),nw:un.nw,ch:un.ch})).slice(0,-1)+',"ents":'+key+'}':JSON.stringify(id);
   if(txt.length>8e6)return;
   try{if(window.chrome&&window.chrome.webview){window.chrome.webview.postMessage('mohaa-modify-backup\n'+txt);return;}}catch(_e){}
   const k='mohaaMapViewerModify|'+id.map+'|'+id.mt;
@@ -9685,7 +9978,7 @@ window.MOHAA_MODIFY_RECOVERY=function(b){
   $('bRecYes').onclick=()=>{close();
     modHist();
     modRestore({ents:ents.map(e=>({id:MOD.nid++,ei:e.ei==null?undefined:e.ei,kv:e.kv.map(x=>[String(x[0]),String(x[1])]),
-      orig:e.ei!=null?MAP.ents[e.ei].kv.map(x=>[x[0],x[1]]):null,hid:!!e.hid})),sel:null,multi:[]});
+      orig:e.ei!=null?MAP.ents[e.ei].kv.map(x=>[x[0],x[1]]):null,hid:!!e.hid,del:!!e.del&&e.ei!=null})),sel:null,multi:[]});
     MOD.ents.forEach(m=>{if(m.ei===undefined)delete m.ei;});
     modChanged(true);lineDirty=true;flash('Restored Modify\'s unsaved work: '+nw+' new, '+ch+' changed');};
   $('bRecNo').onclick=()=>{close();_modBkKey=null;modBackupNow();flash('Unsaved Modify work discarded');};
@@ -9722,7 +10015,7 @@ function modParse(txt){
   const lines=String(txt).split(/\r?\n/);
   for(let n=0;n<lines.length&&!closed;n++){
     const ln=lines[n],L=n+1;
-    const q=(ln.replace(/\/\/.*$/,'').match(/"/g)||[]).length;
+    const q=(ln.replace(/"[^"]*"|\/\/.*$/g,m=>m[0]==='"'?m:'').match(/"/g)||[]).length;   // a // inside quotes is not a comment
     if(q%2)throw new Error('line '+L+': a quote isn\'t closed on its line');
     let r;re.lastIndex=0;
     while((r=re.exec(ln))){
@@ -9895,6 +10188,10 @@ function drawModify(vp){
     const P=k=>[(k&1)?mx[0]:mn[0],(k&2)?mx[1]:mn[1],(k&4)?mx[2]:mn[2]];
     if(!X.ol||hasM)for(const[a,d]of E)lin(P(a),P(d),[c[0]*0.6,c[1]*0.6,c[2]*0.6,0.8]);
     if(sel){const g=2,Q=k=>[(k&1)?mx[0]+g:mn[0]-g,(k&2)?mx[1]+g:mn[1]-g,(k&4)?mx[2]+g:mn[2]-g];for(const[a,d]of E)lin(Q(a),Q(d),[1,1,0.35,1]);}
+    // a modelled entity: thin white axes at its origin, turned with its angles (as the
+    // original's are), so the new origin can be seen exactly
+    if(hasM){const kv2=modKvl(m),ax=anglesAxis(entAngles(kv2)),w=[1,1,1,1];
+      for(const k of[0,1,2]){const d=ax[k];lin([o[0]-d[0]*10,o[1]-d[1]*10,o[2]-d[2]*10],[o[0]+d[0]*10,o[1]+d[1]*10,o[2]+d[2]*10],w);}}
     // (its facing arrow and target links are drawn with the map's: rebuildLines)
     if(sel&&MOD.trim){
       // the trim arrows: white, red while it moves that way
@@ -9971,21 +10268,53 @@ function modClasses(){
   for(const e of MAP.ents)if(e.cls&&!e.prims.length&&!WORLDLIKE[e.cls]&&modClassOk(e.cls))s.add(e.cls);
   return [...s];
 }
+// ---- the list: only the rows in view are in the page ---------------------------------------
+// MOD.ents stays the one place the entities live; the list draws the few rows that are
+// visible (newest first), and a row's tooltip (the entity's whole text) is built when the
+// mouse is over it, so adding or changing hundreds of entities doesn't rebuild hundreds of rows.
+const MOD_RH=22;
+let _modListRaf=0,_modLastSel=-2;
+function modListSetup(L){
+  if(L._vp)return;
+  L.innerHTML='<div class="mmsg"></div><div class="mvp" style="position:relative;max-height:360px;overflow-y:auto"><div class="msp"></div><div class="mrows" style="position:absolute;left:0;right:0;top:0"></div></div>';
+  L._msg=L.querySelector('.mmsg');L._vp=L.querySelector('.mvp');L._sp=L.querySelector('.msp');L._rows=L.querySelector('.mrows');
+  L._vp.addEventListener('scroll',()=>{if(_modListRaf)return;
+    _modListRaf=requestAnimationFrame(()=>{_modListRaf=0;const l=$('modList');if(l&&MOD)modListDraw(l);});});
+  L.addEventListener('mouseover',e=>{const r=e.target.closest('[data-mi]');if(!r||r.title)return;
+    const i=+r.dataset.mi,m=MOD.ents[i];if(!m)return;
+    r.title=modText(m)+'\n\nShift+click the name: '+(modIsSel(i)?'take it out of the selection':'add it to the selection')+' · Shift+click the square: '+(m.hid?'show':'hide')+' it';});
+}
+function modRowHtml(m,i){
+  const o=modOrigin(m),c=modColour(m),rgb='rgb('+c.map(v=>Math.round(v*255)).join(',')+')',map=modIsMap(m),ch=map&&modEdited(m);
+  const tag=map&&m.del?'<span class="mtag ch" style="color:var(--err)" title="one of the map\'s own entities, deleted here: left out of the saved map (not saved yet). Restore puts it back">#'+m.ei+' DEL</span>':map?'<span class="mtag'+(ch?' ch':'')+'" title="'+(ch?'one of the map\'s own entities, changed here (not saved yet)':'one of the map\'s own entities, as the map has it')+'">#'+m.ei+(ch?' changed':' map')+'</span>':'<span class="mtag nw" title="added here, not saved yet">new</span>';
+  return '<div class="li'+(modIsSel(i)?' sel':'')+(m.hid||m.del?' hid':'')+'" data-mi="'+i+'"><span class="sw" style="'+(map?'border:2px solid '+rgb+';background:transparent':'background:'+rgb)+'"></span><span class="nm">'+esc(modName(m))+'</span>'+tag+'<span class="ct">( '+o.map(v=>+v.toFixed(1)).join(' ')+' )'+(modBusy(i)?' · editing':'')+'</span></div>';
+}
+function modListDraw(L){
+  modListSetup(L);
+  const n=MOD.ents.length,vp=L._vp;
+  const msg=(MOD.linking?'<div class="co" style="color:var(--accent)">Click an entity that has a targetname to set '+esc(modName(MOD.linking.from))+'\'s "target" to it (Esc or Make path again cancels).</div>':'')+(MOD.placing?'<div class="co" style="color:var(--accent)">Click anywhere on the map to '+(MOD.placing.move!=null?'move':'place')+' the '+esc(MOD.placing.cls)+' (Esc or '+(MOD.placing.move!=null?'Move':'Add')+' again cancels).</div>':'')+
+    (n||MOD.placing?'':'<div class="co">Nothing added yet. Add, then click on the map to place it; new entities stay see-through until saved.</div>');
+  if(L._msgH!==msg){L._msgH=msg;L._msg.innerHTML=msg;}
+  vp.style.display=n?'':'none';
+  L._sp.style.height=(n*MOD_RH)+'px';
+  const vh=vp.clientHeight||360;
+  // a newly selected row is scrolled into view (newest first: the last entity is the top row)
+  if(MOD.sel!==_modLastSel){_modLastSel=MOD.sel;
+    if(MOD.sel>=0&&MOD.sel<n){const top=(n-1-MOD.sel)*MOD_RH;
+      if(top<vp.scrollTop)vp.scrollTop=top;else if(top+MOD_RH>vp.scrollTop+vh)vp.scrollTop=top+MOD_RH-vh;}}
+  const first=Math.max(0,Math.floor(vp.scrollTop/MOD_RH)-8),last=Math.min(n,Math.ceil((vp.scrollTop+vh)/MOD_RH)+8);
+  let h='';
+  for(let p=first;p<last;p++){const i=n-1-p;h+=modRowHtml(MOD.ents[i],i);}
+  L._rows.style.top=(first*MOD_RH)+'px';
+  L._rows.innerHTML=h;
+}
 function modRender(){
   const L=$('modList');if(!L)return;
   modMultiPrune();modHideSync();
-  let h='';
-  // new ones: a filled square and "new"; the map's own: a hollow square and its entity
-  // number, "changed" in yellow once their keys differ from the map's. Newest first: each
-  // row goes in front of the ones before it (data-mi keeps its place in MOD.ents)
-  MOD.ents.forEach((m,i)=>{const o=modOrigin(m),c=modColour(m),rgb='rgb('+c.map(v=>Math.round(v*255)).join(',')+')',map=modIsMap(m),ch=map&&modEdited(m);
-    const tag=map?'<span class="mtag'+(ch?' ch':'')+'" title="'+(ch?'one of the map\'s own entities, changed here (not saved yet)':'one of the map\'s own entities, as the map has it')+'">#'+m.ei+(ch?' changed':' map')+'</span>':'<span class="mtag nw" title="added here, not saved yet">new</span>';
-    h='<div class="li'+(modIsSel(i)?' sel':'')+(m.hid?' hid':'')+'" data-mi="'+i+'" title="'+esc(modText(m))+'\n\nShift+click the name: '+(modIsSel(i)?'take it out of the selection':'add it to the selection')+' · Shift+click the square: '+(m.hid?'show':'hide')+' it"><span class="sw" style="'+(map?'border:2px solid '+rgb+';background:transparent':'background:'+rgb)+'"></span><span class="nm">'+esc(modName(m))+'</span>'+tag+'<span class="ct">( '+o.map(v=>+v.toFixed(1)).join(' ')+' )'+(modBusy(i)?' · editing':'')+'</span></div>'+h;});
-  L.innerHTML=(MOD.linking?'<div class="co" style="color:var(--accent)">Click an entity that has a targetname to set '+esc(modName(MOD.linking.from))+'\'s "target" to it (Esc or Make path again cancels).</div>':'')+(MOD.placing?'<div class="co" style="color:var(--accent)">Click anywhere on the map to '+(MOD.placing.move!=null?'move':'place')+' the '+esc(MOD.placing.cls)+' (Esc or '+(MOD.placing.move!=null?'Move':'Add')+' again cancels).</div>':'')+
-    (h||(MOD.placing?'':'<div class="co">Nothing added yet. Add, then click on the map to place it; new entities stay see-through until saved.</div>'));
+  modListDraw(L);                                   // windowed: only the rows in view
   $('bModAdd').classList.toggle('on',!!MOD.placing&&MOD.placing.move==null);
   const has=MOD.ents[MOD.sel]!=null;
-  for(const id of['bModEdit','bModMove','bModTrim','bModLink','bModEye','bModFly','bModDel'])$(id).disabled=!has;
+  for(const id of['bModEdit','bModMove','bModTrim','bModLink','bModEye','bModFly','bModSf','bModDel'])$(id).disabled=!has;
   $('bModLink').classList.toggle('on',!!MOD.linking);
   const nsel=modSelCount();
   $('bModDup').disabled=!nsel&&!(MOD.placing&&MOD.placing.copy);
@@ -10003,12 +10332,25 @@ function modRender(){
   $('bModMove').classList.toggle('on',moving);
   $('bModTrim').classList.toggle('on',MOD.trim);$('bModEdit').classList.toggle('on',MOD.edit>=0);
   const cur=MOD.ents[MOD.sel];
-  $('bModDel').textContent=cur&&modIsMap(cur)?'Restore':'Delete';
-  $('bModDel').title=cur&&modIsMap(cur)?'Put back the map\'s own keys for this entity':'Remove the entity (every selected one)\n\nHotkey: Delete';
+  const rest=cur&&modIsMap(cur)&&(cur.del||modKvEdited(cur));
+  $('bModDel').textContent=rest?'Restore':'Delete';
+  $('bModDel').title=rest?'Put back the map\'s own keys for this entity and keep it in the saved map':cur&&modIsMap(cur)?'Delete this map entity: it is left out of the saved map (flagged DEL; Restore or Undo puts it back)\n\nHotkey: Delete':'Remove the entity (every selected one)\n\nHotkey: Delete';
   if(modSelEnts(false).length>1)$('bModDel').textContent='Delete ('+modSelEnts(false).length+')';
-  if(cur&&modIsMap(cur)&&!modEdited(cur))$('bModDel').disabled=true;
   const nw=MOD.ents.filter(m=>!modIsMap(m)),ch=MOD.ents.filter(m=>modIsMap(m)&&modEdited(m));
   $('bModSaveBsp').disabled=$('bModSaveMap').disabled=$('bModCopy').disabled=!(nw.length||ch.length);
+  modStatSoon();
+  sfRender();
+  // a selected entity the level script spawns can't be edited here: it isn't in the .bsp or the .map
+  {const ei=selFocusEnt(),e=ei>0&&MAP&&MAP.ents[ei],el=$('modScr');
+    if(e&&e.scr&&!cur){el.style.display='';
+      el.textContent='This entity is spawned by the level script ('+scrWhere(e.scr.f,e.scr.l)+'): it can only be modified in the level script, not in the map viewer.';}
+    else el.style.display='none';}
+}
+// the heavy part of the render (path checks, limits, the status line), once per frame at most
+let _modStatRaf=0;
+function modStatSoon(){if(_modStatRaf)return;_modStatRaf=requestAnimationFrame(()=>{_modStatRaf=0;if(MAP&&MOD&&$('modStat'))modStatNow();});}
+function modStatNow(){
+  const nw=MOD.ents.filter(m=>!modIsMap(m)),ch=MOD.ents.filter(m=>modIsMap(m)&&modEdited(m));
   const A=PA_C&&PA_C.n0!=null?PA_C:null,nn=nw.filter(modIsNode).length;
   const LM=(nw.length||ch.length)?modLimits():null;
   const IS=(nw.length||ch.length)?paIssues():null;
@@ -10096,20 +10438,20 @@ function modEntsText(){return MOD.ents.filter(m=>!modIsMap(m)).map(modText).join
 // the map's entities changed here: by entity number (the decompiled .map keeps the entity
 // lump's order), with the class and origin they had, to check against the .bsp
 function modSets(){return MOD.ents.filter(m=>modIsMap(m)&&modEdited(m)).map(m=>({ei:m.ei,cls:MAP.ents[m.ei].cls,
-  origin:parseVec(edKey({kv:m.orig},'origin'),3),kv:m.kv}));}
+  origin:parseVec(edKey({kv:m.orig},'origin'),3),kv:m.del?m.orig:m.kv,del:!!m.del}));}
 // the .map with the changes: each changed (point) entity's block written again, the new ones added
 function modMapText(){
   let t=D.srcText;const ch=MOD.ents.filter(m=>modIsMap(m)&&modEdited(m)).sort((a,b)=>MAP.ents[b.ei].ts-MAP.ents[a.ei].ts);
-  for(const m of ch){const e=MAP.ents[m.ei];if(!(e.ts>=0&&e.te>e.ts))continue;t=t.slice(0,e.ts)+modText(m)+t.slice(e.te);}
+  for(const m of ch){const e=MAP.ents[m.ei];if(!(e.ts>=0&&e.te>e.ts))continue;t=t.slice(0,e.ts)+(m.del?'':modText(m))+t.slice(e.te);}
   const add=MOD.ents.filter(m=>!modIsMap(m));
   if(add.length)t=t.replace(/\s*$/,'\n')+'// added in MOHAA Map Viewer\'s MODIFY\n'+add.map(modText).join('\n')+'\n';
   return t;
 }
-function modCopyText(){const ch=MOD.ents.filter(m=>modIsMap(m)&&modEdited(m));
+function modCopyText(){const ch=MOD.ents.filter(m=>modIsMap(m)&&modEdited(m)&&!m.del);
   return (ch.length?'// changed (entity number in the map)\n'+ch.map(m=>'// entity '+m.ei+'\n'+modText(m)).join('\n')+'\n// new\n':'')+modEntsText();}
 // What Save would write, to tell whether it has been saved: the new entities' text and the
 // map's changed ones (modSaved keeps it once a save goes through)
-function modSaveKey(){return JSON.stringify([modEntsText(),modSets().map(x=>[x.ei,x.kv])]);}
+function modSaveKey(){return JSON.stringify([modEntsText(),modSets().map(x=>[x.ei,x.kv,x.del?1:0])]);}
 // MODIFY's changes not saved yet as a .bsp or .map: {nw new, ch changed}, else null
 function modUnsaved(){
   if(!MOD||!MOD.ents)return null;
@@ -10157,6 +10499,7 @@ function modInit(){
     const v=eyeViewFrom(modCls(m),modKvl(m),modOrigin(m),modName(m),-1,true);if(!v)return;
     flyTo(v.pos,v.ang[1],v.ang[0],-v.ang[2]);requestDraw();flash(v.flash);};
   $('bModFly').onclick=modFly;
+  $('bModSf').onclick=toggleSfMenu;
   $('bModDel').onclick=()=>modRemoveSel();
   $('bModDup').onclick=()=>modCopySel();
   $('bModHUndo').onclick=()=>modUndoGo(-1);
@@ -10221,6 +10564,7 @@ function simPost(m){try{if(simHost()){window.chrome.webview.postMessage(m);retur
 // The node Simulate starts from: the selected info_splinepath (a map entity, or a new one
 // Modify placed): 'e<entity>' / 'm<Modify id>', else null.
 function simFocus(){
+  if(selAll().n>1)return null;               // several selected: no spline Simulate
   const m=MOD.ents[MOD.sel];
   if(m&&!modIsMap(m))return modCls(m)==='info_splinepath'?'m'+m.id:null;
   const ei=m&&modIsMap(m)?m.ei:selFocusEnt();
@@ -10245,7 +10589,7 @@ function simWorld(){
   for(const m of MOD.ents)if(modIsMap(m))modOf.set(m.ei,m);
   const add=(key,kvl,ei)=>{const n={key:key,kvl:kvl,ei:ei,cls:String(kvl.classname||'').toLowerCase()};all.push(n);
     const t=kvl.targetname;if(t&&!tn.has(t))tn.set(t,n);};
-  for(let ei=1;ei<MAP.ents.length;ei++){const m=modOf.get(ei);add('e'+ei,m&&modEdited(m)?simKvl(m):MAP.ents[ei].kvl,ei);}
+  for(let ei=1;ei<MAP.ents.length;ei++){const m=modOf.get(ei);if(m&&m.del)continue;add('e'+ei,m&&modEdited(m)?simKvl(m):MAP.ents[ei].kvl,ei);}
   for(const m of MOD.ents)if(!modIsMap(m))add('m'+m.id,simKvl(m),-1);
   return{all:all,tn:tn};
 }
@@ -10313,9 +10657,12 @@ function lerpAng(a,b,u){let d=b-a;d=((d%360)+540)%360-180;return a+d*u;}
 // ---- the panel -----------------------------------------------------------------------------
 function simPanel(){
   if(!$('simSect')||!MAP)return;
-  const key=simFocus(),show=!!key||SIM.run;
+  const key=simFocus(),nf=(!key&&!SIM.run)?actFocus():null,show=!!key||SIM.run||!!nf;
   $('simSect').style.display=show?'':'none';
-  if(!show){SIM.chain=null;return;}
+  // a path node shows the actor's controls instead of the spline's
+  $('simSpl').style.display=nf?'none':'';$('simNd').style.display=nf?'':'none';
+  actPanel(nf);
+  if(!show||nf){SIM.chain=null;return;}
   if(key&&(!SIM.chain||SIM.chain.key!==key||!SIM.run))SIM.chain=simChain(key);
   const ch=SIM.run?SIM.rc:SIM.chain;
   $('bSim').disabled=SIM.run||!SIM.chain;$('bSimReset').disabled=!SIM.run;
@@ -10523,12 +10870,886 @@ function simInit(){
   $('simZoom').oninput=simZoomShow;$('simZoom').onchange=()=>$('simZoom').blur();simZoomShow();
   simModelText();
 }
+// ============================================================================
+//  SIMULATE ON A PATH NODE: a human with a weapon on an info_pathnode or info_waypoint
+// ============================================================================
+// The panel's Simulate section also shows for an info_pathnode or info_waypoint (a map's own
+// or one Modify placed). Spawn stands a human of the chosen kind, holding the chosen weapon,
+// on it: dropped to the floor (droptofloor, as the game does) and facing the node's yaw,
+// playing his idle. A node with special spawnflags can then be Simulated: he plays the
+// animation the game plays there (PathNode::GetSpecialAttack: CORNER_LEFT / CORNER_RIGHT take
+// the _wall_ ones, CRATE the _crate_ ones, from anim/cornerleft.scr, cornerright.scr,
+// overattack.scr; LOW_WALL_ARC, SNIPER and DUCK the aim and crouch stances), so a wall, a
+// crate that is too high or a node too near a wall shows in the animation itself: nothing
+// here stops him going through them. Move runs or walks him along the node's "target" chain,
+// or to whatever is clicked next, routed over the AI's path nodes as the game routes him
+// (below). Respawn puts him back on the node. The human and weapon are built by the launcher
+// from the paks (mohaa_map_actor.py) as one packet with the human's skin weights; the page
+// poses him itself, as the Model Viewer does (worldFromPose / skin), and the weapon rides his
+// tag_weapon_right as a rigid model. Prefix act: nothing here is the spline Simulate's.
+const ACT={n:0,lists:null,listErr:'',asked:false,built:new Map(),byK:new Map(),cur:null,want:null,msg:'',pose:0,hum:'',wpn:''};
+const ACT_LS_H='mohaaMapViewerActHuman', ACT_LS_W='mohaaMapViewerActWeapon';
+const ACT_KEEP=4;           // actors kept built (the launcher keeps as many)
+const ACT_HOLD=0.35;        // a step shows at least this long (s)
+const ACT_IDLE_DT=50;       // ms between the idle's poses
+const ACT_DEF_H='models/human/german_wehrmact_soldier.tik', ACT_DEF_W='models/weapons/mp40.tik';
+// the Model Viewer's skeleton maths (mohaa_view.py qmat / mmul / mvec): the quaternion is
+// conjugated, as the .skc's are
+function actQmat(q){const x=-q[0],y=-q[1],z=-q[2],w=q[3];return[
+  1-2*(y*y+z*z),2*(x*y-w*z),2*(x*z+w*y),
+  2*(x*y+w*z),1-2*(x*x+z*z),2*(y*z-w*x),
+  2*(x*z-w*y),2*(y*z+w*x),1-2*(x*x+y*y)];}
+function actMmul(A,B){const R=new Array(9);for(let i=0;i<3;i++)for(let j=0;j<3;j++){let s=0;for(let k=0;k<3;k++)s+=A[i*3+k]*B[k*3+j];R[i*3+j]=s;}return R;}
+function actMvec(A,v){return[A[0]*v[0]+A[1]*v[1]+A[2]*v[2],A[3]*v[0]+A[4]*v[1]+A[5]*v[2],A[6]*v[0]+A[7]*v[1]+A[8]*v[2]];}
+// each bone's world matrix and position for a pose: over[i] is a bone's [px,py,pz,qx,qy,qz,qw]
+// or a rotation alone [qx,qy,qz,qw] (the clip has no "<bone> pos": the base position stays),
+// every other bone has its base pose
+function actWorld(sk,over){
+  const NB=sk.bn.length,R=new Array(NB),T=new Array(NB),done=new Uint8Array(NB),B=sk.base;
+  const res=i=>{if(done[i])return;done[i]=1;let p,q;const a=over&&over[i];
+    if(a&&a.length===4){p=[B[i*7],B[i*7+1],B[i*7+2]];q=a;}
+    else if(a){p=[a[0],a[1],a[2]];q=[a[3],a[4],a[5],a[6]];}
+    else{p=[B[i*7],B[i*7+1],B[i*7+2]];q=[B[i*7+3],B[i*7+4],B[i*7+5],B[i*7+6]];}
+    const lR=actQmat(q),par=sk.bp[i];
+    if(par<0){R[i]=lR;T[i]=p;}
+    else{res(par);R[i]=actMmul(R[par],lR);const pt=actMvec(R[par],p);T[i]=[pt[0]+T[par][0],pt[1]+T[par][1],pt[2]+T[par][2]];}};
+  for(let i=0;i<NB;i++)res(i);
+  return{R:R,T:T};
+}
+// every vertex of the human for a pose, in the mesh's own space (its load_scale applied:
+// ModelBuilder writes the model that way), into b.out
+function actSkin(b,w){
+  const sk=b.sk,wc=sk.wc,wb=sk.wb,ww=sk.ww,wo=sk.wo,out=b.out,sc=b.H.M.sc||1,NB=sk.bn.length;
+  let k=0;
+  for(let i=0;i<wc.length;i++){let X=0,Y=0,Z=0;
+    for(let n=wc[i];n>0;n--,k++){const bi=wb[k];if(bi>=NB)continue;
+      const wv=ww[k],ox=wo[k*3],oy=wo[k*3+1],oz=wo[k*3+2],R=w.R[bi],T=w.T[bi];
+      X+=wv*(R[0]*ox+R[1]*oy+R[2]*oz+T[0]);Y+=wv*(R[3]*ox+R[4]*oy+R[5]*oz+T[1]);Z+=wv*(R[6]*ox+R[7]*oy+R[8]*oz+T[2]);}
+    out[i*3]=X*sc;out[i*3+1]=Y*sc;out[i*3+2]=Z*sc;}
+}
+// a pose between two frames of a clip: positions blend, rotations take the short way
+function actLerp(fa,fb,u){
+  if(!fb||u<=0)return fa;
+  const o={};
+  for(const i in fa){const a=fa[i],b=fb[i];
+    if(!b||b.length!==a.length){o[i]=a;continue;}
+    const r=new Array(a.length),qo=a.length-4;let d=0;
+    for(let k=0;k<4;k++)d+=a[qo+k]*b[qo+k];
+    const sg=d<0?-1:1;
+    for(let k=0;k<qo;k++)r[k]=a[k]+(b[k]-a[k])*u;
+    let l=0;for(let k=0;k<4;k++){r[qo+k]=a[qo+k]+(b[qo+k]*sg-a[qo+k])*u;l+=r[qo+k]*r[qo+k];}
+    l=Math.sqrt(l)||1;for(let k=0;k<4;k++)r[qo+k]/=l;
+    o[i]=r;}
+  return o;
+}
+function actFrameAt(rec,t){
+  const F=rec.frames,ft=rec.frameTime||0.05;if(!F.length)return null;
+  const x=Math.max(0,t)/ft,i=Math.min(F.length-1,Math.floor(x)),j=Math.min(F.length-1,i+1);
+  return actLerp(F[i],F[j],Math.min(1,x-i));
+}
+// a role's clips end to end: each plays at its own frame time, a short one is held to
+// ACT_HOLD, the last frame stays when it ends
+// A clip's server commands can move the weapon to the other hand (the right-corner clips
+// hold it there: `attachtohand offhand`): r.hand is [[frame, 0 main | 1 other]], frame -1 the
+// last; the hand a clip ends with is the one the next starts with, and every role starts
+// with the weapon in the main hand.
+function actTimeline(a){
+  const segs=[];let t=0,hand=0,off=[0,0,0];
+  for(const nm of a.seq){const r=a.recs[nm];if(!r||!r.frames.length)continue;
+    const ft=r.frameTime||0.05,play=Math.max(0,(r.frames.length-1)*ft),len=Math.max(play,ACT_HOLD),last=r.frames.length-1;
+    const ev=(r.hand||[]).map(e=>[e[0]<0?last:Math.min(last,e[0]),e[1]]).sort((x,y)=>x[0]-y[0]);
+    const g={r:r,t0:t,play:play,len:len,name:nm,ev:ev,hand0:hand,o0:off.slice()};
+    for(const e of ev)hand=e[1];
+    // the clip's own movement (r.dl: running sum of its frame deltas, x ahead / y left) carries on
+    // from where the clip before it left him
+    if(r.dl&&r.dl.length>=3*(last+1)){off=[off[0]+r.dl[last*3],off[1]+r.dl[last*3+1],off[2]+r.dl[last*3+2]];}
+    segs.push(g);t+=len;}
+  return{segs:segs,total:t};
+}
+// how far a clip has moved him by its local time t, in his own space (x ahead, y left)
+function actMoveAt(g,t){
+  const r=g.r,o=g.o0;
+  if(!r.dl)return o;
+  const ft=r.frameTime||0.05,last=r.frames.length-1,x=Math.max(0,t)/ft,i=Math.min(last,Math.floor(x)),j=Math.min(last,i+1),u=Math.min(1,x-i),d=r.dl;
+  return[o[0]+d[i*3]+(d[j*3]-d[i*3])*u,o[1]+d[i*3+1]+(d[j*3+1]-d[i*3+1])*u,o[2]+d[i*3+2]+(d[j*3+2]-d[i*3+2])*u];
+}
+// the hand the weapon is in at a clip's local time t
+function actHandAt(g,t){
+  const fi=t>=g.play?g.r.frames.length-1:Math.floor(Math.max(0,t)/(g.r.frameTime||0.05));
+  let h=g.hand0;for(const e of g.ev)if(e[0]<=fi)h=e[1];
+  return h;
+}
+// the pose and the weapon's hand at time t into a role: {p, h}
+function actPoseAt(tl,t){
+  if(!tl.segs.length)return null;
+  let s=tl.segs[tl.segs.length-1];
+  for(const g of tl.segs)if(t<g.t0+g.len){s=g;break;}
+  const lt=Math.min(s.play,t-s.t0);
+  return{p:actFrameAt(s.r,lt),h:actHandAt(s,t-s.t0),m:actMoveAt(s,lt)};
+}
+// ---- the node ------------------------------------------------------------------------------
+// One selected entity as a node he can stand on (ACT_CLS), from Modify's entity m or the map's
+// entity ei: its key, kvl, origin (as the map has it: not dropped), yaw and spawnflags; null
+// when it isn't such a node
+function actItem(m,ei){
+  let key,kvl,cls='';
+  if(m&&!modIsMap(m)){
+    if(!ACT_CLS.has(modCls(m)))return null;
+    key='m'+m.id;kvl=simKvl(m);cls=modCls(m);
+  }else{
+    if(!(ei>0)||ei>=MAP.ents.length)return null;
+    const mm=MOD.ents.find(x=>x.ei===ei),ed=!!mm&&modEdited(mm);
+    cls=ed?modCls(mm):String(MAP.ents[ei].kvl.classname||'').toLowerCase();
+    if(!ACT_CLS.has(cls))return null;
+    key='e'+ei;kvl=ed?simKvl(mm):MAP.ents[ei].kvl;
+  }
+  const o=parseVec(kvl.origin,3)||(ei>0&&ENTS[ei]&&ENTS[ei].origin)||[0,0,0];
+  // his facing: the node's own angle; else toward its target; else null (the camera's, from
+  // the moment he spawns: actYaw)
+  let yaw=null;
+  if(parseVec(kvl.angles,3)||isFinite(parseFloat(kvl.angle)))yaw=entAngles(kvl)[1];
+  else if(kvl.target){const nx=actNamed(kvl.target);
+    if(nx&&Math.hypot(nx.o[0]-o[0],nx.o[1]-o[1])>0.01)yaw=Math.atan2(nx.o[1]-o[1],nx.o[0]-o[0])*180/Math.PI;}
+  return{key:key,kvl:kvl,o:o.slice(),yaw:yaw,hasAng:yaw!=null,sf:parseInt(kvl.spawnflags,10)|0,cls:cls,ei:ei};
+}
+// Everything selected, each entity once (a map entity selected in Modify is also in SEL):
+// {n: how many things, items: the nodes among them (null for one that isn't), prims}
+function selAll(){
+  const seen=new Set(),items=[];let bad=false;
+  const add=(k,m,ei)=>{if(seen.has(k))return;seen.add(k);const it=actItem(m,ei);if(it)items.push(it);else bad=true;};
+  const ml=[];if(MOD.sel>=0&&MOD.ents[MOD.sel])ml.push(MOD.ents[MOD.sel]);for(const m of MOD.multi)ml.push(m);
+  for(const m of ml)add(modIsMap(m)?'e'+m.ei:'m'+m.id,m,m.ei);
+  for(const k of SEL)if(k[0]==='e')add(k,null,+k.slice(1));else{seen.add(k);bad=true;}
+  return{n:seen.size,items:items,bad:bad};
+}
+// The node Simulate works on. One node selected: it. Several: only when they are all nodes
+// and join each other directly (a node's "target" names another selected one, so the selection
+// is one unbroken stretch of a path; which is also every node of a path selected): then the
+// first of them along the path. Two random nodes of a path, or anything else with them: null.
+function actFocus(){
+  if(!MAP)return null;
+  const s=selAll();
+  if(!s.n)return null;
+  if(s.n===1)return s.items[0]||null;
+  if(s.bad||s.items.length!==s.n)return null;
+  const L=s.items,by=new Map();
+  L.forEach((it,i)=>{const t=it.kvl.targetname;if(t){let a=by.get(t);if(!a)by.set(t,a=[]);a.push(i);}});
+  const adj=L.map(()=>[]),hasIn=L.map(()=>false);
+  L.forEach((it,i)=>{const t=it.kvl.target;if(!t)return;
+    for(const j of by.get(t)||[]){if(j===i)continue;adj[i].push(j);adj[j].push(i);hasIn[j]=true;}});
+  const seen=new Set([0]),q=[0];
+  while(q.length){const i=q.pop();for(const j of adj[i])if(!seen.has(j)){seen.add(j);q.push(j);}}
+  if(seen.size!==L.length)return null;
+  let h=hasIn.indexOf(false);if(h<0)h=0;      // a loop has no first: the first selected
+  return L[h];
+}
+// the classes he can stand on: path nodes (with their animations) and waypoints (to run from)
+const ACT_CLS=new Set(['info_pathnode','info_waypoint']);
+// What the node's spawnflags make the man do: {role, note}. The special attacks in the order
+// PathNode::GetSpecialAttack tests them (CORNER_LEFT, CORNER_RIGHT, CRATE); a combination the
+// AI refuses (IsValidPathnode: nodeFlagsBad) has no role. Same as flags_role in mohaa_map_actor.py.
+const ACT_FLAGS=[[2,'DUCK'],[4,'COVER'],[8,'CONCEALMENT'],[16,'CORNER_LEFT'],[32,'CORNER_RIGHT'],[64,'SNIPER'],[128,'CRATE']];
+function actRole(sf,cls){
+  if(cls==='info_waypoint')return{role:null,note:'A waypoint has no node animation: he can run or walk from it.'};
+  const v=sf&0xfe;
+  if(!v&&!(sf&256))return{role:null,note:'No spawnflags: he only stands on the node.'};
+  const nm=ACT_FLAGS.filter(x=>v&x[0]).map(x=>x[1]);if(sf&256)nm.push('LOW_WALL_ARC');
+  const names=nm.join(' + ');
+  if(nodeFlagsBad(sf))return{role:null,note:names+': the AI can\'t combine these flags (the game draws the node black), so there is nothing to play'};
+  if(v&16)return{role:'left',note:'CORNER_LEFT'};
+  if(v&32)return{role:'right',note:'CORNER_RIGHT'};
+  if(v&128)return{role:'crate',note:'CRATE'};
+  // LOW_WALL_ARC (Spearhead / Breakthrough): anim/lowwall.scr with DUCK, else highwall.scr
+  if(sf&256)return{role:(v&2)?'lowwall':'highwall',note:'LOW_WALL_ARC'+((v&2)?' + DUCK':'')+' (Spearhead / Breakthrough)'};
+  if(v&64)return{role:'sniper',note:'SNIPER'};
+  if(v&2)return{role:'duck',note:'DUCK'};
+  return{role:null,note:names+' has no special animation: he only stands on the node'};
+}
+// the node dropped to the floor (droptofloor), where his feet are
+// his yaw on the node: the node's (angle or target), else the camera's yaw when he spawned
+function actYaw(f,c){return f.yaw!=null?f.yaw:(c&&c.camYaw!=null?c.camYaw:0);}
+function actPlace(f){
+  let o=f.o;
+  try{o=pgDrop(f.o);ACT.dropWarn=false;}
+  catch(e){if(!ACT.dropWarn){ACT.dropWarn=true;flash('Simulate: the node can\'t be dropped to the floor ('+(e&&e.message||e)+'): he stands on it where it is');}}
+  return o;
+}
+// ---- the lists and the picks ------------------------------------------------------------------
+function actLabel(p){return p.replace(/^models\/(human|weapons)\//,'').replace(/\.tik$/,'');}
+// pak names go into the lists as text: a crafted entry name must not become markup
+function actEsc(x){return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function actFill(){
+  const H=$('actHum'),W=$('actWpn');if(!H||!W)return;
+  const L=ACT.lists;
+  if(!L){H.innerHTML='';W.innerHTML='';H.disabled=W.disabled=true;return;}
+  const lh=LS.get(ACT_LS_H)||ACT.hum||ACT_DEF_H,lw=LS.get(ACT_LS_W)||ACT.wpn||ACT_DEF_W;
+  H.innerHTML=L.h.map(p=>'<option value="'+actEsc(p)+'">'+actEsc(actLabel(p))+'</option>').join('');
+  W.innerHTML=L.w.map(x=>'<option value="'+actEsc(x[0])+'" title="animations: '+actEsc(x[1])+'">'+actEsc(actLabel(x[0]))+' ('+actEsc(x[1])+')</option>').join('');
+  H.value=L.h.includes(lh)?lh:(L.h.includes(ACT_DEF_H)?ACT_DEF_H:L.h[0]);
+  W.value=L.w.some(x=>x[0]===lw)?lw:(L.w.some(x=>x[0]===ACT_DEF_W)?ACT_DEF_W:L.w[0][0]);
+  ACT.hum=H.value;ACT.wpn=W.value;H.disabled=W.disabled=false;
+}
+window.MOHAA_SIM_ACTORS=function(h,w,why){
+  ACT.asked=false;
+  if(Array.isArray(h)&&Array.isArray(w)&&h.length&&w.length){
+    ACT.lists={h:h.map(x=>String(x).toLowerCase()),w:w.map(x=>[String(x[0]).toLowerCase(),String(x[1])])};ACT.listErr='';}
+  else{ACT.lists=null;ACT.listErr=String(why||'No actor list');}
+  actFill();simPanel();
+};
+// ---- building ---------------------------------------------------------------------------------
+function actFree(b){
+  if(!b||!gl)return;
+  for(const R of[b.H,b.Wp]){if(!R)continue;
+    for(const k of['vbP','vbT','ib','vbE','vbN','vbA2','vbA2M','instBuf','selBuf'])if(R[k])gl.deleteBuffer(R[k]);
+    if(R.vao)gl.deleteVertexArray(R.vao);if(R.vaoSel)gl.deleteVertexArray(R.vaoSel);}
+  b.H=b.Wp=null;
+}
+function actGet(hum,wpn){
+  const key=hum+'|'+wpn;let b=ACT.built.get(key);
+  if(b)return b;
+  b={k:'a'+(++ACT.n),key:key,hum:hum,wpn:wpn,state:'building',why:'',H:null,Wp:null,sk:null,out:null,meta:null,anims:new Map(),tag:-1};
+  ACT.built.set(key,b);ACT.byK.set(b.k,b);
+  while(ACT.built.size>ACT_KEEP){
+    let drop=null;for(const x of ACT.built.values()){if(!(ACT.cur&&ACT.cur.b===x)&&x!==b){drop=x;break;}}
+    if(!drop)break;
+    ACT.built.delete(drop.key);ACT.byK.delete(drop.k);actFree(drop);}
+  if(!simPost('mohaa-sim-actor\n'+JSON.stringify({k:b.k,m:hum,w:wpn}))){b.state='fail';b.why='Actors need the Map Viewer: it builds them from the paks';}
+  return b;
+}
+window.MOHAA_SIMACTOR=async function(k,meta,b64){
+  const b=ACT.byK.get(k);if(!b||b.state!=='building')return;
+  try{
+    if(!gl)throw new Error('no 3D view');
+    const P=await decodePacket(String(b64||''));
+    const ti=(P.tex||[]).map(t=>simTexIndex(t,P));
+    const mk=M=>{if(!M)throw new Error('the build sent no model');return Object.assign({},M,{s:M.s.map(s=>{const c=s.slice();c[2]=ti[s[2]]!=null?ti[s[2]]:0;return c;})});};
+    const HM=mk((P.models||[])[meta.mi]),WM=mk((P.models||[])[meta.wi]);
+    const sk=HM.sk;if(!sk)throw new Error('the human came without skin weights');
+    const prev=gl.getParameter(gl.VERTEX_ARRAY_BINDING);gl.bindVertexArray(null);
+    try{b.H=modelR(HM,P);b.Wp=modelR(WM,P);}finally{gl.bindVertexArray(prev);}
+    b.sk={bn:sk.bn,bp:sk.bp,base:P.f32(sk.base),wc:P.bytes(sk.wc),wb:P.u32(sk.wb),ww:P.f32(sk.ww),wo:P.f32(sk.wo)};
+    const nv=b.H.pos.length/3;
+    if(b.sk.wc.length!==nv)throw new Error('the skin has '+b.sk.wc.length+' vertices, the mesh '+nv);
+    b.tag=b.sk.bn.indexOf(String(meta.tag||'tag_weapon_right').toLowerCase());
+    b.tagL=b.sk.bn.indexOf(String(meta.tagL||'tag_weapon_left').toLowerCase());
+    b.out=new Float32Array(nv*3);
+    b.meta=meta;b.idleTL=meta.idle?actTimeline({seq:['idle'],recs:{idle:meta.idle}}):null;
+    b.state='ready';
+    if(b.tag<0)flash('Simulate: this human has no '+(meta.tag||'tag_weapon_right')+': the weapon is left out');
+  }catch(e){b.state='fail';b.why=String(e&&e.message||e);actFree(b);flash('Simulate: the actor can\'t be drawn ('+b.why+')');}
+  if(ACT.want===b.key)actSpawnNow();
+  simPanel();requestDraw();
+};
+window.MOHAA_SIMACT_ANIM=function(k,role,out){
+  const b=ACT.byK.get(k);if(!b)return;
+  b.anims.set(role,{tl:actTimeline(out),seq:out.seq});
+  if(ACT.cur&&ACT.cur.b===b&&ACT.cur.wantRole===role){const c=ACT.cur;c.wantRole='';if(c.wantGo){c.wantGo=false;actGoStart();}else actPlay(role);}
+  simPanel();
+};
+window.MOHAA_SIMACT_FAIL=function(k,role,why){
+  const b=ACT.byK.get(k);
+  if(!role){if(b){b.state='fail';b.why=String(why||'not built');if(ACT.want===b.key)ACT.want=null;}}
+  else if(b){if(!b.anims.has(role)&&b.meta)b.meta.roles[role]=String(why||'not built');
+    if(ACT.cur&&ACT.cur.b===b)ACT.cur.wantRole='';}
+  ACT.msg=String(why||'not built');flash('Simulate: '+ACT.msg);simPanel();
+};
+// ---- spawn and simulate -----------------------------------------------------------------------
+function actSpawn(){
+  const f=actFocus();if(!f){flash('Select an info_pathnode first');return;}
+  if(!ACT.lists){flash('The human and weapon lists aren\'t here yet');return;}
+  const hum=$('actHum').value,wpn=$('actWpn').value;
+  ACT.hum=hum;ACT.wpn=wpn;LS.set(ACT_LS_H,hum);LS.set(ACT_LS_W,wpn);
+  const b=actGet(hum,wpn);ACT.want=b.key;ACT.node=f.key;
+  if(b.state==='ready')actSpawnNow();else if(b.state==='fail')flash('Simulate: '+b.why);
+  simPanel();requestDraw();
+}
+function actSpawnNow(){
+  const f=actFocus(),b=ACT.built.get(ACT.want||'');
+  if(!f||!b||b.state!=='ready'||f.key!==ACT.node)return;
+  ACT.want=null;
+  ACT.cur={b:b,key:f.key,o:actPlace(f),yaw:0,camYaw:((cam.yaw+180)%360+360)%360,t0:performance.now(),play:null,wantRole:'',lastIdle:0,go:null,plan:null,moved:false,wantGo:false};
+  ACT.cur.yaw=actYaw(f,ACT.cur);
+  actPose(performance.now());
+  simPanel();requestDraw();
+}
+function actSimulate(){
+  const c=ACT.cur,f=actFocus();if(!c||!f){flash('Spawn him on a node first');return;}
+  const r=actRole(f.sf,f.cls);
+  if(!r.role){flash('Simulate: '+r.note);return;}
+  const b=c.b,why=b.meta.roles[r.role];
+  if(why){flash('Simulate: '+why);return;}
+  if(b.anims.has(r.role)){actPlay(r.role);return;}
+  c.wantRole=r.role;
+  if(!simPost('mohaa-sim-actor-anim\n'+JSON.stringify({k:b.k,role:r.role}))){c.wantRole='';flash('Actors need the Map Viewer');return;}
+  simPanel();
+}
+function actPlay(role){
+  const c=ACT.cur;if(!c)return;
+  const a=c.b.anims.get(role);if(!a||!a.tl.segs.length){flash('Simulate: nothing to play');return;}
+  c.play={tl:a.tl,t0:performance.now(),role:role,seq:a.seq};
+  actPose(performance.now());simPanel();requestDraw();
+}
+// ---- running and walking: along a "target" chain, or to a spot you click ------------------------
+// As the game sends a man to a goal (Actor::MoveToPatrolCurrentNode): a goal that is an
+// info_waypoint is walked to in a straight line (SetDest, FaceMotion: no path search, the
+// physics stop him at a wall); any other goal is reached by SetPath, which is
+// PathSearch::FindPath: the nearest path node to him that he can see (NearestStartNode, else just
+// the nearest), the nearest to the goal that it can see (NearestEndNode, which has no fallback),
+// and an A* over the nodes' links between them (links that drop further than ai_fallheight are
+// left out). When that finds nothing ("Path not found": no node near enough, or the nodes aren't
+// joined) the game clears the path and he stays where he is; he does not run through the walls.
+// The pace is the clip's own: the movement of its frames over its length.
+const ACT_SPEED={run:250,walk:100};        // units/s, only when the clip carries no movement
+let ACT_CELLS=null,ACT_ADJ=null;
+// PathSearch's cells (AddNode): every linked node is in the four 256-unit cells round it
+function actCells(A){
+  if(ACT_CELLS&&ACT_CELLS.A===A)return ACT_CELLS.m;
+  const NC=c=>{let v=c+8192-128;if(v<0)v=c+8192+128-1;return Math.trunc(v)>>8;};
+  const m=new Map(),add=(x,y,i)=>{if(x<0||x>=64||y<0||y>=64)return;const k=x*64+y;let l=m.get(k);if(!l)m.set(k,l=[]);if(l.length<128)l.push(i);};
+  for(let i=0;i<A.n;i++){if(A.f[i]&1)continue;const x=NC(A.o[i*3]),y=NC(A.o[i*3+1]);add(x,y,i);add(x+1,y,i);add(x,y+1,i);add(x+1,y+1,i);}
+  ACT_CELLS={A:A,m:m};return m;
+}
+// each node's links (rows of A.c: from, to, fall, p1 x y z, p2 x y z)
+function actAdj(A){
+  if(ACT_ADJ&&ACT_ADJ.A===A)return ACT_ADJ.l;
+  const l=Array.from({length:A.n},()=>[]),C=A.c;
+  for(let k=0;k<C.length;k+=9){const a=C[k]|0;if(a>=0&&a<A.n)l[a].push(k);}
+  ACT_ADJ={A:A,l:l};return l;
+}
+// NearestNodeSetup: the nodes of his cell whose height he is within reach of (MAXS_Z 94), nearest first
+function actNearest(A,pos){
+  const cell=actCells(A).get(gridCoord(pos[0])*64+gridCoord(pos[1]));
+  const out=[];if(!cell)return out;
+  for(const i of cell){const z=A.o[i*3+2];
+    if(pos[2]>z+94||pos[2]+94<z)continue;
+    const dx=A.o[i*3]-pos[0],dy=A.o[i*3+1]-pos[1],dz=z-pos[2];
+    out.push({i:i,d:dx*dx+dy*dy+dz*dz});}
+  out.sort((a,b)=>a.d-b.d);return out;
+}
+// the sight trace of NearestStartNode / NearestEndNode: his box (-15 -15 0, 15 15 62) from 32 up
+// to the node's own 32 up
+function actSees(A,pos,i){
+  try{const t=pgTrace([pos[0],pos[1],pos[2]+32],[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+32],[-15,-15,0],[15,15,62],false);return t.f===1&&!t.startsolid;}
+  catch(_e){return true;}
+}
+// PathSearch::FindPath from start to end: {ok, pts: the points he walks (start, each link's two
+// ends, end), nodes: the nodes it crosses} or {ok:false, why: PathSearch::last_error}
+function actFindPath(A,start,end){
+  const sc=actNearest(A,start);let s0=null;
+  for(const c of sc)if(actSees(A,start,c.i)){s0=c.i;break;}
+  if(s0==null&&sc.length)s0=sc[0].i;
+  if(s0==null)return{ok:false,why:'couldn\'t find start node'};
+  let e0=null;
+  for(const c of actNearest(A,end))if(actSees(A,end,c.i)){e0=c.i;break;}
+  if(e0==null)return{ok:false,why:'couldn\'t find end node'};
+  const adj=actAdj(A),C=A.c,O=A.o,fh=+CVARS.ai_fallheight;
+  const d2=(ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
+  const gs=new Map(),par=new Map();let open=[];
+  const sg=d2(O[s0*3],O[s0*3+1],start[0],start[1]);
+  gs.set(s0,sg);open.push({i:s0,f:sg+d2(start[0],start[1],end[0],end[1])});
+  while(open.length){
+    let bi=open.length-1;for(let k=open.length-1;k>=0;k--)if(open[k].f<open[bi].f)bi=k;
+    const cur=open.splice(bi,1)[0],n=cur.i;
+    if(n===e0){
+      const links=[];for(let x=n;par.has(x);x=C[par.get(x)]|0)links.push(par.get(x));
+      links.reverse();
+      const pts=[start.slice()];
+      for(const k of links){pts.push([C[k+3],C[k+4],C[k+5]],[C[k+6],C[k+7],C[k+8]]);}
+      pts.push(end.slice());
+      return{ok:true,pts:pts,nodes:links.length+1};}
+    for(const k of adj[n]){
+      const to=C[k+1]|0;if(to<0||to>=A.n)continue;
+      if(C[k+2]>fh)continue;
+      const g=Math.trunc(d2(C[k+3],C[k+4],C[k+6],C[k+7])+gs.get(n)+1);
+      if(gs.has(to)&&gs.get(to)<=g)continue;
+      const h=d2(C[k+6],C[k+7],end[0],end[1]);
+      gs.set(to,g);par.set(to,k);
+      const oi=open.findIndex(o=>o.i===to);if(oi>=0)open.splice(oi,1);
+      open.push({i:to,f:Math.trunc(g+h)});}
+  }
+  return{ok:false,why:'unreachable path'};
+}
+// the floor under a place (a node sits 16 up, a waypoint where its map put it)
+function actFloor(o){try{return pgDrop(o);}catch(_e){return o.slice();}}
+// an entity by targetname: Modify's (a new one, or a changed map entity) else the map's own
+function actNamed(tn){
+  for(const m of MOD.ents){if(m.del)continue;const kv=modKvl(m);
+    if(kv.targetname===tn&&(!modIsMap(m)||modEdited(m)))return{key:'m'+m.id,kvl:kv,o:modOrigin(m),cls:modCls(m),name:modName(m)};}
+  for(const ei of ENTS.tn.get(tn)||[]){const e=MAP.ents[ei];if(!e||MOD.ents.some(m=>m.ei===ei&&m.del))continue;
+    const o=parseVec(e.kvl.origin,3)||(ENTS[ei]&&ENTS[ei].origin);if(!o)continue;
+    return{key:'e'+ei,kvl:e.kvl,o:o.slice(),cls:String(e.cls||'').toLowerCase(),name:entName(ei)};}
+  return null;
+}
+// the "target" chain from the node: its target, that one's target... (stops where one has none,
+// names nothing, or comes back to one already in it)
+function actChain(f){
+  const out=[],seen=new Set([f.key]);let kvl=f.kvl;
+  for(let n=0;n<512;n++){
+    const t=kvl&&kvl.target;if(!t)break;
+    const nx=actNamed(t);if(!nx||seen.has(nx.key))break;
+    seen.add(nx.key);out.push(nx);kvl=nx.kvl;}
+  return out;
+}
+// his route through the goals, one after the other, from where he stands: {pts, fail, nodes, straight}
+function actRoute(c,goals){
+  const R={pts:[c.o.slice()],fail:'',nodes:0,straight:0,legs:[]};let pos=c.o.slice();
+  for(const g of goals){
+    const to=actFloor(g.o);
+    if(g.cls==='info_waypoint'){R.pts.push(to);R.straight++;R.legs.push({e:R.pts.length-1,straight:true});pos=to;continue;}
+    const A=routesOk()?PA():null;
+    if(!A){R.fail=(routesOk()?'the AI paths are still being worked out: try again in a moment':'this map has no path nodes')+' (to '+g.name+')';break;}
+    const r=actFindPath(A,pos,to);
+    if(!r.ok){R.fail=r.why+' (to '+g.name+')';break;}
+    for(let i=1;i<r.pts.length;i++)R.pts.push(r.pts[i]);
+    R.legs.push({e:R.pts.length-1,straight:false});
+    R.nodes+=r.nodes;pos=to;}
+  return R;
+}
+function actGo(role,goals,label){
+  const c=ACT.cur,f=actFocus();if(!c||!f){flash('Spawn him on a node first');return;}
+  if(c.go||c.wantRole)return;
+  const why=c.b.meta.roles[role];if(why){flash('Simulate: '+why);return;}
+  const R=actRoute(c,goals);
+  c.plan={role:role,label:label,R:R,n:goals.length};
+  c.play=null;
+  if(R.pts.length<2){
+    flash(R.fail?'Path not found: '+R.fail+'. In the game he stays where he is':'Nowhere to go');simPanel();return;}
+  if(c.b.anims.has(role)){actGoStart();return;}
+  c.wantRole=role;c.wantGo=true;
+  if(!simPost('mohaa-sim-actor-anim\n'+JSON.stringify({k:c.b.k,role:role}))){c.wantRole='';c.wantGo=false;flash('Actors need the Map Viewer');}
+  simPanel();
+}
+function actGoStart(){
+  const c=ACT.cur;if(!c||!c.plan)return;
+  const P=c.plan,a=c.b.anims.get(P.role);
+  if(!a||!a.tl.segs.length){flash('Simulate: nothing to play');return;}
+  const rec=a.tl.segs[0].r,ft=rec.frameTime||0.05,last=rec.frames.length-1,dur=Math.max(0.05,last*ft),sc=c.b.H.M.sc||1;
+  let sp=0;if(rec.dl&&rec.dl.length>=3*(last+1))sp=Math.abs(rec.dl[last*3])*sc/dur;
+  P.fallback=!(sp>1);if(P.fallback)sp=ACT_SPEED[P.role];
+  P.speed=sp;
+  // his whole walk, tick by tick, as the game steers it (actSimRoute)
+  const now=performance.now(),pts=P.R.pts;
+  if(DOORS)doorsAdvance(now);                    // the doors as they stand: the plan starts from them
+  const sim=actSimRoute(P.R,sp,c.yaw,now);
+  c.go={pts:pts,sim:sim,speed:sp,rec:rec,dur:dur,t0:now,tl:now,yaw:c.yaw,evi:0};
+  if(sim.stuck>=0)flash('He is stopped by '+entName(sim.stuck)+': it never opens for him (a shootable, TARGETED or NOT_MONSTERS door), as in game');
+  c.moved=true;c.wantRole='';c.wantGo=false;
+  actPose(now);simPanel();requestDraw();
+}
+// His walk as the game's server runs it, in 50 ms frames (level.frametime), sampled ahead of
+// time so Pause and the clock stay simple. Taken from actor.cpp / actorpath.cpp / g_mmove.cpp:
+//  - he doesn't follow the path's corners: ActorPath::UpdatePos aims him at a point a "look
+//    ahead" further along it (PathLookAhead: a swept area that grows 1024 a frame, to 256^2,
+//    while the way is clear to that point (a 30x30x60 box trace), and shrinks when it isn't),
+//    so he cuts and rounds each corner; MovePath's velocity is that direction at the clip's pace
+//  - his yaw is not the path's: FaceMotion turns him to his velocity, or, when that agrees, to
+//    the way he has moved over the last 375-500 ms (the four 125 ms slots of m_vOriginHistory),
+//    and UpdateAngles turns him there at m_fAngleYawSpeed = 360 degrees a second
+//  - a path ends when he is within 16 units (x and y) of its end; an info_waypoint leg is a
+//    straight walk to it (SetDest), no look-ahead
+// Not here: the walls and steps of MmoveSingle (the viewer doesn't test them), and the
+// long-fall cut-off in PathLookAhead.
+// ---- doors on the way (Door::SpawnTriggerField / FieldTouched / TryOpen / DoorFire, doors.cpp) ----
+// A man doesn't open a door with a key: the group of doors that touch (the master's chain) has
+// a field round it, the group's bounds 60 units bigger in x and y and 8 in z (no field for a door
+// that has "health" or is TARGETED; none that answers only players: NOT_MONSTERS). A man whose
+// box is in the field makes the master try to open (the proximity test against the master's own
+// box, grown by a quarter of his speed in a second, FieldTouched), which runs the same Door::Open
+// as the use key. The doors are solid to him: he runs on the spot against a shut one until it has
+// swung or slid clear. While the master is opening, a man in the field is held to "speed" * 64
+// units a second (the door's speed is 1 / its time: a wood door, 1 second, 64) and his path's
+// look-ahead is cut short (ForceShortLookahead). The doors run on copies of the live ones (the
+// same doorOpen / doorsAdvance), so what the walk plans is what then plays: actDoorFire.
+// Not here: DoorBlocked (a door closing on him), and the walls: he stops at a door, he doesn't
+// slide along it (the viewer tests no walls, so a slide would take him round its ends).
+function actDoorSim(t0){
+  if(!DOORS||!DOORS.size)return null;
+  const reg=new Map(),busy=new Set(),groups=[];
+  for(const[ei,d]of DOORS){
+    const s=Object.assign({},d,{reg:reg,busy:busy,sim:true,mv:d.mv?Object.assign({},d.mv):null});
+    reg.set(ei,s);if(s.mv||s.closeAt!=null)busy.add(s);}
+  for(const[ei,s]of reg){
+    if(s.kind==='script'||s.master!==ei)continue;
+    const mem=s.chain.map(e=>reg.get(e)).filter(Boolean);
+    if(!(s.sf&128)&&!mem.some(x=>doorNum(MAP.ents[x.ei].kvl.health)>0)){
+      const mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+      for(const x of mem)for(let k=0;k<3;k++){mn[k]=Math.min(mn[k],x.o[k]+x.mins[k]);mx[k]=Math.max(mx[k],x.o[k]+x.maxs[k]);}
+      groups.push({m:s,mn:[mn[0]-60,mn[1]-60,mn[2]-8],mx:[mx[0]+60,mx[1]+60,mx[2]+8],resp:!(s.sf&16)});}}
+  const solid=[...reg.values()].filter(s=>s.kind!=='script');
+  // his box (-15 -15 0, 15 15 h) against a door where it is now: his centre in the door's own
+  // frame (turned back about its origin), grown by how far his corners reach along its axes
+  const hit=(s,x,y,z,h)=>{
+    if(s.state==='open'&&!s.mv&&!s.a)return false;     // a START_OPEN door left where the .map has it: open in game
+    const X=doorXfAt(s,s.a),R=X.R,px=x-s.o[0]-X.t[0],py=y-s.o[1]-X.t[1],pz=z-s.o[2]-X.t[2];
+    const lx=R[0]*px+R[3]*py,ly=R[1]*px+R[4]*py,ex=15*(Math.abs(R[0])+Math.abs(R[1]));
+    return lx+ex>s.mins[0]&&lx-ex<s.maxs[0]&&ly+ex>s.mins[1]&&ly-ex<s.maxs[1]&&pz+h>s.mins[2]&&pz<s.maxs[2];};
+  const any=(x,y,z,h)=>{for(const s of solid)if(hit(s,x,y,z,h))return s;return null;};
+  const DS={ev:[],cap:Infinity,blocked:0,hold:null,
+    adv(T){doorsAdvance(T,busy);},
+    // one frame's move, in 3-unit steps (a door is thinner than a frame's step), stopped by a shut door
+    move(x,y,z,dx,dy){
+      this.hold=null;if(any(x,y,z,60))return[x+dx,y+dy];       // already in one (it closed on him): free
+      const n=Math.max(1,Math.ceil(Math.hypot(dx,dy)/3)),sx=dx/n,sy=dy/n;
+      for(let i=0;i<n;i++){const d=any(x+sx,y+sy,z,60);if(d){this.hold=d;break;}x+=sx;y+=sy;}
+      return[x,y];},
+    // after the move: the fields he is in. Returns true when he is in one (ForceShortLookahead)
+    post(x,y,z,vx,vy,tick){
+      const T=this.T0+(tick+1)*50;let touched=false;
+      this.cap=Infinity;
+      for(const g of groups){
+        if(!g.resp||x+15<g.mn[0]||x-15>g.mx[0]||y+15<g.mn[1]||y-15>g.mx[1]||z+94<g.mn[2]||z>g.mx[2])continue;
+        touched=true;const m=g.m;
+        if(m.state==='opening')this.cap=Math.min(this.cap,64/m.secs);
+        if(((m.sf&32)||(m.state!=='open'&&!(m.sf&64)))&&(m.state==='open'||m.state==='opening'))continue;
+        const dist=Math.hypot(vx,vy)*0.25,c=[];
+        const X=doorXfAt(m,m.a),mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+        for(let k=0;k<8;k++){const p=xfP(X,[m.o[0]+((k&1)?m.maxs[0]:m.mins[0]),m.o[1]+((k&2)?m.maxs[1]:m.mins[1]),m.o[2]+((k&4)?m.maxs[2]:m.mins[2])]);
+          for(let j=0;j<3;j++){mn[j]=Math.min(mn[j],p[j]);mx[j]=Math.max(mx[j],p[j]);}}
+        if(x-15>mx[0]+dist||y-15>mx[1]+dist||z>mx[2]||x+15<mn[0]-dist||y+15<mn[1]-dist||z+94<mn[2])continue;
+        // TryOpen, then DoorFire
+        if((m.sf&33)&&(m.state==='open'||m.state==='opening')){m.sf&=~1;doorClose(m,T);this.ev.push({tick:tick+1,ei:m.ei,close:true,p:[x,y,z]});}
+        else{doorOpen(m,T,[x,y,z]);this.ev.push({tick:tick+1,ei:m.ei,close:false,p:[x,y,z]});}
+        doorsAdvance(T,busy);}
+      return touched;},
+    // a stretch of 20 seconds against a door that nothing is moving or about to move: he stays there
+    stuck(){if(this.hold){if(++this.blocked>400&&!busy.size)return true;}else this.blocked=0;return false;},
+    T0:t0};
+  return DS;
+}
+// a door event the plan made, played on the live doors at its own time
+function actDoorFire(e,t){
+  const m=DOORS&&DOORS.get(e.ei);if(!m)return;
+  if(e.close){m.sf&=~1;doorClose(m,t);}else doorOpen(m,t,e.p);
+  doorBtnRender();requestDraw();
+}
+function actSimRoute(R,speed,yaw0,t0){
+  const DT=0.05,MAXT=12000,pts=R.pts,legs=R.legs&&R.legs.length?R.legs:[{e:pts.length-1,straight:false}];
+  const DS=actDoorSim(t0||performance.now());let halt=false,la=4096;
+  const px=[],py=[],pz=[],yw=[],nx=[];
+  let x=pts[0][0],y=pts[0][1],z=pts[0][2],yaw=((yaw0%360)+360)%360,want=yaw,ach=true,tick=0,ch=0,vx=0,vy=0;
+  const hist=[[x,y],[x,y],[x,y],[x,y]];
+  const sample=k=>{px.push(x);py.push(y);pz.push(z);yw.push(yaw);nx.push(k);};
+  const think=()=>{const k=Math.floor(tick*50/125)%4;if(k!==ch){ch=k;hist[k>=1?k-1:3]=[x,y];}};
+  const face=()=>{
+    if(vx*vx+vy*vy>1){let dx=vx,dy=vy;const h=hist[ch],ex=x-h[0],ey=y-h[1];
+      if(ex*ex+ey*ey>=1&&ex*dx+ey*dy>0){dx=ex;dy=ey;}
+      want=((Math.atan2(dy,dx)*180/Math.PI)%360+360)%360;ach=false;}
+    if(!ach){let e=((want-yaw)%360+540)%360-180;const d=360*DT;
+      if(e<-d)yaw-=d;else if(e>d)yaw+=d;else{yaw+=e;ach=true;}
+      yaw=((yaw%360)+360)%360;}};
+  const clear=(end)=>{try{const t=pgTrace([x,y,z+32],[end[0],end[1],end[2]+32],[-15,-15,0],[15,15,60],false);return t.f>=1&&!t.startsolid;}catch(_e){return true;}};
+  sample(1);
+  // one frame's step of (vx, vy): the doors run up to it, he is held to a door's opening pace
+  // and stopped by a shut one; then the fields he is in (a leg's look-ahead is cut short in one)
+  const apply=()=>{
+    if(!DS){x+=vx*DT;y+=vy*DT;return;}
+    DS.adv(DS.T0+tick*50);
+    if(DS.cap<Infinity){const sp=Math.hypot(vx,vy);if(sp>DS.cap){vx*=DS.cap/sp;vy*=DS.cap/sp;}}
+    const r=DS.move(x,y,z,vx*DT,vy*DT);x=r[0];y=r[1];
+    if(DS.post(x,y,z,vx,vy,tick))la=4096;
+    if(DS.stuck())halt=true;};
+  let a=0;
+  for(const leg of legs){
+    const e=leg.e;if(e<=a)continue;
+    if(leg.straight){
+      const T=pts[e];
+      while(tick<MAXT&&!halt){
+        think();
+        const dx=T[0]-x,dy=T[1]-y,d=Math.hypot(dx,dy),step=speed*DT;
+        if(d<=step||d<1){x=T[0];y=T[1];z=T[2];vx=vy=0;tick++;sample(e);break;}
+        vx=dx/d*speed;vy=dy/d*speed;apply();z+=(T[2]-z)*step/d;
+        face();tick++;sample(e);}
+    }else{
+      const n=e-a+1,P=[];
+      for(let i=0;i<n;i++)P.push({p:pts[e-i].slice(),dist:0});
+      for(let i=0;i<n-1;i++)P[i].dist=Math.hypot(P[i].p[0]-P[i+1].p[0],P[i].p[1]-P[i+1].p[1]);
+      let pp=n-1,chg=true,hc=false,end=[0,0,0];la=4096;
+      // PathLookAhead: the point `area` along the path, as the area swept between it and him
+      const look=(total)=>{
+        let area=total,cp=pp,pos=P[cp].p,t=0;
+        for(;;){
+          if(cp===0){end=P[0].p.slice();hc=true;return area;}
+          cp--;
+          let nx0=P[cp].p[1]-pos[1],ny0=pos[0]-P[cp].p[0];const l=Math.hypot(nx0,ny0);if(l>0){nx0/=l;ny0/=l;}
+          t=Math.abs((P[cp].p[0]-x)*nx0+(P[cp].p[1]-y)*ny0)*P[cp].dist;
+          if(t>=area)break;
+          area-=t;pos=P[cp].p;}
+        t=area/t;const s=1-t;
+        end=[pos[0]*s+P[cp].p[0]*t,pos[1]*s+P[cp].p[1]*t,pos[2]*s+P[cp].p[2]*t];hc=false;return 0;};
+      while(tick<MAXT&&!halt){
+        think();
+        // ActorPath::UpdatePos
+        let dx,dy;
+        if(pp===0){end=P[0].p.slice();chg=true;hc=true;dx=end[0]-x;dy=end[1]-y;}
+        else{
+          if(look(la)>la-4096||clear(end)){la+=1024;if(la>65536)la=65536;chg=true;}
+          else{if(chg){la-=2048;chg=false;}else la/=2;if(la<4096)la=4096;look(la);}
+          dx=end[0]-x;dy=end[1]-y;}
+        const dl=Math.hypot(dx,dy),ux=dl>1e-9?dx/dl:0,uy=dl>1e-9?dy/dl:0;
+        let cp=pp,prev=0,cur=0;
+        for(;cp>=0;cp--){cur=(P[cp].p[0]-x)*ux+(P[cp].p[1]-y)*uy;if(cur>=0)break;prev=cur;}
+        if(cp<0){pp=0;}
+        else if(cp!==pp){pp=cp+1;const tt=prev/(prev-cur),s=1-tt;
+          for(let k=0;k<3;k++)P[pp].p[k]=P[pp].p[k]*s+P[cp].p[k]*tt;
+          P[cp].dist*=s;}
+        // Complete
+        if(hc&&Math.abs(x-P[0].p[0])<16&&Math.abs(y-P[0].p[1])<16){vx=vy=0;break;}
+        vx=ux*speed;vy=uy*speed;apply();
+        // height: along the segment he is on
+        const i0=Math.min(pp,n-2);
+        if(i0>=0){const A=P[i0+1].p,B=P[i0].p,sx=B[0]-A[0],sy=B[1]-A[1],sl=sx*sx+sy*sy,
+          uu=sl>1e-9?Math.max(0,Math.min(1,((x-A[0])*sx+(y-A[1])*sy)/sl)):1;z=A[2]+(B[2]-A[2])*uu;}
+        face();tick++;sample(Math.max(a+1,e-pp));}
+    }
+    a=e;if(halt)break;
+  }
+  return{n:px.length,DT:DT,px:px,py:py,pz:pz,yw:yw,nx:nx,ev:DS?DS.ev:[],stuck:halt&&DS&&DS.hold?DS.hold.ei:-1};
+}
+// Run to / Walk to: the next click picks the goal (a node, any entity, or a spot)
+function actPickStart(role){
+  if(!ACT.cur||ACT.cur.go)return;
+  if(ACT.pick&&ACT.pick.role===role){actPickCancel();return;}
+  ACT.pick={role:role};
+  flash((role==='run'?'Run':'Walk')+' to: click a node, an entity or a spot on the map (Esc cancels)');
+  simPanel();
+}
+function actPickCancel(){if(!ACT.pick)return;ACT.pick=null;simPanel();flash('Cancelled');}
+function actPickClick(x,y){
+  const P=ACT.pick;if(!P)return false;
+  let g=null;
+  const mi=modPick(x,y);
+  if(mi>=0){const m=MOD.ents[mi];g={o:modOrigin(m),cls:modCls(m),name:modName(m)};}
+  else{
+    const h=hitInfo(pickAt(x,y),x,y);
+    if(h&&h.ent>0&&!isWorldlike(h.ent)){
+      const e=MAP.ents[h.ent],X=ENTS[h.ent],o=parseVec(e.kvl.origin,3)||(X&&(X.origin||X.anchor));
+      if(o)g={o:o.slice(),cls:String(e.cls||'').toLowerCase(),name:entName(h.ent)};}
+    if(!g&&h&&h.point)g={o:h.point.slice(),cls:'',name:'the spot you clicked'};}
+  if(!g){flash('Click an entity or a spot on the map (Esc cancels)');return true;}
+  ACT.pick=null;
+  actGo(P.role,[g],g.name);
+  return true;
+}
+// ---- drawing --------------------------------------------------------------------------------
+// light the grid gives at a place, as simInst takes it
+function actLight(p){
+  const G=lightGrid();let c=[255,255,255];
+  if(G){const v=lgFast(G,p).slice(0,3).map(x=>x*2),m=Math.max(v[0],v[1],v[2]);c=m>255?v.map(x=>x*255/m):v;}
+  return c;
+}
+// one instance of R: M turns its space into the world's (3x3, rows), p is where it sits
+function actInst(R,M,p,c){
+  const d=new Float32Array([M[0],M[1],M[2],p[0], M[3],M[4],M[5],p[1], M[6],M[7],M[8],p[2],
+    0, c[0]/255,c[1]/255,c[2]/255, -1, -1, 0]);
+  gl.bindBuffer(gl.ARRAY_BUFFER,R.instBuf);gl.bufferData(gl.ARRAY_BUFFER,d,gl.DYNAMIC_DRAW);R.n=1;
+}
+// the actor's pose now: bones from the playing clip (else the idle), the mesh skinned, the
+// weapon on his hand, both placed on the node
+function actPose(now){
+  const c=ACT.cur;if(!c||!gl)return false;
+  const b=c.b;if(b.state!=='ready'||!b.H||!b.Wp)return false;
+  if(c.pauseAt!=null)now=c.pauseAt;           // Pause: the clock stands still
+  let over=null,running=false,hand=0,mv=[0,0,0],pos=c.o,yaw=c.yaw;
+  if(c.go){
+    const g=c.go,S=g.sim,t=Math.max(0,(now-g.t0)/1000),f=Math.min(S.n-1,t/S.DT),i=Math.floor(f),j=Math.min(S.n-1,i+1),u=f-i;
+    g.tl=now;
+    while(g.evi<S.ev.length&&S.ev[g.evi].tick<=i){const e=S.ev[g.evi++];actDoorFire(e,g.t0+e.tick*S.DT*1000);}   // the doors he opens, at their frame
+    pos=[S.px[i]+(S.px[j]-S.px[i])*u,S.py[i]+(S.py[j]-S.py[i])*u,S.pz[i]+(S.pz[j]-S.pz[i])*u];
+    yaw=lerpAng(S.yw[i],S.yw[j],u);g.yaw=yaw;
+    over=actFrameAt(g.rec,t%g.dur);running=true;g.cur=pos;g.nxt=S.nx[i];
+    if(f>=S.n-1){c.o=pos;c.yaw=yaw;c.go=null;c.t0=now;simPanel();return actPose(now);}   // arrived: he idles there
+  }else if(c.play){
+    const t=(now-c.play.t0)/1000,pa=actPoseAt(c.play.tl,t);
+    if(pa){over=pa.p;hand=pa.h;mv=pa.m;}
+    running=t<c.play.tl.total;
+    if(!running&&c.play.done!==true){c.play.done=true;simPanel();}
+  }else if(b.idleTL&&b.meta.idle){
+    over=actFrameAt(b.meta.idle,((now-c.t0)/1000)%Math.max(0.05,(b.meta.idle.frames.length-1)*(b.meta.idle.frameTime||0.05)));
+  }
+  const w=actWorld(b.sk,over);
+  actSkin(b,w);
+  gl.bindBuffer(gl.ARRAY_BUFFER,b.H.vbP);gl.bufferSubData(gl.ARRAY_BUFFER,0,b.out);
+  const ax=anglesAxis([0,yaw,0]),Rn=[ax[0][0],ax[1][0],ax[2][0], ax[0][1],ax[1][1],ax[2][1], ax[0][2],ax[1][2],ax[2][2]];
+  // the node moved by what the clip has stepped him (turned to his yaw): he leans out round the corner
+  const hs0=b.H.M.sc||1,mw=actMvec(Rn,[mv[0]*hs0,mv[1]*hs0,mv[2]*hs0]),po=[pos[0]+mw[0],pos[1]+mw[1],pos[2]+mw[2]];
+  c.at=po.slice();c.cyaw=yaw;                 // where he is now: Fly to and Follow go there
+  const lt=actLight(po);
+  actInst(b.H,Rn,po,lt);
+  const tg=(hand&&b.tagL>=0)?b.tagL:b.tag;
+  if(tg>=0){
+    // the weapon: its mesh is in its own space, scaled by its own load_scale; the tag's
+    // matrix (the main hand's, or the other's while a clip has it there) turns it into the
+    // human's space and the tag's position (the human's scale applied) places it.
+    // ATT_BASE_ANG of the Model Viewer's attachments is the identity.
+    const hs=b.H.M.sc||1,tp=actMvec(Rn,[w.T[tg][0]*hs,w.T[tg][1]*hs,w.T[tg][2]*hs]);
+    actInst(b.Wp,actMmul(Rn,w.R[tg]),[po[0]+tp[0],po[1]+tp[1],po[2]+tp[2]],lt);
+  }else b.Wp.n=0;
+  return running||!c.play;
+}
+// each frame: true when the picture changed (the idle's pose every ACT_IDLE_DT ms)
+function actTick(now){
+  const c=ACT.cur;if(!c)return false;
+  const r=actTick2(now,c);
+  if(ACT.follow&&c.at){actFollowCam(c);return true;}   // after his pose, so the camera has his latest spot
+  return r;
+}
+// Pause: stop his clocks at this moment; Resume moves every start time on by the pause
+function actPause(){
+  const c=ACT.cur;if(!c)return;
+  const now=performance.now();
+  if(c.pauseAt==null){c.pauseAt=now;ACT.pick=null;}
+  else{const d=now-c.pauseAt;c.pauseAt=null;
+    if(c.go){c.go.t0+=d;c.go.tl+=d;}
+    if(c.play)c.play.t0+=d;
+    c.t0+=d;}
+  simPanel();requestDraw();
+}
+// Follow: the game's third-person view (CG_OffsetThirdPersonView): the eye at his head (the
+// origin + the 82 standing view height), 18 up (cg_cameraheight), back 120 (cg_cameradist)
+// along the view angles, 2 down (cg_cameraverticaldisplacement), the camera a 10-unit box
+// traced from his head so a wall keeps it out; when that leaves it under 40 units from his
+// head (up against a wall) the pitch is cranked up 2 degrees at a time until it is 40 away,
+// so it ends up over him. He looks level, along his heading.
+function actCamCalc(p,yaw){
+  const H=[p[0],p[1],p[2]+82],ref=[H[0],H[1],H[2]+18],mn=[-5,-5,-5],mx=[5,5,5];
+  const place=a=>{const f=anglesAxis([a[0],a[1],0])[0],n=[ref[0]-120*f[0],ref[1]-120*f[1],ref[2]-120*f[2]-2];
+    try{const t=pgTrace(H,n,mn,mx,false);return t.startsolid&&t.allsolid?H.slice():t.end.slice();}catch(_e){return n;}};
+  const dl=q=>{const d=[q[0]-H[0],q[1]-H[1],q[2]-H[2]];return d;};
+  let ang=[0,yaw],pos=place(ang),d=dl(pos);
+  if(d[2]<40)d[2]=0;
+  if(Math.hypot(d[0],d[1],d[2])<40){
+    const orig=ang.slice();
+    while(ang[0]<90){ang[0]+=2;pos=place(ang);d=dl(pos);if(d[2]<0)d[2]=0;
+      if(Math.hypot(d[0],d[1],d[2])>=40){ang[0]=0.25*ang[0]+0.75*orig[0];break;}}
+    if(ang[0]>90)ang[0]=orig[0];}
+  return{pos:pos,pitch:ang[0],yaw:ang[1]};
+}
+function actFollowCam(c){
+  const v=actCamCalc(c.at,c.cyaw!=null?c.cyaw:c.yaw);
+  flyAnim=null;cam.pos=v.pos;cam.yaw=((v.yaw%360)+360)%360;cam.pitch=v.pitch;cam.roll=0;camChanged();
+}
+function actTick2(now,c){
+  if(c.pauseAt!=null)return false;
+  if(c.go){actPose(now);return true;}
+  if(c.play&&c.play.done!==true){actPose(now);return true;}
+  if(now-c.lastIdle<ACT_IDLE_DT)return false;
+  c.lastIdle=now;
+  if(c.play){return false;}                  // finished: the last frame stays until Reset
+  return actPose(now);
+}
+function actDrawn(){
+  const c=ACT.cur;if(!c||!c.b.H)return null;
+  return c.b.Wp&&c.b.Wp.n?[c.b.H,c.b.Wp]:[c.b.H];
+}
+// ---- the panel ------------------------------------------------------------------------------
+function actPanel(f){
+  const host=simHost(),c=ACT.cur;
+  if(host&&!ACT.lists&&!ACT.asked){ACT.asked=true;if(!simPost('mohaa-sim-actors'))ACT.asked=false;}
+  // a different node (or none) than the actor's: he goes
+  if(c&&(!f||f.key!==c.key)){ACT.cur=null;ACT.want=null;ACT.pick=null;ACT.follow=false;
+    for(const b of ACT.built.values()){if(b.H)b.H.n=0;if(b.Wp)b.Wp.n=0;}requestDraw();}
+  const cc=ACT.cur,r=f?actRole(f.sf,f.cls):{role:null,note:''};
+  if(cc&&f&&!cc.go&&!cc.moved){cc.o=actPlace(f);cc.yaw=actYaw(f,cc);}   // the node moved: so does he (until he runs)
+  const b=cc&&cc.b,busyW=ACT.want&&ACT.built.get(ACT.want),building=!!busyW&&busyW.state==='building';
+  const why=b&&r.role?b.meta.roles[r.role]:'';
+  $('bActSpawn').disabled=!host||!ACT.lists||building;
+  $('bActSpawn').textContent=cc?'Respawn':'Spawn';
+  $('bActSim').disabled=!(cc&&r.role&&!why&&!(cc.play&&cc.play.done!==true)&&!cc.wantRole&&cc.pauseAt==null);
+  // Run / Walk: along the target chain, or to the next click
+  const chain=f?actChain(f):[],idle=!!cc&&!cc.go&&!cc.wantRole&&!(cc.play&&cc.play.done!==true)&&cc.pauseAt==null;
+  // once he has run or walked (to the end of a path, or anywhere) the path can't be started again
+  // from where he stands: it would send him back through the walls; Respawn first
+  $('bActRunPath').disabled=$('bActWalkPath').disabled=!(idle&&chain.length&&!cc.moved);
+  $('bActRunTo').disabled=$('bActWalkTo').disabled=!idle;
+  $('bActMove').disabled=!idle;
+  if(!idle)$('actMoveMenu').style.display='none';
+  $('bActMove').classList.toggle('on',!!ACT.pick);
+  $('bActTrace').classList.toggle('on',TRACEPATH);
+  $('bActRunTo').classList.toggle('on',!!ACT.pick&&ACT.pick.role==='run');
+  $('bActWalkTo').classList.toggle('on',!!ACT.pick&&ACT.pick.role==='walk');
+  for(const id of['bActRunPath','bActWalkPath'])$(id).title=(id==='bActRunPath'?'Run':'Walk')+' along this node\'s "target" chain: to its target, then that one\'s, and so on'+(chain.length?' ('+chain.length+' stop'+(chain.length===1?'':'s')+')':': it has no target, so there is nothing to follow');
+  $('bActFly').disabled=!cc;
+  $('bActPause').disabled=!cc;$('bActPause').textContent=cc&&cc.pauseAt!=null?'Resume':'Pause';
+  $('bActPause').classList.toggle('on',!!cc&&cc.pauseAt!=null);
+  $('bActFollow').disabled=!cc;$('bActFollow').classList.toggle('on',!!ACT.follow&&!!cc);
+  let s='';
+  if(!host)s='Actors need the Map Viewer: it builds them from the paks';
+  else if(ACT.listErr&&!ACT.lists)s=ACT.listErr;
+  else if(!ACT.lists)s='Asking the launcher for the paks\' humans and weapons…';
+  else if(building)s='Building '+actLabel(busyW.hum)+' with '+actLabel(busyW.wpn)+'…';
+  else if(busyW&&busyW.state==='fail')s='Can\'t build him: '+busyW.why;
+  if(f&&!s){
+    s=cc?(cc.play?(cc.play.done===true?'Finished: Respawn starts again':'Playing '+cc.play.seq.join(' › ')):
+      cc.wantRole?'Building the '+r.note+' animation…':'Idle on the node.'):'Spawn stands him on the node.';
+    s+='\n'+r.note;
+    if(cc&&cc.go)s=(cc.plan.role==='walk'?'Walking':'Running')+' to '+cc.plan.label+'…';
+    else if(cc&&cc.wantRole&&cc.wantGo)s='Building the '+cc.plan.role+' animation…';
+    else if(cc&&cc.moved&&cc.plan)s='Arrived at '+cc.plan.label+': Respawn puts him back on the node.';
+    if(ACT.pick)s+='\nClick a node, an entity or a spot to '+ACT.pick.role+' to (Esc cancels)';
+    if(cc&&cc.plan){const R=cc.plan.R;
+      s+='\n'+(R.nodes?'Over '+R.nodes+' path node'+(R.nodes===1?'':'s'):'')+(R.nodes&&R.straight?' and ':'')+(R.straight?R.straight+' straight leg'+(R.straight===1?'':'s')+' to a waypoint (the game doesn\'t search for those, and a wall would stop him: the viewer doesn\'t test it).':'');
+      if(cc.plan.fallback)s+='\nThis clip carries no movement, so he goes at '+ACT_SPEED[cc.plan.role]+' units a second';
+      if(R.fail)s+='\nPath not found: '+R.fail+'. In the game he stays where he is (g_patherror prints it), he does not run through the walls';}
+    if(why)s+='\nNo animation: '+why;
+    if(r.role==='lowwall'||r.role==='highwall')s+='\nSpearhead / Breakthrough only: the original game has no such node.'+((parseFloat(f.kvl.low_wall_arc)||0)>0?' He fires within '+f.kvl.low_wall_arc+' degrees either side of the node\'s yaw':' No "low_wall_arc" key, so the arc is 0 degrees: he only fires straight ahead of the node\'s yaw');
+    if(r.role&&(f.sf&(16|32|128|256))&&f.kvl.angle==null&&f.kvl.angles==null)s+=f.kvl.target&&f.yaw!=null?'\nThis node has no angle: he faces its target, whatever the wall':'\nThis node has no angle: he turns to face the camera as it was when he spawned, whatever the wall';
+    if(cc&&cc.pauseAt!=null)s='Paused: Resume carries on\n'+s;
+    s+='\nHe is removed when this node is deselected (Respawn starts him again).';
+  }
+  $('actSum').textContent=s;
+}
+function actInit(){
+  if(!$('bActSpawn'))return;
+  $('bActSpawn').onclick=actSpawn;$('bActSim').onclick=actSimulate;
+  $('bActPause').onclick=actPause;
+  $('bActFollow').onclick=()=>{if(!ACT.cur){flash('Spawn him first');return;}
+    ACT.follow=!ACT.follow;if(ACT.follow){flyAnim=null;SIM.camT=0;}simPanel();requestDraw();
+    flash(ACT.follow?'Follow on: the game\'s third-person camera (moving the camera by hand turns it off)':'Follow off');};
+  // Fly to: the camera goes to him (where he is now), keeping its heading and looking at his chest
+  $('bActFly').onclick=()=>{const c=ACT.cur;if(!c){flash('Spawn him first');return;}
+    const p=c.at||c.o,t=[p[0],p[1],p[2]+36],a=camAxes(),D2=Math.PI/180;
+    let dir=vnorm(vsub(t,cam.pos))||a.f;
+    const yaw=Math.atan2(dir[1],dir[0])*180/Math.PI,pitch=-Math.asin(Math.max(-1,Math.min(1,dir[2])))*180/Math.PI;
+    const f=[Math.cos(pitch*D2)*Math.cos(yaw*D2),Math.cos(pitch*D2)*Math.sin(yaw*D2),-Math.sin(pitch*D2)];
+    flyTo([t[0]-f[0]*120,t[1]-f[1]*120,t[2]-f[2]*120],yaw,pitch);};
+  const mm=$('actMoveMenu');
+  $('bActMove').onclick=e=>{e.stopPropagation();mm.style.display=mm.style.display==='flex'?'none':'flex';};
+  mm.addEventListener('click',()=>{mm.style.display='none';});
+  document.addEventListener('click',e=>{if(!$('actMoveWrap').contains(e.target))mm.style.display='none';});
+  const chainOf=()=>{const f=actFocus();return f&&ACT.cur&&!ACT.cur.moved?actChain(f):[];};
+  $('bActRunPath').onclick=()=>{const l=chainOf();if(l.length)actGo('run',l,'the end of its target chain ('+l.length+' stop'+(l.length===1?'':'s')+')');};
+  $('bActWalkPath').onclick=()=>{const l=chainOf();if(l.length)actGo('walk',l,'the end of its target chain ('+l.length+' stop'+(l.length===1?'':'s')+')');};
+  $('bActRunTo').onclick=()=>actPickStart('run');$('bActWalkTo').onclick=()=>actPickStart('walk');
+  const ch=()=>{const H=$('actHum'),W=$('actWpn');ACT.hum=H.value;ACT.wpn=W.value;LS.set(ACT_LS_H,H.value);LS.set(ACT_LS_W,W.value);
+    H.blur();W.blur();if(ACT.cur&&actFocus())actSpawn();};
+  $('bActTrace').onclick=()=>{TRACEPATH=!TRACEPATH;$('bActTrace').classList.toggle('on',TRACEPATH);requestDraw();
+    flash(TRACEPATH?'Trace path on: the path he follows is drawn in blue and red':'Trace path off');};
+  $('actHum').onchange=ch;$('actWpn').onchange=ch;
+  ACT.hum=LS.get(ACT_LS_H)||'';ACT.wpn=LS.get(ACT_LS_W)||'';
+  actFill();
+}
 // ---- drawing: the path's curve (while the section shows) and the box ----------------------
+// ai_showpath, as PathSearch::ShowNodes draws it (navigate.cpp) while he runs a path: the whole
+// way from start to end in blue, the path still to go in red (each point 32 units up, over the
+// green routes that ai_showroutes draws), and in yellow the line from him to his next point
+// (ai_showpath 3). The game draws it for any ai_showpath; here it shows while Trace path is on
+// (TRACEPATH: on with AI routes, and it can be turned off by itself).
+function actShowPath(){
+  const c=ACT.cur,g=c&&c.go;
+  if(!g||!TRACEPATH||!g.cur)return null;
+  const up=p=>[p[0],p[1],p[2]+32],out=[],P=g.pts;
+  out.push([P[0],P[P.length-1],[0,0,1,1]]);
+  const me=up(g.cur);let prev=me;
+  for(let i=g.nxt;i<P.length;i++){const q=up(P[i]);if(i===g.nxt)out.push([me,q,[1,1,0,1]]);out.push([prev,q,[1,0,0,1]]);prev=q;}
+  return out;
+}
 function drawSim(vp){
   const ch=SIM.run?SIM.rc:(($('simSect')&&$('simSect').style.display!=='none')?SIM.chain:null);
-  if(!gl||(!ch&&!SIM.run))return;
+  const ap=actShowPath();
+  if(!gl||(!ch&&!SIM.run&&!ap))return;
   const T=[],L=[],Lx=[];
   const lin=(A,p,q,c)=>A.push(p[0],p[1],p[2],q[0],q[1],q[2],c[0],c[1],c[2],c[3],q[0],q[1],q[2],p[0],p[1],p[2],c[0],c[1],c[2],c[3]);
+  if(ap)for(const[p,q,c]of ap){lin(L,p,q,c);lin(Lx,p,q,[c[0],c[1],c[2],0.3]);}
   const tri=(a,b,c,col)=>{for(const p of[a,b,c])T.push(p[0],p[1],p[2],p[0],p[1],p[2],col[0],col[1],col[2],col[3]);};
   if(ch&&ch.fr.curve.length>1){const cv=ch.fr.curve,c=[1,0.62,0.12,0.95],cx=[1,0.62,0.12,0.3];
     for(let i=1;i<cv.length;i++){lin(L,cv[i-1],cv[i],c);lin(Lx,cv[i-1],cv[i],cx);}
@@ -10592,6 +11813,7 @@ async function main(){
     modInit();
     setTimeout(modRecoverAsk,500);
     simInit();
+    actInit();
     cvarCountRender();
     loadTextures();
     resize();

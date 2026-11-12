@@ -27,7 +27,7 @@
 #        with its code (the RUN window then stays open). Appends to run_NAME.log.
 #
 #    python mohaa_envcheck.py menu
-#        The RUN launcher's opening menu: which program to start. Up / Down and Enter,
+#        The RUN launcher's opening menu: which program to start. Up / Down and Enter (or Space),
 #        or 1 / 2 at once; Q, Esc or Ctrl+C quits. Exit 11 = Map Viewer, 12 = Model
 #        Viewer, 10 = quit (codes clear of Python's own 1 and 2 for an error).
 #
@@ -55,7 +55,7 @@ except Exception:                               # a damaged install: no log file
 # ==============================================================================
 #  Constants
 # ==============================================================================
-VERSION = "1.0.001"
+VERSION = "1.0.003"
 # (pip requirement, distribution name, minimum version, import check run in a NEW process)
 # Pillow's floor is a SECURITY floor (see docs/SECURITY.md); importing PIL._imaging catches
 # a compiled extension built for a different Python (the libs folder outlived a Python update).
@@ -526,7 +526,7 @@ MENU_HEAD = [
     " files or from disk, move around, and see what they are made of.",
     "",
 ]
-MENU_HINT = " Up / Down and Enter, or press 1 or 2.  Q or Esc quits."
+MENU_HINT = " Up / Down and Enter or Space, or press 1 or 2.  Q or Esc quits."
 
 
 def _vt_on():
@@ -560,7 +560,7 @@ def _menu_key_reader():
             if ch in ("\x00", "\xe0"):                 # arrows and the other special keys
                 ch2 = msvcrt.getwch()
                 return {"H": "up", "P": "down"}.get(ch2)
-            if ch in ("\r", "\n"):
+            if ch in ("\r", "\n", " "):               # Space works as Enter
                 return "enter"
             if ch in ("\x1b", "\x03") or ch.lower() == "q":
                 return "quit"
@@ -581,7 +581,7 @@ def _menu_key_reader():
                 return "quit"
             seq = os.read(fd, 2)
             return {b"[A": "up", b"OA": "up", b"[B": "down", b"OB": "down"}.get(seq)
-        if ch in (b"\r", b"\n"):
+        if ch in (b"\r", b"\n", b" "):               # Space works as Enter
             return "enter"
         if ch in (b"q", b"Q", b"\x03", b""):
             return "quit"

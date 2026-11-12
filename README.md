@@ -51,8 +51,8 @@ Extract the `mohaa-model-viewer-main` folder anywhere on your PC.
 
 * Start either program with **`MOH Model-Map Viewer (Windows x86-x64).bat`**. A menu asks which one:
   press **1** for the **Map Viewer** (`.bsp` / `.map` / `.bak`) or **2** for the **Model
-  Viewer** (`.skd` / `.tik`), or move with Up / Down and press Enter (the Map Viewer is
-  selected at first); Q or Esc quits. Drag a file onto the `.bat` to skip the menu and
+  Viewer** (`.skd` / `.tik`), or move with Up / Down and press Enter or Space (the Map
+  Viewer is selected at first); Q or Esc quits. Drag a file onto the `.bat` to skip the menu and
   open it straight away in the program for its kind.
 
   Before opening the program, it:
@@ -107,7 +107,7 @@ brew install python-tk                    # macOS (or use the python.org install
 Then start either program with **`MOH Model-Map Viewer (Linux - Mac OS).sh`**, from a terminal
 (Konsole, GNOME Terminal, macOS Terminal ...) or a Linux file manager (it opens a terminal
 for itself if it has none). The same menu asks which one: **1** Map Viewer, **2** Model
-Viewer, or Up / Down and Enter. Give it a file to skip the menu:
+Viewer, or Up / Down and Enter (or Space). Give it a file to skip the menu:
 
 ```sh
 ./"MOH Model-Map Viewer (Linux - Mac OS).sh"                     # the menu
@@ -313,6 +313,19 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
   one is picked), **Reset** stops it, **Follow** rides along behind it (with **Eye view**
   too, at its own angles, banking with it), and **camera zoom** (or the mouse wheel)
   sets how far behind. Move or edit the nodes in Modify and simulate again to see the change.
+  Select an `info_pathnode` (or an `info_waypoint`) instead and the same section stands a
+  **Human** (choose any actor model) holding a **Weapon** (any weapon, no grenades) on the
+  node, dropped to the floor and facing its angle, idling (**Spawn**). If the node has
+  spawnflags (CORNER_LEFT, CORNER_RIGHT, CRATE, SNIPER, DUCK, or Spearhead's and
+  Breakthrough's LOW_WALL_ARC), **Simulate** plays the animation the game plays there (wall
+  left / right with its sideways lean, crate, aiming, crouching), so you can see whether a
+  wall or crate is in the way and move the node. **Move** runs or walks him along the node's
+  `target` chain, or to any node, entity or spot you click next, routed over the AI's path
+  nodes the way the game routes a soldier (a waypoint is walked to in a straight line), and
+  doors open for him as they do for the AI; **Trace path** draws his route. **Pause**, **Fly
+  to** and **Follow** (the game's third-person camera) help watch him, and **Respawn** puts
+  him back on the node. The human and weapon are built from the paks only when chosen, each
+  animation the first time it's needed. Needs the Map Viewer (not a bare browser).
 * **Modify** (above Find): add entities, most of all AI path nodes: Add, then click on the
   map where it goes. A new node is drawn
   see-through until saved, its parameters edit as entity-lump text (applied as you type),
@@ -323,7 +336,10 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
   never writes over the original. **Save as .map** and **Copy** are there too. Closing the
   viewer with Esc while changes aren't saved asks first: Save as .bsp, Save as .map,
   Discard changes or Cancel. Selecting one of the map's own point entities (a broken
-  path node, say) lists it in Modify too, to edit, move or trim it the same way. **Make path**
+  path node, say) lists it in Modify too, to edit, move or trim it the same way, or to
+  **Delete** it from the saved copy (marked DEL until you save; Restore or Undo puts it
+  back). **Spawnflags** ticks the selected entity's spawnflags from its class's list (for
+  a path node DUCK, COVER, CORNER_LEFT, CRATE ...). **Make path**
   sets the selected entity's `target` by clicking the next one (waypoints, spline paths,
   script origins), drawn as a target link. **Grid** (+) draws a see-through 3D grid of MOHRadiant's sizes (1 to 512)
   that Add and Move snap to.
@@ -348,7 +364,9 @@ click away: its targetname, origin, `setsize`, targets and ready-to-paste script
   `setsize` (taken from its brushes for triggers and doors) and ready-to-paste script
   lines. `Alt+click` selects everything of the same kind, `Ctrl+Alt+click` a whole path
   (a node's `target` chain, before and after it), and `Ctrl+Shift+click` shows a face's
-  texture.
+  texture. The Selection panel's **Same spawnflags** selects every entity of that class
+  with the same spawnflags (every CRATE node, say), and **Same error** every path node
+  with the same AI path problem (no paths, one-way, no angle, 48 paths full ...).
 * **Find** any class, targetname, key or texture (`Ctrl+F`), with `"exact"`, `$targetname`,
   `key: value`, `entity 25`, `( x y z )` and `-term` searches, or browse every class and
   texture the map uses; Shift+click a green (selected) row to deselect just that row.
@@ -395,6 +413,7 @@ copy a numbered folder's contents over the program folder.
 | Scratch space | a `mohaaview_*` folder in your system temp folder | a `mohaamap_*` folder in your system temp folder |
 | Program logs | `output/logs/mohaa_launcher.log` and `mohaa_view.log` (page builds) | `output/logs/mohaa_map_launcher.log` and `mohaa_map_view.log` (page builds) |
 | Settings backups | `mohaa_viewer_config.json.bak` beside the settings | `mohaa_map_viewer_config.json.bak` beside the settings |
+| Unsaved Modify work | | `output/modify_recovery/<map>_<hash>.json`, offered back when the map opens again; cleared by a save or Discard changes |
 | Previous versions | `output/previous-versions/<n>/` (written by Help → Check for updates, shared) | (same) |
 | Python packages | `bin/libs` (Windows), `bin/libs-linux` (Linux), `bin/libs-mac` (macOS), shared | (same) |
 
@@ -483,6 +502,7 @@ python tests/test_hardening.py      # regression tests for the hardening pass
 python tests/check_batch_files.py   # CRLF, no ">" inside quotes, a single pause
 python tests/check_privacy_sync.py  # PRIVACY.md = PRIVACY_TEXT = _PRIVACY_SWAPS
 python tests/check_init_attrs.py    # MapApp.__init__ keeps up with App.__init__
+python tests/test_map_actor.py      # Simulate's actors (set MOHAA_GAMEFOLDER for real-data tests)
 python tests/fuzz_parsers.py bin 1  # corrupted-input fuzz of every file parser
 ```
 
