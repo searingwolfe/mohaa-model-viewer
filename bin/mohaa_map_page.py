@@ -466,6 +466,7 @@ __KEYS_CSS__
        <button class="sm" id="bModEdit" title="Edit the entity as the .bsp's entity lump holds it: &quot;key&quot; &quot;value&quot; lines, applied as you type. A path node joins the AI's paths again when you're done&#10;&#10;Hotkey: Alt+E">Edit parameters</button>
        <button class="sm" id="bModMove" title="Move: the selected entity follows the mouse again; a click on the map puts it there (Esc or Move again cancels). Off while Trim origin is on&#10;&#10;Hotkey: Alt+M">Move</button>
        <button class="sm" id="bModTrim" title="Trim origin: the camera stops and W A S D / the arrow keys move the entity along the map's axes (the way you face), Space / C up and down, by the trim step. Esc or T stops&#10;&#10;Hotkey: Alt+T">Trim origin</button>
+       <button class="sm" id="bModYaw" title="Yaw: turn the selected entity to the next of 0, 90, 180 and 270 degrees (one that faces none of those starts at 0). An info_ class gets &quot;angle&quot;, anything else &quot;angles&quot; &quot;0 yaw 0&quot;. Every selected row turns to the same yaw; each press is one Undo step&#10;&#10;Hotkey: Alt+R">Yaw</button>
        <button class="sm" id="bModLink" title="Make path: click another entity to set this one's &quot;target&quot; to its targetname (only entities that have one can be picked), drawn as a target link. The clicked one is selected after, so pressing Make path again goes on along the path (info_waypoint, info_splinepath, script_origin...). Esc cancels">Make path</button>
        <button class="sm" id="bModEye" title="Eye view: put the camera where the entity sees from, as Eye view does for the map's entities: a path node, a player start or an AI 82 units above the floor under it, anything else at its origin, facing its angles, else its target, else yaw 0">Eye view</button>
        <button class="sm" id="bModFly" title="Fly the camera to the entity&#10;&#10;Hotkey: click its row in the list again once it is selected (green), or double-click the row">Fly to</button>
@@ -1344,9 +1345,12 @@ function drawPathIssues2D(){
     let s;const ei=mapEi&&i<nMap?mapEi[i]:-1,X=ei>=0?ENTS[ei]:null;
     const em=A.edits&&i<nMap?A.edits.get(i):null;          // a map node moved in Modify: its tag goes with it
     const mm=em||(!X&&A.mod&&i>=nMap?A.mod[i-nMap]:null);
-    if(X&&X.anchor&&!em){s=project([X.anchor[0],X.anchor[1],X.anchor[2]+(X.box?X.box.maxs[2]+6:0)]);if(s)s=[s[0],s[1]+7];}
-    else if(mm){const o=modOrigin(mm),b=modBox(mm);s=project([o[0],o[1],o[2]+b.maxs[2]+6]);if(s)s=[s[0],s[1]+7];}
-    else s=project([A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40]);
+    let wp,below=true;
+    if(X&&X.anchor&&!em)wp=[X.anchor[0],X.anchor[1],X.anchor[2]+(X.box?X.box.maxs[2]+6:0)];
+    else if(mm){const o=modOrigin(mm),b=modBox(mm);wp=[o[0],o[1],o[2]+b.maxs[2]+6];}
+    else{wp=[A.o[i*3],A.o[i*3+1],A.o[i*3+2]+40];below=false;}
+    if(!view.xray&&!lblSeen('t'+i,wp))continue;           // X-ray off: no tag through a wall
+    s=project(wp);if(s&&below)s=[s[0],s[1]+7];
     if(!s||s[0]<0||s[0]>W||s[1]<0||s[1]>H)continue;
     const txt=(o.lv?'\u26a0 ':'')+o.t.join(', '),tw=ctx.measureText(txt).width;
     ctx.fillStyle='rgba('+TH.labelbg+',.85)';ctx.fillRect(s[0]-tw/2-4,s[1]-8,tw+8,16);ctx.fillStyle=col[o.lv];ctx.fillText(txt,s[0]-tw/2,s[1]);}
@@ -4622,7 +4626,8 @@ function draw2D(){
     // Behind a wall, less far: 512 named, 350 unnamed, a label past that showing only when
     // the camera can see its spot (lblSeen: a sight line through the world's opaque
     // brushes). Each fades out over the last 40% of its own range, to nothing at its end.
-    // Selected ones always show, fully.
+    // Selected ones always show, fully. With X-ray off, no label shows through a wall at
+    // all: each needs a sight line to its spot, at any distance, selected ones too.
     const cand=[];lblOccluders();
     for(const X of ENTS){if(X.ei===0||!X.anchor||!entVisible(X.ei))continue;
       const sel=selE.has(X.ei), e=MAP.ents[X.ei], tn=e.kvl.targetname;
@@ -4654,7 +4659,8 @@ function draw2D(){
       const sp=project(top);if(!sp||sp[0]<-50||sp[0]>W+50||sp[1]<-20||sp[1]>H+20)continue;
       const e=X.mod?X.e:MAP.ents[X.ei], tn=e.kvl.targetname;
       let lim=tn?2048:700;const wall=tn?512:350;
-      if(d>=0&&d>wall*0.6&&!lblSeen(X.mod?'m'+X.mod.id:X.ei,top))lim=wall;
+      if(!view.xray){if(!lblSeen(X.mod?'m'+X.mod.id:X.ei,top))continue;}
+      else if(d>=0&&d>wall*0.6&&!lblSeen(X.mod?'m'+X.mod.id:X.ei,top))lim=wall;
       const al=d<0?1:Math.min(1,(lim-d)/(lim*0.4));
       if(al<0.04)continue;
       const txt=(e.kvl.classname||e.cls||'?')+nodeFlagTag(e)+(tn?'  $'+tn:'');
@@ -6089,7 +6095,8 @@ function gameEnts(){
     const e=MAP.ents[ei],k=e.kvl,c=e.cls,R={g:'',num:-1,rad:0,gone:false,cn:'',why:''};out.push(R);
     if(ei===0){R.g='entity';R.num=1022;continue;}
     if(e.scr){R.g='script';R.why='spawned by the level script while the game runs: it gets its entity number then';continue;}
-    if(isStaticProp(ei)){R.g='static';R.why='a static model: scenery the map compiler made, not an entity';continue;}
+    if(isStaticProp(ei)){R.g='static';R.why='a static model: scenery the map compiler made, not an entity'+
+      (D.bsp&&D.bsp.firstStatic>0?' (not in the .bsp\'s entity lump, so it can\'t be modified here)':'');continue;}
     if(WORLDLIKE[c]){R.g='none';R.why='its brushes become part of the world when the map is compiled';continue;}
     if(k.spawnflags!=null&&c!=='info_pathnode'&&c!=='info_patharea'&&inhibitEntity(parseInt(k.spawnflags,10)|0,map)){
       R.g='inhibited';R.why='its spawnflags keep it out of this game (g_gametype, skill, developer)';continue;}
@@ -8223,11 +8230,11 @@ window.addEventListener('keydown',e=>{
     e.preventDefault();return;}
   // Alt+A Add: Modify's Add, as clicked (again cancels the placing)
   if(e.altKey&&!e.ctrlKey&&!e.metaKey&&kl==='a'){const b=$('bModAdd');if(b&&!b.disabled)b.click();e.preventDefault();return;}
-  // Alt+M Move, Alt+T Trim origin, Alt+E Edit parameters, Alt+S Spawnflags: Modify's buttons
-  // for its selected entity (as clicked, so not while one is off)
-  if(e.altKey&&!e.ctrlKey&&!e.metaKey&&(kl==='m'||kl==='t'||kl==='e'||kl==='s')){
-    const b=$({m:'bModMove',t:'bModTrim',e:'bModEdit',s:'bModSf'}[kl]);
-    if(MOD.sel<0)flash('Select an entity in Modify first (Alt+M Move, Alt+T Trim origin, Alt+E Edit parameters, Alt+S Spawnflags)');
+  // Alt+M Move, Alt+T Trim origin, Alt+R Yaw, Alt+E Edit parameters, Alt+S Spawnflags:
+  // Modify's buttons for its selected entity (as clicked, so not while one is off)
+  if(e.altKey&&!e.ctrlKey&&!e.metaKey&&(kl==='m'||kl==='t'||kl==='r'||kl==='e'||kl==='s')){
+    const b=$({m:'bModMove',t:'bModTrim',r:'bModYaw',e:'bModEdit',s:'bModSf'}[kl]);
+    if(MOD.sel<0)flash('Select an entity in Modify first (Alt+M Move, Alt+T Trim origin, Alt+R Yaw, Alt+E Edit parameters, Alt+S Spawnflags)');
     else if(!b.disabled)b.click();
     e.preventDefault();return;}
   if(e.ctrlKey||e.metaKey||e.altKey)return;
@@ -8327,7 +8334,7 @@ const DISPLAY=[
  {k:'labels',l:'Labels',key:'6',t:'Class and $targetname over nearby entities'},
  {k:'links',l:'Links',key:'7',t:'A line from each entity to the entities its "target" key points at'},
  {k:'fog',l:'Fog',key:'8',t:'The map\'s distance fog (worldspawn farplane / farplane_color), like in game'},
- {k:'xray',l:'X-ray',key:'9',t:'Show the selection\'s outline, box, target links and facing arrow faintly through walls (everything else stays hidden behind them)'},
+ {k:'xray',l:'X-ray',key:'9',t:'Show the selection\'s outline, box, target links and facing arrow faintly through walls (everything else stays hidden behind them). Off, labels and path tags don\'t show through walls either: only those whose spot the camera can see'},
  {k:'lights',l:'Lights off',key:'0',t:'Every light entity of the map off, as if it had never been there: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the sun, the sky and the ambient light give it. Again: every light back on. Single lights turn off and on from Selection (Turn off / Turn on). The first time takes a moment, while the page works out how much of the baked light each light gave'},
  {k:'sun',l:'Sun light',key:'-',t:'The sun\'s and the sky\'s light on the map (worldspawn suncolor, sundirection, sundiffuse). Off: the game\'s baked light (lightmaps, vertex light, props and models) keeps only what the lights and the ambient light give it, so open ground goes dark. The sun flare (J) is separate. The first time takes a moment, as Lights off does'},
  {k:'grid',l:'Grid',key:'+',t:'Grid: a see-through grid of MOHRadiant\'s grid size round what you work on (Modify\'s selected or moving entity, else the surface ahead of the camera), with its coordinates counted from ( 0 0 0 ). While it is on, Add and Move in Modify snap to it, as MOHRadiant snaps to its grid. Under the backdrop: which planes (Grid XY / XZ / YZ / all), the size ({ and }) and its colour'},
@@ -8907,11 +8914,30 @@ function nodeFlagTag(e){
     if((v>>>b)&1){const nm=names[b];if(nm&&nm.toLowerCase()!=='x')return ' ['+nm+']';}
   return '';
 }
-function spawnflagNames(ei){
-  const e=MAP.ents[ei], v=parseInt(e.kvl.spawnflags||'0',10)>>>0;if(!v)return '';
-  const d=(D.defs||{})[e.cls], names=d&&d.f?d.f:[], ed=D.editorFlags||{}, out=[];
+function spawnflagNames(ei){const e=MAP.ents[ei];return sfNamesOf(e.cls,e.kvl.spawnflags);}
+// a spawnflags value as its bits, each with the class's name for it: "8 CONCEALMENT, 2 DUCK"
+function sfNamesOf(cls,val){
+  const v=parseInt(val||'0',10)>>>0;if(!v)return '';
+  const d=(D.defs||{})[cls], names=d&&d.f?d.f:[], ed=D.editorFlags||{}, out=[];
   for(let b=0;b<32;b++)if(v&(1<<b)>>>0){let nm=(b<names.length&&names[b].toLowerCase()!=='x')?names[b]:(ed[b]||'');out.push(((1<<b)>>>0)+(nm?' '+nm:''));}
   return out.join(', ');
+}
+// What Modify has changed on one of the map's entities and not saved yet, for its info card:
+// each key whose value differs, the map's value struck through and the new one after it
+// (spawnflags with their names), or that it is deleted. The rest of the card is the map's own.
+function modChangesHtml(ei){
+  const m=MOD&&MOD.ents?MOD.ents.find(x=>x.ei===ei):null;
+  if(!m||!(m.del||modKvEdited(m)))return '';
+  let h='<h4>Changed in Modify (not saved yet)<span class="sp"></span>'+(m.del?'':copyBtn(modText(m),'Copy'))+'</h4>';
+  if(m.del)return h+'<div class="warn">DEL: deleted in Modify, so Save as .bsp / .map leaves it out. Restore (or Undo, Alt+Z) puts it back.</div>';
+  const first=kv=>{const M=new Map();for(const[k,v]of kv){const l=k.toLowerCase();if(!M.has(l))M.set(l,[k,v]);}return M;};
+  const old=first(m.orig||[]),nw=first(m.kv),cls=modCls(m)||MAP.ents[ei].cls,rows=[];
+  const show=(l,v)=>v==null?'(none)':esc(v)+(l==='spawnflags'?' ['+esc(sfNamesOf(cls,v)||'none')+']':'');
+  for(const l of new Set([...old.keys(),...nw.keys()])){
+    const a=old.get(l),b=nw.get(l),av=a?a[1]:null,bv=b?b[1]:null;if(av===bv)continue;
+    rows.push([(b||a)[0],'<span class="co" style="text-decoration:line-through">'+show(l,av)+'</span> → <span style="color:var(--warn)">'+show(l,bv)+'</span>']);}
+  h+=rows.length?kvTable(rows):'<div class="note">Only the order of its keys changed.</div>';
+  return h+'<div class="note">The sections below show the map\'s own keys, as it was loaded.</div>';
 }
 function srcText(a,b){return D.srcText.slice(a,b);}
 function card(title,body){$('infoScr').style.display=(infoMode==='scr'&&D.scr&&D.scr.files&&D.scr.files.length)?'':'none';$('infoTitle').textContent=title;$('infoBody').innerHTML=body;$('info').classList.add('on');$('infoBody').scrollTop=0;}
@@ -9119,6 +9145,7 @@ function infoEntity(ei){
   if(ei>0){const R=gameEnts()[ei];
     h+='<div class="note">in game: '+(R.num>=0?'entity number '+R.num+', radnum '+R.rad+(R.gone?' ('+esc(R.why)+')':''):esc(R.why||'no entity number'))+
       ' <span class="co">(g_gametype '+CVARS.g_gametype+', skill '+CVARS.skill+(CVARS.developer?', developer 1':'')+')</span></div>';}
+  h+=modChangesHtml(ei);                      // Modify's unsaved changes to it, if any
   if(b){
     const o=b.origin, amin=[o[0]+b.wmins[0],o[1]+b.wmins[1],o[2]+b.wmins[2]], amax=[o[0]+b.wmaxs[0],o[1]+b.wmaxs[1],o[2]+b.wmaxs[2]];
     const ss='setsize '+fvec(b.mins)+' '+fvec(b.maxs);
@@ -9363,6 +9390,30 @@ const MOD_STEPS=[1,2,3,4,5,8,10,12,16,20,25,32,40,50];
 let PA_C=null,PA_GEN=null,PA_PEND=false;
 function modKv(m,k){for(const[a,v]of m.kv)if(a.toLowerCase()===k)return v;return null;}
 function modSetKv(m,k,v){const i=m.kv.findIndex(x=>x[0].toLowerCase()===k);if(i>=0)m.kv[i][1]=v;else m.kv.push([k,v]);}
+// Yaw (Alt+R): the selected entity turned to the next of 0, 90, 180 and 270 degrees, after the
+// one it faces now (a yaw that is none of them, or no angle at all, starts at 0). An info_
+// class (path nodes, waypoints, player starts...) gets "angle" "<yaw>", anything else "angles"
+// "0 <yaw> 0"; the other of the two keys is taken out, so only the new one counts. Every
+// selected row turns to the same yaw, and each press is one Undo step.
+const MOD_YAWS=[0,90,180,270];
+function modYaw(){
+  const m=MOD.ents[MOD.sel];if(!m){flash('Select an entity in Modify first (Alt+R Yaw)');return;}
+  const L=modSelEnts(false).filter(x=>!x.del);if(!L.length)return;
+  const kv=modKvl(m);let cur=null;
+  if(kv.angles!=null){const a=parseVec(kv.angles,3);if(a)cur=a[1];}
+  else if(kv.angle!=null&&isFinite(parseFloat(kv.angle)))cur=parseFloat(kv.angle);
+  if(cur!=null)cur=((cur%360)+360)%360;
+  const k=cur==null?-1:MOD_YAWS.indexOf(cur),yaw=k<0?0:MOD_YAWS[(k+1)%4];
+  if(MOD.edit>=0)modEditClose(true);
+  modHist();let node=false;
+  for(const x of L){
+    const info=modCls(x).startsWith('info_'),drop=info?'angles':'angle';
+    if(info)modSetKv(x,'angle',String(yaw));else modSetKv(x,'angles','0 '+yaw+' 0');
+    const i=x.kv.findIndex(p=>p[0].toLowerCase()===drop);if(i>=0)x.kv.splice(i,1);
+    if(modIsNode(x))node=true;}
+  modChanged(node);
+  flash((L.length===1?modName(m):L.length+' entities')+': yaw '+yaw+' (Alt+R again: '+MOD_YAWS[(MOD_YAWS.indexOf(yaw)+1)%4]+')');
+}
 function modOrigin(m){return parseVec(modKv(m,'origin'),3)||[0,0,0];}
 function modCls(m){return(modKv(m,'classname')||'').toLowerCase();}
 function modSf(m){return parseInt(modKv(m,'spawnflags')||'0',10)|0;}
@@ -10337,7 +10388,7 @@ function modRender(){
   modListDraw(L);                                   // windowed: only the rows in view
   $('bModAdd').classList.toggle('on',!!MOD.placing&&MOD.placing.move==null);
   const has=MOD.ents[MOD.sel]!=null;
-  for(const id of['bModEdit','bModMove','bModTrim','bModLink','bModEye','bModFly','bModSf','bModDel'])$(id).disabled=!has;
+  for(const id of['bModEdit','bModMove','bModTrim','bModYaw','bModLink','bModEye','bModFly','bModSf','bModDel'])$(id).disabled=!has;
   $('bModLink').classList.toggle('on',!!MOD.linking);
   const nsel=modSelCount();
   $('bModDup').disabled=!nsel&&!(MOD.placing&&MOD.placing.copy);
@@ -10363,11 +10414,15 @@ function modRender(){
   $('bModSaveBsp').disabled=$('bModSaveMap').disabled=$('bModCopy').disabled=!(nw.length||ch.length);
   modStatSoon();
   sfRender();
-  // a selected entity the level script spawns can't be edited here: it isn't in the .bsp or the .map
-  {const ei=selFocusEnt(),e=ei>0&&MAP&&MAP.ents[ei],el=$('modScr');
-    if(e&&e.scr&&!cur){el.style.display='';
-      el.textContent='This entity is spawned by the level script ('+scrWhere(e.scr.f,e.scr.l)+'): it can only be modified in the level script, not in the map viewer.';}
-    else el.style.display='none';}
+  // a selected entity Modify can't take, and why: one the level script spawns (it isn't in the
+  // .bsp or the .map), a static model of a .bsp (its static model lump, not its entity lump),
+  // or a brush entity (only point entities are modified here)
+  {const ei=selFocusEnt(),e=ei>0&&MAP&&MAP.ents[ei],el=$('modScr');let t='';
+    if(e&&!cur&&!modTakes(ei)){
+      if(e.scr)t='This entity is spawned by the level script ('+scrWhere(e.scr.f,e.scr.l)+'): it can only be modified in the level script, not in the map viewer.';
+      else if(D.bsp&&isStaticProp(ei))t='This is a static model, not a .bsp entity: the map compiler moved it into the .bsp\'s static model lump, so it isn\'t in the entity lump and can\'t be modified in the map viewer. Change it in the map\'s .map source and compile again.';
+      else if(ENTS[ei]&&ENTS[ei].hasGeo&&!WORLDLIKE[e.cls])t='This is a brush entity: only point entities can be modified in the map viewer.';}
+    el.style.display=t?'':'none';el.textContent=t;}
 }
 // the heavy part of the render (path checks, limits, the status line), once per frame at most
 let _modStatRaf=0;
@@ -10523,6 +10578,7 @@ function modInit(){
     flyTo(v.pos,v.ang[1],v.ang[0],-v.ang[2]);requestDraw();flash(v.flash);};
   $('bModFly').onclick=modFly;
   $('bModSf').onclick=toggleSfMenu;
+  $('bModYaw').onclick=modYaw;
   $('bModDel').onclick=()=>modRemoveSel();
   $('bModDup').onclick=()=>modCopySel();
   $('bModHUndo').onclick=()=>modUndoGo(-1);

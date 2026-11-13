@@ -2080,6 +2080,21 @@ development is rebuilt because its scripts are newer).
   `!Medium` ... that every class has; for a path node DONT_LINK to CRATE and LOW_WALL_ARC).
   A click sets or clears a bit, Clear takes them all off; each change is one Undo step.
   Hotkey Alt+S (again, or Esc, closes it), listed in the keyboard map with Alt+M / T / E.
+- **Yaw** (Modify, after Trim origin; Alt+R): each press turns the selected entities to the
+  next of 0, 90, 180 and 270 degrees, as `"angle"` on an `info_` class and `"angles" "0 yaw 0"`
+  on anything else (taking out the other key); one Undo step a press.
+- **X-ray off hides labels behind walls.** With X-ray (9) off, entity labels and the AI path
+  tags show only where the camera can see their spot (`lblSeen`), at any distance and for
+  selected entities too; with it on they show through walls within 512 / 350 units as before.
+  The button's tooltip says so.
+- **Why an entity can't be modified.** Selecting a `.bsp`'s static model (`static_*`,
+  from the static model lump, not the entity lump) or a brush entity now says so in yellow
+  in Modify, as an entity the level script spawns already did; the static model's info card
+  adds that it isn't in the `.bsp`'s entity lump and can't be modified here.
+- **Changes on the info card.** A map entity changed in Modify gets a "Changed in Modify
+  (not saved yet)" section on its info card (N): each changed key with the map's value
+  struck through and the new one (spawnflags named), or DEL for a deleted one, before the
+  map's own keys (`modChangesHtml`, `sfNamesOf`).
 - **48-path relinking.** A map node that already has its 48 paths may have been cut short;
   when a node within 640 units of it is added, moved or deleted, it is linked again in the
   game's order, as the game would on the next build.

@@ -208,7 +208,9 @@ run at once.
   `lblBlocked`; detail brushes count, clip and see-through ones don't, nor patches,
   terrain or brush entities), through a box tree over them and kept until the camera
   moves 4 units. Each label fades out over the last 40% of its own range (in sight or
-  behind a wall) to nothing at its end. Selected entities are always labelled, fully. A path node with spawnflags
+  behind a wall) to nothing at its end. Selected entities are always labelled, fully. With
+  X-ray off, no label shows through a wall at all, selected ones included: a label needs
+  that sight line at any distance, and so do the AI path tags (no paths, one-way...). A path node with spawnflags
   names its highest one after its class, `info_pathnode [CORNER_RIGHT]` for COVER +
   CORNER_RIGHT (`nodeFlagTag`; one name, the more particular kind, so labels stay short),
   since its outline colour is otherwise the only sign. Modify's entities are labelled the
@@ -1018,8 +1020,13 @@ each change.
   (`eyeViewFrom`: a node, a player start or an AI 82 units above the floor under it,
   facing its angles, else its target, else yaw 0); Fly to (also a click on its row once
   it is selected, so a double-click on the row), Delete. Hotkeys: Alt+M Move, Alt+T Trim
-  origin, Alt+E Edit parameters, Alt+S Spawnflags, Delete; each button's tooltip names its
-  own.
+  origin, Alt+R Yaw, Alt+E Edit parameters, Alt+S Spawnflags, Delete; each button's tooltip
+  names its own.
+- **Yaw** (after Trim origin, Alt+R) turns the selected entity to the next of 0, 90, 180 and
+  270 degrees after the one it faces (a yaw that is none of them, or none at all, starts at
+  0): an `info_` class gets `"angle" "<yaw>"`, anything else `"angles" "0 <yaw> 0"`, and the
+  other key is taken out. Every selected row turns to the same yaw; each press is one Undo
+  step (`modYaw`).
 - **The map's own entities.** Selecting one of the map's point entities (a path node, a
   player start, a script origin...; not brush entities, static props or what the level
   script spawns) gives it a row too, with a hollow square and its entity number ("#251
@@ -1030,9 +1037,17 @@ each change.
   changed `info_pathnode` (node k of the `.pth`, the map's k-th) has its links worked out
   again, both ways, as a new node's are, and the `.pth`'s links to and from it are left
   out; a node whose classname is changed away from `info_pathnode` loses its links (and
-  gets them again if changed back), once Edit parameters is closed. Selecting an entity
-  the level script spawns says that it can only be changed in the script (with its file
-  and line): it isn't in the `.bsp` or the `.map`.
+  gets them again if changed back), once Edit parameters is closed. Its info card (N)
+  opens with a **Changed in Modify (not saved yet)** section: every key whose value
+  differs, the map's value struck through and the new one after it, spawnflags with their
+  names (`16 [16 CORNER_LEFT] → 6 [2 DUCK, 4 COVER]`), with Copy for the new keys
+  (`modChangesHtml`); the rest of the card still shows the map's own keys. Selecting one
+  Modify can't take says why, in yellow under its buttons: an entity the level script
+  spawns can only be changed in the script (with its file and line), since it isn't in the
+  `.bsp` or the `.map`; a static model of a `.bsp` (`static_*`, such as
+  `static_weapon_mg42bipod`) is in the static model lump, not the entity lump, so it can
+  only be changed in the `.map` source and compiled again (its info card says the same);
+  a brush entity isn't a point entity.
 - **Deleting the map's own entities.** Delete (the button, or the Delete key) on one of the
   map's rows flags it DEL: the row reads "#251 DEL" in red, its label DEL, and it is drawn
   nowhere. A deleted path node has no links, and the routes round it are worked out again
