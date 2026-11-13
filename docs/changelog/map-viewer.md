@@ -1018,7 +1018,8 @@ each change.
   (`eyeViewFrom`: a node, a player start or an AI 82 units above the floor under it,
   facing its angles, else its target, else yaw 0); Fly to (also a click on its row once
   it is selected, so a double-click on the row), Delete. Hotkeys: Alt+M Move, Alt+T Trim
-  origin, Alt+E Edit parameters, Delete; each button's tooltip names its own.
+  origin, Alt+E Edit parameters, Alt+S Spawnflags, Delete; each button's tooltip names its
+  own.
 - **The map's own entities.** Selecting one of the map's point entities (a path node, a
   player start, a script origin...; not brush entities, static props or what the level
   script spawns) gives it a row too, with a hollow square and its entity number ("#251
@@ -1039,7 +1040,7 @@ each change.
   takes `del` entries; the worldspawn can't be deleted), Save as .map drops its block and
   Copy leaves it out. On a DEL or changed row the button reads **Restore**, which puts back
   the map's keys and clears the flag; Undo does the same.
-- **Spawnflags** (the button after Fly to): a list beside it, in the game cvars list's look,
+- **Spawnflags** (the button after Fly to, or Alt+S; Esc or Alt+S again closes it): a list beside it, in the game cvars list's look,
   of every spawnflag bit the selected entity's class has: its value and its name, the
   class's own from the QUAKED headers (`D.defs[class].f`) and then the editor's (`!Easy`,
   `!Medium` ...) that every class has; for a path node DONT_LINK, DUCK, COVER, CONCEALMENT,

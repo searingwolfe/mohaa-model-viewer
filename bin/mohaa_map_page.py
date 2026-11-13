@@ -469,7 +469,7 @@ __KEYS_CSS__
        <button class="sm" id="bModLink" title="Make path: click another entity to set this one's &quot;target&quot; to its targetname (only entities that have one can be picked), drawn as a target link. The clicked one is selected after, so pressing Make path again goes on along the path (info_waypoint, info_splinepath, script_origin...). Esc cancels">Make path</button>
        <button class="sm" id="bModEye" title="Eye view: put the camera where the entity sees from, as Eye view does for the map's entities: a path node, a player start or an AI 82 units above the floor under it, anything else at its origin, facing its angles, else its target, else yaw 0">Eye view</button>
        <button class="sm" id="bModFly" title="Fly the camera to the entity&#10;&#10;Hotkey: click its row in the list again once it is selected (green), or double-click the row">Fly to</button>
-       <button class="sm" id="bModSf" title="Spawnflags: tick the selected entity's spawnflags from the list of its class (a path node: DONT_LINK, DUCK, COVER, CONCEALMENT, CORNER_LEFT, CORNER_RIGHT, SNIPER, CRATE, and LOW_WALL_ARC for Spearhead / Breakthrough only)">Spawnflags</button>
+       <button class="sm" id="bModSf" title="Spawnflags: tick the selected entity's spawnflags from the list of its class (a path node: DONT_LINK, DUCK, COVER, CONCEALMENT, CORNER_LEFT, CORNER_RIGHT, SNIPER, CRATE, and LOW_WALL_ARC for Spearhead / Breakthrough only)&#10;&#10;Hotkey: Alt+S">Spawnflags</button>
        <button class="sm" id="bModDup" title="Copy: the selected entities again (Shift+click adds more to the selection, the map's own entities selected in the view too), without targetname or target. They follow the mouse together, spaced as they are, until a click puts them down; Esc takes them away&#10;&#10;Hotkey: Alt+C">Copy</button>
        <button class="sm" id="bModHUndo" title="Undo the last change to Modify's entities, back to none added&#10;&#10;Hotkey: Alt+Z">Undo</button>
        <button class="sm" id="bModHRedo" title="Redo the last change undone&#10;&#10;Hotkey: Alt+Y or Alt+Shift+Z">Redo</button>
@@ -7541,7 +7541,8 @@ function sfMenuClose(){
   if(sfBack){sfBack.remove();sfBack=null;}
   document.removeEventListener('keydown',sfMenuKey,true);}
 function sfMenuKey(ev){
-  if(ev.key==='Escape'){sfMenuClose();ev.preventDefault();}
+  // Esc closes it, and so does Alt+S again (the key that opened it)
+  if(ev.key==='Escape'||(ev.altKey&&!ev.ctrlKey&&!ev.metaKey&&ev.key.toLowerCase()==='s')){sfMenuClose();ev.preventDefault();}
   ev.stopPropagation();}
 function sfMenuPlace(){
   if(!sfEl)return;
@@ -8222,11 +8223,11 @@ window.addEventListener('keydown',e=>{
     e.preventDefault();return;}
   // Alt+A Add: Modify's Add, as clicked (again cancels the placing)
   if(e.altKey&&!e.ctrlKey&&!e.metaKey&&kl==='a'){const b=$('bModAdd');if(b&&!b.disabled)b.click();e.preventDefault();return;}
-  // Alt+M Move, Alt+T Trim origin, Alt+E Edit parameters: Modify's buttons for its selected
-  // entity (as clicked, so not while one is off)
-  if(e.altKey&&!e.ctrlKey&&!e.metaKey&&(kl==='m'||kl==='t'||kl==='e')){
-    const b=$({m:'bModMove',t:'bModTrim',e:'bModEdit'}[kl]);
-    if(MOD.sel<0)flash('Select an entity in Modify first (Alt+M Move, Alt+T Trim origin, Alt+E Edit parameters)');
+  // Alt+M Move, Alt+T Trim origin, Alt+E Edit parameters, Alt+S Spawnflags: Modify's buttons
+  // for its selected entity (as clicked, so not while one is off)
+  if(e.altKey&&!e.ctrlKey&&!e.metaKey&&(kl==='m'||kl==='t'||kl==='e'||kl==='s')){
+    const b=$({m:'bModMove',t:'bModTrim',e:'bModEdit',s:'bModSf'}[kl]);
+    if(MOD.sel<0)flash('Select an entity in Modify first (Alt+M Move, Alt+T Trim origin, Alt+E Edit parameters, Alt+S Spawnflags)');
     else if(!b.disabled)b.click();
     e.preventDefault();return;}
   if(e.ctrlKey||e.metaKey||e.altKey)return;

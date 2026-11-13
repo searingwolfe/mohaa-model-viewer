@@ -2079,6 +2079,7 @@ development is rebuilt because its scripts are newer).
   its value and name (the class's own from the QUAKED headers, then the editor's `!Easy`,
   `!Medium` ... that every class has; for a path node DONT_LINK to CRATE and LOW_WALL_ARC).
   A click sets or clears a bit, Clear takes them all off; each change is one Undo step.
+  Hotkey Alt+S (again, or Esc, closes it), listed in the keyboard map with Alt+M / T / E.
 - **48-path relinking.** A map node that already has its 48 paths may have been cut short;
   when a node within 640 units of it is added, moved or deleted, it is linked again in the
   game's order, as the game would on the next build.
