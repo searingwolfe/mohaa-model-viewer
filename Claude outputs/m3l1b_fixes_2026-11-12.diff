@@ -1,0 +1,520 @@
+--- /dev/fd/63	2026-11-12 18:50:27.304206670 -0500
++++ /dev/fd/62	2026-11-12 18:50:27.304206670 -0500
+@@ -288,6 +288,8 @@
+ 	level.route_floor_from = 72			// a routed leg ends on the floor under the node, found by tracing down from this far above his own feet (the path nodes float far above the floor, and the engine only finds a pathnode within 94 units of the spot's height).
+ 	level.route_fail_time = 1.5			// seconds a routed leg may leave him standing still (no route from here - the hills and the beach have no pathnodes) before that node is run at straight instead.
+ 	level.route_hold = 1.0				// seconds a man standing still keeps the leg he was just given (straight or routed, and which node) instead of working it out again on every pass of his path loop.
++	level.route_floor_maxdrop = 160			// a routed leg whose floor spot is more than this far above or below his own feet is not used (the trace went down a hole or stairwell to another level, where no route reaches). He is run straight at the node instead.
++	level.route_moved_dist = 48			// a routed leg counts as having got him going once he is this far (flat units) from where it started. Under it after route_fail_time = no route. (Measured by distance, not speed, so being jostled on the spot doesn't count.)
+ 
+ 	//--- SCRIPT DETECTION (runpath_done_findtarget) and the live-actor lists ------
+ 	level.detect_area_gate = 0			// 1 = skip candidates in a different enclosed space beyond area_gate_dist. OFF: this map has men seeing each other through firing slits, doorways and the deck rail.
+@@ -356,6 +358,9 @@
+ 
+ 	//--- DITCH_RUN / DITCH2_RUN (the finish_rendevous six and the finish_ditch2 six) ---
+ 	level.ditch_spacing = 1				// 1 = the two ditch crews get the walking-queue spacing on the way (separate_moving_actors). 0 = no spacing.
++	level.rendevous_hold = 1			// 1 = the finish_rendevous six hold where they arrive at the rendezvous (they still turn and shoot) until the player gets there and they move on. 0 = free to move as soon as they arrive.
++	level.rendevous_hold_leash = 48			// ...how far (units) a holding man may move from his spot.
++	level.finish_fall_guard = 1			// 1 = a finish_rendevous / finish_ditch2 man who drops out of the map (under the tables at the roadblock, say) is put back where he last stood. 0 = off.
+ 	level.finish_ditch2_range = 8192		// the ditch2 six: script detection range AND engine eyesight. They see much further than the rest of the finish.
+ 
+ 	//--- THE PATH LOOPS: keepmovingpath (friendlies) / keepmovingpath_enemy (Germans) ---
+@@ -14560,6 +14565,7 @@
+ 	level.rendevousguys[6] = local.private4
+ 	for(local.r = 1; local.r <= level.rendevousguys.size; local.r++)
+ 	{
++		level.rendevousguys[local.r] thread finish_fall_guard
+ 		//*** these six run and shoot like the trench_run men, so they get the same senses (via actor_senses), with the same
+ 		//*** detect_fov / detect_range pairing the weapon crews and burn victims use.
+ 		level.rendevousguys[local.r].detect_fov = 360
+@@ -14586,12 +14592,12 @@
+ 
+ 	if($player.map_quadrant == 3 || $player.map_quadrant == 4 || $player.map_quadrant == 8) // make actors run to the rendevous point
+ 	{
+-		local.captain thread ditch_run $finish_rendevous_captain_path 2 $player
+-		local.sergeant thread ditch_run $finish_rendevous_sergeant_path .1 $player
+-		local.private1 thread ditch_run $finish_rendevous_private1_path 3.25 local.captain
+-		local.private2 thread ditch_run $finish_rendevous_private2_path 4.75 local.captain
+-		local.private3 thread ditch_run $finish_rendevous_private3_path 1.25 local.sergeant
+-		local.private4 thread ditch_run $finish_rendevous_private4_path 2.50 local.sergeant
++		local.captain thread ditch_run $finish_rendevous_captain_path 2 $player 0 1
++		local.sergeant thread ditch_run $finish_rendevous_sergeant_path .1 $player 0 1
++		local.private1 thread ditch_run $finish_rendevous_private1_path 3.25 local.captain 0 1
++		local.private2 thread ditch_run $finish_rendevous_private2_path 4.75 local.captain 0 1
++		local.private3 thread ditch_run $finish_rendevous_private3_path 1.25 local.sergeant 0 1
++		local.private4 thread ditch_run $finish_rendevous_private4_path 2.50 local.sergeant 0 1
+ 	}
+ 	else // spawn them immediately at their spots
+ 	{
+@@ -14612,6 +14618,7 @@
+ 			level.rendevousguys[local.r] show
+ 			level.rendevousguys[local.r] solid
+ 			level.rendevousguys[local.r].rendevous_done = 1
++			level.rendevousguys[local.r] waitthread rendevous_pin
+ 		}
+ 
+ 		local.captain lookat $player
+@@ -14755,10 +14762,11 @@
+ 
+ //*********************************************
+ // guys run to place
+-ditch_run local.path local.time local.lookent local.keepdisabled:
++ditch_run local.path local.time local.lookent local.keepdisabled local.hold:
+ 
+ 	if(local.path == NULL || self == NULL) { end }
+ 	self.rendevous_done = 0
++	self waitthread rendevous_unpin
+ 	wait local.time
+ 
+ 	self lookat NULL
+@@ -14802,6 +14810,7 @@
+ 	if(local.kdheld == 0) { self exec global/enable_ai.scr }
+ 	else { self exec global/disable_ai.scr }
+ 	self.rendevous_done = 1
++	if(local.hold == 1) { self waitthread rendevous_pin }
+ 
+ 	while(isalive self && self.rendevous_done == 1 && local.lookent != NIL)
+ 	{
+@@ -14811,6 +14820,73 @@
+ end
+ 
+ //*********************************************
++// HOLD AT THE RENDEZVOUS (level.rendevous_hold).
++//
++// Once one of the six reaches his rendezvous spot he stays there until the
++// player arrives: his engine "home" is fixed to the spot with a short leash, so
++// he still turns, aims and fires, but a fight can't walk him off round the
++// area. Without it the men drifted while fighting, and when the player arrived
++// the next path sent them back across the map through walls.
++//
++// rendevous_pin is called when he arrives; rendevous_unpin when his next path
++// starts (ditch_run calls it every time, so it's a no-op on a man never pinned).
++//*********************************************
++rendevous_pin:
++
++	if(level.rendevous_hold != 1) { end }
++	if(!isalive self) { end }
++	self.rendevous_pinned = 1
++	self resetleash
++	self leash level.rendevous_hold_leash
++	self fixedleash 1
++	self mindist 0			// inside the leash, or the engine prints an "LD ERROR" and clamps it itself
++	self gren_awareness 0		// a grenade would otherwise send him running, leash or not
++end
++
++rendevous_unpin:
++
++	if(self.rendevous_pinned != 1) { end }
++	self.rendevous_pinned = 0
++	if(!isalive self) { end }
++	self fixedleash 0
++	self leash 512			// the engine's defaults
++	self mindist 128
++	self gren_awareness 10		// what spawn_friendly_actor gives him
++	self resetleash
++end
++
++//*********************************************
++// FINISH FALL GUARD (level.finish_fall_guard).
++//
++// Every half second, remember where he stands while he's in the map. If he
++// turns up under it (the same two volumes dead_fail_mission uses for the
++// captain - below the tables at the roadblock, say) he's put back on his last
++// spot and dropped to the floor, and his path loop carries on from there.
++// Runs until he dies; two comparisons per half second.
++//*********************************************
++finish_fall_guard:
++
++	if(level.finish_fall_guard != 1) { end }
++	local.last = NIL
++	while(isalive self)
++	{
++		local.o = self.origin
++		local.under = 0
++		if(local.o[1] < -1024 && local.o[2] < -599) { local.under = 1 }
++		if(local.o[1] >= -1023 && local.o[2] < 51 && local.o[2] > -251) { local.under = 1 }
++
++		if(local.under == 0 && local.o[2] > -400) { local.last = local.o }
++		else if(local.under == 1 && local.last != NIL)
++		{
++			if(level.debug_route == 1) { iprintlnbold_noloc(self.targetname + "[" + self.entnum + "] fell out of the map at " + local.o + " - put back at " + local.last) }
++			self.origin = local.last + ( 0 0 16 )
++			self droptofloor
++		}
++		wait 0.5
++	}
++end
++
++//*********************************************
+ // all the ditch guys are dead, next sequence
+ ditch_done:
+ 
+@@ -14922,6 +14998,7 @@
+ 	local.ditch2guys[6] = local.engineer
+ 	for(local.d = 1; local.d <= local.ditch2guys.size; local.d++)
+ 	{
++		local.ditch2guys[local.d] thread finish_fall_guard
+ 		//*** same as the rendevous six (see ditch_go)
+ 		local.ditch2guys[local.d].detect_fov = 360
+ 		//*** SQUAD ORDER: lieutenant, sergeant, private1-3, and the engineer last (7, set below the loop)
+@@ -15178,10 +15255,38 @@
+ 	local.stopnode remove
+ 	level.ditch_enemy_death_done = 1
+ 
++	//*** done with the flamethrower: crouch where he stands and switch him on. The engine stands him up by itself when
++	//*** a fight needs it; ditch2_engineer_crouch puts him back down while he has nobody to fight.
+ 	self exec global/crouch.scr
+ 	wait .5
+ 	self turnto NULL
+ 	self.keepdisabled = 0
++	self exec global/enable_ai.scr
++	self thread ditch2_engineer_crouch
++end
++
++//*********************************************
++// keeps the engineer crouched while he's switched on, standing still and
++// idle. Leaves him alone while he's fighting, moving (a scripted run later on),
++// or switched off by a scripted scene.
++//*********************************************
++ditch2_engineer_crouch:
++
++	wait 2
++	while(isalive self)
++	{
++		local.down = 1
++		if(self.actor_is_enabled != 1) { local.down = 0 }
++		if(self.thinkstate != "idle") { local.down = 0 }
++		if(self.enemy) { local.down = 0 }
++		if(vector_length( ( self.velocity[0] self.velocity[1] 0 ) ) >= level.path_stopped_speed) { local.down = 0 }
++		if(local.down == 1)
++		{
++			local.head = self gettagposition "Bip01 Head"
++			if((local.head[2] - self.origin[2]) > 60) { self exec global/crouch.scr }
++		}
++		wait 1
++	}
+ end
+ 
+ ditch_enemy_death_keepstill local.aimat local.angle:
+@@ -22735,9 +22840,30 @@
+ //*********************************************
+ path_leg_go local.legnode local.legrouted:
+ 
++	//*** a floor spot far above or below his feet is on another level (the trace went down a hole or a stairwell):
++	//*** no route reaches it, and the engine would leave him standing ("Path not found"). Run at the node straight.
+ 	if(local.legrouted == 1)
+ 	{
+ 		local.spot = self waitthread route_spot local.legnode
++		local.drop = local.spot[2] - self.origin[2]
++		if(local.drop < 0) { local.drop = 0 - local.drop }
++		if(local.drop > level.route_floor_maxdrop)
++		{
++			local.legrouted = 0
++			self.route_bad_node = local.legnode
++			if(level.debug_route == 1)
++			{
++				if(self.route_say_at == NIL || level.time >= self.route_say_at)
++				{
++					self.route_say_at = level.time + level.debug_route_every
++					iprintlnbold_noloc(self.targetname + "[" + self.entnum + "] routed spot is " + int(local.drop) + " units off his level - running at his node straight")
++				}
++			}
++		}
++	}
++
++	if(local.legrouted == 1)
++	{
+ 		if(level.route_proxy == 1)
+ 		{
+ 			if(self.route_proxy == NIL || self.route_proxy == NULL) { self.route_proxy = spawn script_origin }
+@@ -22750,6 +22876,7 @@
+ 		self.route_moved = 0
+ 		self.route_at = level.time
+ 		self.route_for = local.legnode
++		self.route_from = self.origin
+ 
+ 		if(level.debug_route == 1)
+ 		{
+@@ -23055,7 +23182,12 @@
+ 		//===================================================================
+ 		if(vector_length( ( self.velocity[0] self.velocity[1] 0 ) ) >= level.path_stopped_speed) { self.everran = 1 }
+ 		//*** and whether a routed leg actually got him moving (see path_leg)
+-		if(self.route_live == 1) { if(vector_length( ( self.velocity[0] self.velocity[1] 0 ) ) >= level.path_stopped_speed) { self.route_moved = 1 } }
++		if(self.route_live == 1 && self.route_from != NIL)
++		{
++			local.rdx = self.origin[0] - self.route_from[0]
++			local.rdy = self.origin[1] - self.route_from[1]
++			if((local.rdx * local.rdx + local.rdy * local.rdy) >= (level.route_moved_dist * level.route_moved_dist)) { self.route_moved = 1 }
++		}
+ 
+ 		//=================================================================
+ 		// FLIP TRACER (level.debug_flip).
+@@ -23519,7 +23651,12 @@
+ 		//===================================================================
+ 		if(vector_length( ( self.velocity[0] self.velocity[1] 0 ) ) >= level.path_stopped_speed) { self.everran = 1 }
+ 		//*** and whether a routed leg actually got him moving (see path_leg)
+-		if(self.route_live == 1) { if(vector_length( ( self.velocity[0] self.velocity[1] 0 ) ) >= level.path_stopped_speed) { self.route_moved = 1 } }
++		if(self.route_live == 1 && self.route_from != NIL)
++		{
++			local.rdx = self.origin[0] - self.route_from[0]
++			local.rdy = self.origin[1] - self.route_from[1]
++			if((local.rdx * local.rdx + local.rdy * local.rdy) >= (level.route_moved_dist * level.route_moved_dist)) { self.route_moved = 1 }
++		}
+ 
+ 		//=================================================================
+ 		// FLIP TRACER (level.debug_flip).
+--- a/anim/cover_aim.scr
++++ b/anim/cover_aim.scr
+@@ -27,13 +27,20 @@
+ //
+ // Called from the cover scripts as:
+ //	thread anim/cover_aim.scr::CoverAim "crate" self.cover_gen
+-//	thread anim/cover_aim.scr::CoverAim "corner" self.cover_gen
++//	thread anim/cover_aim.scr::CoverAim "corner_left" self.cover_gen
++//	thread anim/cover_aim.scr::CoverAim "corner_right" self.cover_gen
++//
++// Corners only turn toward the open side of the corner, never back across the
++// wall: a CORNER_RIGHT man steps out to the node's right, so he turns from
++// straight out (0) up to +arc; a CORNER_LEFT man from 0 down to -arc. An enemy
++// on the wall side gets him aiming straight out. ("corner" on its own still
++// means both ways.)
+ //
+ // Optional level settings (leave unset for the defaults):
+ //	level.cover_aim = 0               turns the whole thing off
+ //	level.cover_aim_speed             degrees per second he turns (default 240)
+ //	level.cover_aim_crate_arc         degrees either side for crates (default 40, the engine's limit)
+-//	level.cover_aim_corner_arc        degrees either side for corners (default 25, engine limit is 30)
++//	level.cover_aim_corner_arc        degrees toward the open side for corners (default 30, the engine's limit)
+ //	level.cover_aim_corner_center     where corner shots point, relative to the node angle (default 180;
+ //	                                  use 360 for "straight out of the node", since 0 reads as unset)
+ //	level.cover_aim_debug = 1         prints to the console when it starts and stops
+@@ -72,13 +79,30 @@
+ 		{
+ 			local.center = level.cover_aim_corner_center
+ 		}
+-		local.arc = 25
++		local.arc = 30
+ 		if(level.cover_aim_corner_arc)
+ 		{
+ 			local.arc = level.cover_aim_corner_arc
+ 		}
+ 	}
+ 
++	// which way he may turn: lo..hi degrees off the attack line
++	local.lo = 0 - local.arc
++	local.hi = local.arc
++	if(local.kind == "corner_right")
++	{
++		local.lo = 0
++	}
++	else if(local.kind == "corner_left")
++	{
++		local.hi = 0
++	}
++	local.corner = 0
++	if(local.kind != "crate")
++	{
++		local.corner = 1
++	}
++
+ 	// how far he can drift from the node before we treat him as having left it
+ 	// (well past what the step-out animations move him, well short of a run)
+ 	local.leavedist = 72 * 72
+@@ -199,7 +223,7 @@
+ 					// corners only turn while he's stepped out; tucked in behind the
+ 					// wall he stays square to the node so he doesn't poke past the edge
+ 					local.track = 1
+-					if(local.kind == "corner" && self.cover_expose != 1)
++					if(local.corner == 1 && self.cover_expose != 1)
+ 					{
+ 						local.track = 0
+ 					}
+@@ -222,18 +246,19 @@
+ 							}
+ 
+ 							// Far outside the arc means the engine is about to drop the
+-							// node (it re-checks every frame), so don't chase it.
++							// node (it re-checks every frame), so don't chase it. On a
++							// corner, an enemy on the wall side gets the straight-out aim.
+ 							if(local.want > (local.arc + 15) || local.want < (0 - local.arc - 15))
+ 							{
+ 								local.want = 0
+ 							}
+-							else if(local.want > local.arc)
++							else if(local.want > local.hi)
+ 							{
+-								local.want = local.arc
++								local.want = local.hi
+ 							}
+-							else if(local.want < (0 - local.arc))
++							else if(local.want < local.lo)
+ 							{
+-								local.want = 0 - local.arc
++								local.want = local.lo
+ 							}
+ 						}
+ 					}
+--- a/anim/cornerleft.scr
++++ b/anim/cornerleft.scr
+@@ -29,7 +29,7 @@
+ 	self.cover_gen++
+ 	self.cover_tick = level.time
+ 	thread CoverPulse
+-	thread anim/cover_aim.scr::CoverAim "corner" self.cover_gen
++	thread anim/cover_aim.scr::CoverAim "corner_left" self.cover_gen
+ 
+ 	self setmotionanim (self.weapongroup + "_wall_alert_left")
+ 	wait 0.25
+--- a/anim/cornerright.scr
++++ b/anim/cornerright.scr
+@@ -26,7 +26,7 @@
+ 	self.cover_gen++
+ 	self.cover_tick = level.time
+ 	thread CoverPulse
+-	thread anim/cover_aim.scr::CoverAim "corner" self.cover_gen
++	thread anim/cover_aim.scr::CoverAim "corner_right" self.cover_gen
+ 
+ 	self setmotionanim (self.weapongroup + "_wall_alert_right")
+ 	wait 0.25
+--- a/models/human/dday_ranger_sergeant.tik
++++ b/models/human/dday_ranger_sergeant.tik
+@@ -121,8 +121,6 @@
+ 		skelmodel haversack.skd
+ 		surface haversack shader usequip
+ 
+-		skelmodel garandbelt.skd
+-		surface garandbelt shader usammobelt
+ 
+ 		skelmodel tommybelt.skd
+ 		surface tommybelt shader tommybelt
+@@ -147,8 +145,6 @@
+ 		skelmodel haversack.skd
+ 		surface haversack shader usequip
+ 
+-		skelmodel garandbelt.skd
+-		surface garandbelt shader usammobelt
+ 
+ 		skelmodel barbelt.skd
+ 		surface barbelt shader barbelt
+@@ -208,6 +204,9 @@
+ //************************************
+ 
+ 
++	// Keep each weapon case to 5 gear models. With 6 (the BAR and Thompson cases used to
++	// carry a garand belt too) the model goes past 24 surfaces, and one bangalore surface
++	// can't be hidden by "surface bang* +nodraw": it shows on his waist.
+ 	path models/human/animation/scripted/level_m3l1
+ 	skelmodel bangalore_assembly.skd
+ 	surface bang* shader Bangalore
+--- a/models/human/animation/human_mp40.tik
++++ b/models/human/animation/human_mp40.tik
+@@ -1345,7 +1345,7 @@
+ 	{
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand attachtohand mainhand
+-		entry	weaponcommand mainhand angles "0 0 0"
++		entry	weaponcommand mainhand angles "5.8 -10.9 1.1"	// the stock clip points the gun ~12 degrees right of the shot; this lines it up
+ 	}
+ }
+ mp40_wall_blindfire_left			weapon_mp40/cornering/mp40_wall_blindfire_left.skc
+@@ -1354,7 +1354,7 @@
+ 	{
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand attachtohand mainhand
+-		entry	weaponcommand mainhand angles "0 0 0"
++		entry	weaponcommand mainhand angles "5.8 -10.9 1.1"	// the stock clip points the gun ~12 degrees right of the shot; this lines it up
+ 		1 fire
+ 		3 fire
+ 		5 fire
+@@ -1367,7 +1367,7 @@
+ 	{
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand attachtohand mainhand
+-		entry	weaponcommand mainhand angles "0 0 0"
++		entry	weaponcommand mainhand angles "5.8 -10.9 1.1"	// the stock clip points the gun ~12 degrees right of the shot; this lines it up
+ 		1 fire
+ 		3 fire
+ 	}
+@@ -1380,7 +1380,7 @@
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand offhandattachtotag "Bip01 L Finger22"
+ 		entry	weaponcommand mainhand attachtohand offhand
+-		entry	weaponcommand mainhand angles "11 172.5 0"
++		entry	weaponcommand mainhand angles "21.6 -176.5 -1"	// the stock clip points the gun ~15 degrees left of the shot; this lines it up
+ 	}
+ }
+ mp40_wall_blindfire_right			weapon_mp40/cornering/mp40_wall_blindfire_right.skc
+@@ -1390,7 +1390,7 @@
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand offhandattachtotag "Bip01 L Finger22"
+ 		entry	weaponcommand mainhand attachtohand offhand
+-		entry	weaponcommand mainhand angles "11 172.5 0"
++		entry	weaponcommand mainhand angles "21.6 -176.5 -1"	// the stock clip points the gun ~15 degrees left of the shot; this lines it up
+ 		1 fire
+ 		3 fire
+ 		5 fire
+@@ -1403,7 +1403,7 @@
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand offhandattachtotag "Bip01 L Finger22"
+ 		entry	weaponcommand mainhand attachtohand offhand
+-		entry	weaponcommand mainhand angles "11 172.5 0"
++		entry	weaponcommand mainhand angles "21.6 -176.5 -1"	// the stock clip points the gun ~15 degrees left of the shot; this lines it up
+ 		1 fire
+ 		3 fire
+ 	}
+--- a/models/human/animation/human_mp44.tik
++++ b/models/human/animation/human_mp44.tik
+@@ -1441,7 +1441,7 @@
+ 	{
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand attachtohand mainhand
+-		entry	weaponcommand mainhand angles "0 0 0"
++		entry	weaponcommand mainhand angles "5.8 -10.9 1.1"	// the stock clip points the gun ~12 degrees right of the shot; this lines it up
+ 	}
+ }
+ mp44_wall_blindfire_left			weapon_mp40/cornering/mp40_wall_blindfire_left.skc
+@@ -1450,7 +1450,7 @@
+ 	{
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand attachtohand mainhand
+-		entry	weaponcommand mainhand angles "0 0 0"
++		entry	weaponcommand mainhand angles "5.8 -10.9 1.1"	// the stock clip points the gun ~12 degrees right of the shot; this lines it up
+ 		1 fire
+ 		3 fire
+ 		5 fire
+@@ -1463,7 +1463,7 @@
+ 	{
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand attachtohand mainhand
+-		entry	weaponcommand mainhand angles "0 0 0"
++		entry	weaponcommand mainhand angles "5.8 -10.9 1.1"	// the stock clip points the gun ~12 degrees right of the shot; this lines it up
+ 		1 fire
+ 		3 fire
+ 	}
+@@ -1476,7 +1476,7 @@
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand offhandattachtotag "Bip01 L Finger22"
+ 		entry	weaponcommand mainhand attachtohand offhand
+-		entry	weaponcommand mainhand angles "11 172.5 0"
++		entry	weaponcommand mainhand angles "21.6 -176.5 -1"	// the stock clip points the gun ~15 degrees left of the shot; this lines it up
+ 	}
+ }
+ mp44_wall_blindfire_right			weapon_mp40/cornering/mp40_wall_blindfire_right.skc
+@@ -1486,7 +1486,7 @@
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand offhandattachtotag "Bip01 L Finger22"
+ 		entry	weaponcommand mainhand attachtohand offhand
+-		entry	weaponcommand mainhand angles "11 172.5 0"
++		entry	weaponcommand mainhand angles "21.6 -176.5 -1"	// the stock clip points the gun ~15 degrees left of the shot; this lines it up
+ 		1 fire
+ 		3 fire
+ 		5 fire
+@@ -1499,7 +1499,7 @@
+ 		// Make sure the gun is in the correct hand
+ 		entry	weaponcommand mainhand offhandattachtotag "Bip01 L Finger22"
+ 		entry	weaponcommand mainhand attachtohand offhand
+-		entry	weaponcommand mainhand angles "11 172.5 0"
++		entry	weaponcommand mainhand angles "21.6 -176.5 -1"	// the stock clip points the gun ~15 degrees left of the shot; this lines it up
+ 		1 fire
+ 		3 fire
+ 	}

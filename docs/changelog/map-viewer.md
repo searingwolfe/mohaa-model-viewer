@@ -603,6 +603,14 @@ run at once.
   settings, and the camera position for each map (keyed by the map's path inside the
   paks, or its file name). The embedded pane runs WebView2 in private mode, so there
   they last only while the launcher is open.
+- **Slider values** (camera speed, FOV, cubic clip distance, grid size, Modify's trim step
+  and Simulate's camera zoom) are kept in the launcher's settings file
+  (`mohaa_map_viewer_config.json`, key `sliders`), so they last between launches. The
+  page sends them 300 ms after a slider moves (`slidersPost`, `mohaa-sliders`); when a
+  map opens it applies the browser's copy, then asks for the launcher's
+  (`mohaa-sliders-get`, `MapApp._sliders_push`), which wins (`MOHAA_SLIDERS`). In a plain
+  browser they are kept in local storage only (`mohaaMapViewerSliders`). The launcher
+  keeps just those six keys, as numbers (`MapApp._sliders_save`).
 
 ## The game's lighting
 
@@ -1103,7 +1111,8 @@ each change.
   plane's axes are written beside them, unless a floor or wall is in the way. Add and Move
   snap the origin to the nearest corner, a grid size higher when the nearest would put
   the entity's box into the floor. Trim origin keeps its own trim step. On / off, planes,
-  size and colour are remembered (`mohaaMapViewerGrid`).
+  size and colour are remembered (`mohaaMapViewerGrid`); the size, like the other
+  sliders, also in the launcher's settings (Slider values, under The page).
 - **AI routes.** A new `info_pathnode` joins the paths whenever it isn't being edited or
   trimmed. Its links are worked out as `PathSearch::CreatePaths` makes them
   (`navigate.cpp`): dropped to the floor (`droptofloor`, a 31 x 31 box 36 up and 2048

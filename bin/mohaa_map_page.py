@@ -1091,6 +1091,28 @@ const TITLE=__TITLE_JS__;
 const FORCETHEME='__THEME__';
 const LS={get(k){try{return localStorage.getItem(k);}catch(_e){return null;}},
           set(k,v){try{if(v==null)localStorage.removeItem(k);else localStorage.setItem(k,v);}catch(_e){}}};
+// Slider values (camera speed, fov, cubic clip distance, grid size, trim step, follow-camera
+// zoom) are kept in the launcher's config when embedded, and in localStorage otherwise.
+let SL_READY=false,SL_T=0;
+function slidersState(){return {speed:moveSpeed,fov:fovX,clipD:clipDist,gridSz:GRID.i,modStep:MOD.stepI,simZoom:+$('simZoom').value};}
+function slidersPost(){
+  if(!SL_READY)return;clearTimeout(SL_T);
+  SL_T=setTimeout(()=>{const o=slidersState();LS.set('mohaaMapViewerSliders',JSON.stringify(o));
+    try{if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('mohaa-sliders\n'+JSON.stringify(o));}catch(_e){}},300);}
+window.MOHAA_SLIDERS=function(o,ready){
+  try{
+    if(o&&typeof o==='object'){
+      if(o.speed>0){moveSpeed=Math.max(50,Math.min(3000,+o.speed));$('speed').value=moveSpeed;$('speedV').textContent=moveSpeed;}
+      if(o.fov>0){fovX=Math.max(60,Math.min(150,+o.fov));$('fov').value=fovX;$('fovV').textContent=fovX;}
+      if(o.clipD>0)setClipDist(+o.clipD);
+      if(o.gridSz!=null&&isFinite(o.gridSz))setGridSize(+o.gridSz,true);
+      if(o.modStep!=null&&isFinite(o.modStep)){MOD.stepI=Math.max(0,Math.min(MOD_STEPS.length-1,o.modStep|0));$('modStep').value=MOD.stepI;$('modStepV').textContent=MOD_STEPS[MOD.stepI];}
+      if(o.simZoom!=null&&isFinite(o.simZoom)){$('simZoom').value=Math.max(0,Math.min(100,+o.simZoom));simZoomShow();}
+      requestDraw();
+    }
+  }catch(_e){}
+  if(ready)SL_READY=true;
+};
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 // Numbers the way MOHAA scripts and .map files write them: plain integers, else up to 2 decimals.
 function fnum(x){if(!isFinite(x))return '0';const r=Math.round(x);if(Math.abs(x-r)<0.005)return String(r===0?0:r);
@@ -1159,7 +1181,7 @@ $('bgReset').onclick=()=>{applyBackdrop(null,true);gridColour(null);};
 const GRID={on:false,i:3,mode:'xy',col:null,key:'',n:0,buf:null,vao:null,prog:null,c:null,N:0,fk:'',fp:null,vis:new Map(),vk:''};
 function gridSize(){return 1<<GRID.i;}
 function gridDefCol(){return '#6fd6e8';}   // a cyan the map's own colours rarely are
-function gridSave(){LS.set('mohaaMapViewerGrid',JSON.stringify({on:GRID.on,i:GRID.i,col:GRID.col,mode:GRID.mode}));}
+function gridSave(){slidersPost();LS.set('mohaaMapViewerGrid',JSON.stringify({on:GRID.on,i:GRID.i,col:GRID.col,mode:GRID.mode}));}
 // the planes drawn: one plane across two axes (its normal the third), or all three
 const GRID_MODES=['xy','xz','yz','all'];
 function gridNormal(){return GRID.mode==='xy'?2:GRID.mode==='xz'?1:GRID.mode==='yz'?0:-1;}
@@ -8474,7 +8496,7 @@ function filtersChanged(){syncButtons();saveOpts();rebuildWorld();updateSelPanel
 function setCamMode(m){camMode=m;keys.clear();radFly=null;syncButtons();saveOpts();requestDraw();}
 function setClipDist(v){clipDist=Math.max(128,Math.min(32768,v));$('clipD').value=clipDist;$('clipV').textContent=clipDist;saveOpts();requestDraw();}
 function toggleClip(){clipOn=!clipOn;$('bClip').classList.toggle('on',clipOn);saveOpts();requestDraw();}
-function saveOpts(){const cv={};for(const k of cvarsSet())if(!CVAR_NOSAVE.has(k))cv[k]=CVARS[k];
+function saveOpts(){slidersPost();const cv={};for(const k of cvarsSet())if(!CVAR_NOSAVE.has(k))cv[k]=CVARS[k];
   LS.set('mohaaMapViewerOpts',JSON.stringify({ov:2,view:view,hidden:hiddenMask,mode:camMode,speed:moveSpeed,fov:fovX,clip:clipOn,clipD:clipDist,fb:fullBright,ss:simpleSky,sm:simpleModels,sf:sunFlare,cv:cv}));}
 function loadOpts(){try{const o=JSON.parse(LS.get('mohaaMapViewerOpts')||'null');if(!o)return;
   for(const k in view)if(k in (o.view||{}))view[k]=!!o.view[k];
@@ -10508,7 +10530,7 @@ function modInit(){
   $('bModSaveMap').onclick=()=>modSave('map');
   $('bModCopy').onclick=()=>{copyText(modCopyText());flash('The new and changed entities are copied');};
   const st=$('modStep');st.value=MOD.stepI;$('modStepV').textContent=MOD_STEPS[MOD.stepI];
-  st.oninput=()=>{MOD.stepI=+st.value;$('modStepV').textContent=MOD_STEPS[MOD.stepI];};
+  st.oninput=()=>{MOD.stepI=+st.value;$('modStepV').textContent=MOD_STEPS[MOD.stepI];slidersPost();};
   // as the Find lists: Shift+click a row's square hides / shows it, Shift+click the selected
   // (green) row deselects it
   $('modList').addEventListener('click',e=>{const r=e.target.closest('[data-mi]');if(!r)return;const i=+r.dataset.mi;
@@ -10737,7 +10759,7 @@ function simInst(R,p,a){
 // Camera zoom: how far behind the model the camera follows, 24 to 4096 units (the slider's
 // 0..100, on a log scale)
 function simZoomDist(){const v=+$('simZoom').value;return 24*Math.pow(4096/24,v/100);}
-function simZoomShow(){$('simZoomV').textContent=Math.round(simZoomDist());}
+function simZoomShow(){$('simZoomV').textContent=Math.round(simZoomDist());slidersPost();}
 // the model's size, for how high above it Follow rides
 function simSize(){const b=SIM.R&&SIM.R.M&&SIM.R.M.b;return b?Math.max(16,Math.hypot(b[1][0]-b[0][0],b[1][1]-b[0][1],b[1][2]-b[0][2])/2):32;}
 // Follow: behind the model (its heading) and a little above it, looking at it, catching up
@@ -11849,6 +11871,9 @@ else if(FORCETHEME==='light'||FORCETHEME==='dark')setTheme(FORCETHEME==='light')
 else if(LS.get('mohaaViewerTheme')==='light')setTheme(true);
 try{applyBackdrop(LS.get('mohaaMapViewerBg')||null,false);}catch(_e){}
 try{gridLoad();}catch(_e){}
+// saved slider values: this browser's copy first, then the launcher's config (which wins)
+try{window.MOHAA_SLIDERS(JSON.parse(LS.get('mohaaMapViewerSliders')||'null'),false);}catch(_e){}
+try{if(window.chrome&&window.chrome.webview){window.chrome.webview.postMessage('mohaa-sliders-get');setTimeout(()=>{SL_READY=true;},2500);}else SL_READY=true;}catch(_e){SL_READY=true;}
 main();
 </script>
 </body></html>

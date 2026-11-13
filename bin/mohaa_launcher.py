@@ -700,6 +700,16 @@ def _tip_window(master,text,x,y,wrap=360):
     """One shared look for every floating popup: a borderless Toplevel with a 1px
     LINE-coloured border and the theme's tip colours - or the OS-default white +
     system font when 'Use old popup windows' is on."""
+    # The tip must stay inside the launcher window: narrow the wrap to fit, then clamp.
+    try:
+        top=master.winfo_toplevel()
+        wx0,wy0=top.winfo_rootx(),top.winfo_rooty()
+        wx1,wy1=wx0+top.winfo_width(),wy0+top.winfo_height()
+    except Exception:
+        MC.swallowed(); wx0=wy0=wx1=wy1=None
+    MARGIN=8
+    if wx1 is not None:
+        wrap=max(120,min(wrap,wx1-wx0-2*MARGIN-20))
     tip=tk.Toplevel(master); tip.wm_overrideredirect(True); tip.wm_geometry(f"+{x}+{y}")
     try: tip.attributes("-topmost",True)
     except Exception: MC.swallowed()
@@ -710,7 +720,16 @@ def _tip_window(master,text,x,y,wrap=360):
         outer=tk.Frame(tip,bg=LINE); outer.pack(fill="both",expand=True)
         tk.Label(outer,text=text,justify="left",bg=TIP_BG,fg=TIP_TXT,bd=0,
                  font=FONT_SMALL,padx=7,pady=4,wraplength=wrap).pack(padx=1,pady=1)
-        _add_popup_shadow(tip)
+    if wx1 is not None:
+        try:
+            tip.update_idletasks()
+            tw,th=tip.winfo_reqwidth(),tip.winfo_reqheight()
+            nx=max(wx0+MARGIN,min(x,wx1-tw-MARGIN))
+            ny=max(wy0+MARGIN,min(y,wy1-th-MARGIN))
+            tip.wm_geometry(f"+{nx}+{ny}")
+        except Exception: MC.swallowed()
+    if not OLD_POPUPS:
+        _add_popup_shadow(tip)           # after the final clamped position
     return tip
 
 def _mi(label,command=None,accel=None,state="normal"):

@@ -1334,6 +1334,28 @@ class MapApp(ML.App):
         except OSError:
             MC.swallowed()
 
+    SLIDER_KEYS = ("speed", "fov", "clipD", "gridSz", "modStep", "simZoom")
+
+    def _sliders_push(self):
+        """The page opened: hand it the slider values kept in the config (the page then
+        starts saving its own changes)."""
+        o = self._cfg.get("sliders")
+        self._page_js("try{MOHAA_SLIDERS(%s,true)}catch(e){}"
+                      % json.dumps(o if isinstance(o, dict) else None))
+
+    def _sliders_save(self, body):
+        """A slider moved in the page: keep every slider's value in the config."""
+        try: o = json.loads(body)
+        except Exception: MC.swallowed(); return
+        if not isinstance(o, dict): return
+        clean = {}
+        for k in self.SLIDER_KEYS:
+            v = o.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v: clean[k] = v
+        if clean and clean != self._cfg.get("sliders"):
+            self._cfg["sliders"] = clean
+            self._save_config()
+
     def _modify_recovery(self, body):
         """The page opened: hand it the kept copy for its map, if there is one."""
         try: info = json.loads(body)
@@ -1754,6 +1776,11 @@ class MapApp(ML.App):
                         # the level-script card's Open .scr: "mohaa-open-scr\n<path in the paks>\n<where>"
                         parts = (m.split("\n") + ["", ""])[1:3]
                         self._page_requests.append(lambda v=parts[0], w=parts[1]: self._open_scr(v, w))
+                    elif m == "mohaa-sliders-get":
+                        self._page_requests.append(self._sliders_push)
+                    elif m.startswith("mohaa-sliders\n"):
+                        body = m.split("\n", 1)[1][:1000]
+                        self._page_requests.append(lambda b=body: self._sliders_save(b))
                     elif m == "mohaa-sim-models":
                         # SIMULATE's model picker: every model in the loaded paks
                         self._page_requests.append(self._sim_models)

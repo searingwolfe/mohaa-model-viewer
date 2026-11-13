@@ -2120,6 +2120,19 @@ development is rebuilt because its scripts are newer).
 - Build lines starting with `!` show in the launcher's Output in yellow, as notes: the build
   carries on and they aren't errors.
 - The RUN files' menu takes Space as Enter.
+- **Map Viewer sliders saved in the settings.** Camera speed, FOV, cubic clip distance, grid
+  size, Modify's trim step and Simulate's camera zoom are kept in
+  `mohaa_map_viewer_config.json` (`sliders`) and come back the next time a map opens; until
+  now speed, FOV, clip and grid were only in the page's local storage, which the embedded
+  pane (private mode) forgets when the launcher closes, and trim step and camera zoom
+  weren't kept at all. The page posts them (`mohaa-sliders`) a moment after a slider
+  moves and asks for them when it opens (`mohaa-sliders-get`); the launcher keeps only the
+  six known keys, as numbers. In a plain browser they stay in local storage.
+- **Launcher tooltips stay inside the window** (both programs): `_tip_window` narrows a
+  tooltip's wrap to fit the launcher window and then moves it so every edge is at least
+  8 px inside (the top-right buttons' tooltips used to run off the right edge). The drop
+  shadow is added after the move. A tooltip pushed up by the bottom edge can cover the
+  widget it belongs to.
 - `tests/test_map_actor.py`: 23 tests (2 need `MOHAA_GAMEFOLDER`).
 
 Known limits: the walk doesn't test walls, steps or falls (only doors stop him), a door
