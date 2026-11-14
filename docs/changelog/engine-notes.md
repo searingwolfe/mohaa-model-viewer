@@ -26,6 +26,14 @@ and line numbers next to the code that depends on them.
   tags) is composed, matching the engine's lazy evaluation in `skeletorbones.cpp`. An
   FK-then-IK batch pass displaces helper origins on upper-body animations that borrow
   their legs from a movement-slot donor.
+- A `HoseRot` bone comes in three variants, chosen by an int 36 bytes into its base data
+  (read as `parent[ofsBaseData + 4]`, `LoadBoneFromBuffer2`, tiki_skel.cpp:49-57): 0
+  `HOSEROT`, 1 `HOSEROTPARENT` (the parent's X and Z axes turned round before the bend) and 2
+  `HOSEROTBOTH` (the parent's and the target's), skeletorbones.cpp:1095-1131. The retail
+  human rigs' ankle helpers are BOTH and their hip helpers PARENT; MOHAA Reborn's
+  re-exported `allied_pilot.skd` has plain HOSEROT everywhere, and its cuff verts are skinned
+  to match. Posing a plain one as a BOTH turns the cuff's lower ring half way round, which
+  pinches the cuff into an hourglass.
 - `HoseRot` / `AvRot` helper bones must be solved, not folded into their ancestors, or
   ankles, knees and shoulders deform. The ankle helper also needs a 180-degree flip about
   its target's local Y, so its X axis points up the shin.

@@ -2091,6 +2091,13 @@ development is rebuilt because its scripts are newer).
   from the static model lump, not the entity lump) or a brush entity now says so in yellow
   in Modify, as an entity the level script spawns already did; the static model's info card
   adds that it isn't in the `.bsp`'s entity lump and can't be modified here.
+- **Pinched pants cuffs on MOHAA Reborn's allied_pilot** (Model Viewer, and the Map Viewer's
+  actors). The ankle helper was always posed as the retail rigs' `HOSEROTBOTH`, the calf's
+  frame flipped 180 degrees about its Y. `parse_skd` now reads each HoseRot bone's variant
+  (`hoseType`, as `LoadBoneFromBuffer2` does), and an ankle helper that is plain `HOSEROT` (or
+  `HOSEROTPARENT`) is posed by the HoseRot port instead. Only `zzzzzzzz_Reborn_pak8.pk3`'s
+  `allied_pilot.skd` has such ankles among the paks checked (Pak0, pak6, pak7 and the
+  `zzz` paks: 48 retail ankle helpers, all BOTH), so every other model draws as before.
 - **Changes on the info card.** A map entity changed in Modify gets a "Changed in Modify
   (not saved yet)" section on its info card (N): each changed key with the map's value
   struck through and the new one (spawnflags named), or DEL for a deleted one, before the

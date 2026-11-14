@@ -190,13 +190,26 @@ def _solve_helper_world(bones,i,wR,wT):
             _nz=[_nx[1]*_uy[2]-_nx[2]*_uy[1],_nx[2]*_uy[0]-_nx[0]*_uy[2],_nx[0]*_uy[1]-_nx[1]*_uy[0]]
             R=[[_nx[0],_uy[0],_nz[0]],[_nx[1],_uy[1],_nz[1]],[_nx[2],_uy[2],_nz[2]]]
         elif "ankle" in bn.get("name","").lower():
-            # Ankle helper: a hose from the foot up to the calf, so its skinning axis must point up
-            # the limb, but the calf's local X points down at the foot (skelBone_HoseRot aims
-            # myParentTM[0] at targetTM[0], skeletorbones.cpp:986-987). The ankle-weighted garment
-            # verts run up the shin, so copying the calf frame collapses the lower leg. Flip 180
-            # degrees about the target's local Y: X points up the shin, lateral Y is preserved.
+            # Ankle helper: a hose from the foot up to the calf. Which frame its garment verts were
+            # skinned in depends on the HoseRot variant stored in the .skd (hoseType, read as
+            # LoadBoneFromBuffer2 does, tiki_skel.cpp:49-57):
+            #  - HOSEROTBOTH (2, the retail human rigs): the engine turns both the foot's and the
+            #    calf's X and Z axes round before the bend (skelBone_HoseRotBoth::GetDirtyTransform,
+            #    skeletorbones.cpp:1095-1111), so the frame is the calf's flipped 180 degrees about
+            #    its local Y: X points up the shin, the lateral Y is kept.
+            #  - plain HOSEROT (0) or HOSEROTPARENT (1), as some re-exported models have (MOHAA
+            #    Reborn's allied_pilot.skd): no flip of the target, so the frame is the engine's
+            #    bend toward the calf, worked out by the HoseRot port (_hoserot_local). Flipping
+            #    these too turns the cuff's lower ring half way round and pinches it.
             Rt=wR[refs[0]]
-            R=[[-Rt[r][0],Rt[r][1],-Rt[r][2]] for r in range(3)]
+            ht=bn.get("hoseType",2)
+            if ht==2:
+                R=[[-Rt[r][0],Rt[r][1],-Rt[r][2]] for r in range(3)]
+            else:
+                Rp=wR[pi]
+                if ht==1: Rp=[[-Rp[r][0],Rp[r][1],-Rp[r][2]] for r in range(3)]   # HoseRotParent: the foot's X, Z turned
+                q=_hoserot_local(Rp,Rt,bn.get("bendRatio",1.0),bn.get("bendMax",180.0),bn.get("spinRatio",1.0))
+                R=mat_mul(Rp,quat_to_mat(q))
         else:
             R=q2m(m2q(wR[refs[0]]))               # hip: track the target bone's world orientation
     return R,Tw
@@ -403,6 +416,10 @@ def _parse_skmd(b,path):
         elif bType==5 and baseLen>=24:   # HoseRot (ankle/shoulder/hip skinning-frame helper)
             bone["bendRatio"]=_bf(0); bone["bendMax"]=_bf(1); bone["spinRatio"]=_bf(2)
             bindOffset=[_bf(3),_bf(4),_bf(5)]
+            # The HoseRot variant: 0 HOSEROT, 1 HOSEROTPARENT, 2 HOSEROTBOTH. The engine reads
+            # it 36 bytes into the base data (parent[ofsBaseData + 4], the name field starting
+            # at +0x20; LoadBoneFromBuffer2, tiki_skel.cpp:49-57).
+            if baseLen>=40: bone["hoseType"]=_i32(b,off+0x20+ofsBase+4)
         elif bType==6 and baseLen>=16:   # AvRot (knee/elbow averaging helper)
             bone["avWeight"]=_bf(0); bindOffset=[_bf(1),_bf(2),_bf(3)]
         else:
